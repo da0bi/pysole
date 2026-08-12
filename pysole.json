@@ -1,0 +1,54 @@
+{
+    "inputs": {
+        "dem_path": "surface_dem.asc",
+        "outline_path": "creeping_body.shp",
+        "survey_data_path": "sparse_survey.csv",
+        "survey_data_type": "one_way_travel_time"
+    },
+    "spatial_parameters": {
+        "dx": null,
+        "dy": null,
+        "bounds": null
+    },
+    "migration_parameters": {
+        "perform_migration": true,
+        "velocity": 0.16,
+        "interactive_migration": false
+    },
+    "optimization_parameters": {
+        "kc_max": 10.0,
+        "kc_min": 0.01,
+        "d_kc": 0.1,
+        "num_steps": 10,
+        "interactive_optimization": false
+    },
+    "kriging_parameters": {
+        "pre_migration": {
+            "method": "universal",
+            "drift_terms": ["quadratic"],
+            "variogram_model": "spherical",
+            "include_zero_boundary_condition": false
+        },
+        "post_migration": {
+            "method": "universal",
+            "drift_terms": ["sia_thickness"],
+            "variogram_model": "spherical",
+            "include_zero_boundary_condition": true
+        }
+    },
+    "finalization_parameters": {
+        "random_forest_gap_filling": false,
+        "apply_margin_blend": false,
+        "min_gap_dist": 50.0,
+        "smooth_bedrock": false,
+        "smoothing_method": "gaussian",
+        "smoothing_sigma": 1.5,
+        "smoothing_kernel_size": 3,
+        "smoothing_kc_cutoff": null
+    },
+    "outputs": {
+        "output_path": "final_bedrock.tif",
+        "output_format": "tif",
+        "plots_dir": null
+    }
+}

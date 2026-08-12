@@ -1,1 +1,400 @@
-# pysole
+<p align="center">
+  <img src="images/pysole_nano_logo_v2_circular.png" width="360" alt="PySole Logo">
+</p>
+<p style="text-align: center; font-size: 20px;"><strong>Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Datasets</strong></p>
+
+`PySole` is designed to reconstruct the thickness distribution and basal topography (sole) of glaciers, landslides, and other gravity-driven, viscous flow phenomena. It adapts the Shallow Ice Approximation (SIA) to estimate the thickness distribution of gravity-driven viscous bodies based on the fundamental inverse relation between surface slope and depth - where gentler surface slopes corrspond to greater depths, and vice versa. It is specifically engineered for sparse geophysical datasets where traditional 3D wavefield migration to image the bedrock is impossible due to insufficient spatial sampling. `PySole` transforms limited survey points into robust, physically-constrained 3D bedrock models.
+
+---
+
+## Table of Contents
+
+- [Key Features](#key-features)
+- [Methodology & Workflow](#methodology-and-workflow)
+- [Installation](#installation)
+- [Configuration Guide (`pysole.json`)](#configuration-guide)
+- [Configuration Parameter Reference](#configuration-parameter-reference)
+- [Technical & Methodological Notes](#technical-and-methodological-notes)
+  - [1. Supported DEM Input Formats](#supported-dem-input-formats)
+  - [2. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)
+  - [3. Shallow Ice Approximation (SIA) Custom Physical Drift](#shallow-ice-approximation-sia-custom-physical-drift)
+  - [4. Ice Thickness Field DEM Spatial Smoothing](#ice-thickness-field-dem-spatial-smoothing)
+  - [5. Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)
+  - [6. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)
+  - [7. CRS & Coordinate Alignment Verification](#crs-and-coordinate-alignment-verification)
+- [Package Architecture](#package-architecture)
+- [Python API & Quick Start](#python-api-and-quick-start)
+- [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)
+- [Citation & References](#citation-and-references)
+
+---
+
+<a id="key-features"></a>
+## Key Features
+
+* **JSON Configuration Driven (`pysole.json`):** All required and optional input and output parameters are fully defined in a single `pysole.json` file.
+* **5 Supported DEM Input Formats:** Seamless loading and metadata extraction for GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`, `.txt`), CSV matrix (`.csv`), NumPy binary array (`.npy`), and in-memory NumPy 2D array (`np.ndarray`).
+* **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (surface DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
+* **Flexible Survey Data Types (`survey_data_type`):**
+  <ul style="list-style-type: none; padding-left: 20px;">
+    <li>▸ <code>"one_way_travel_time"</code>: Uses One-Way Traveltimes <i>T</i> [ns] directly.</li>
+    <li>▸ <code>"two_way_travel_time"</code>: Converts Two-Way Traveltimes TWT to OWT (<i>T</i> = <i>TWT/2</i>).</li>
+    <li>▸ <code>"thickness"</code> / <code>"ice_thickness"</code>: Treats observations as direct thickness measurements <i>D</i> [m] and skips 3D ray-based migration.</li>
+  </ul>
+* **DEM Surface Slope Optimization:** `PySole` adapts the Shallow Ice Approximation (SIA) following the methodology of Binder et al. (2009). Optimal DEM surface slopes are derived by enforcing the optimization criterion of minimum spatial variance in basal shear stress:
+  <p align="center">
+    <font size="+1"><b>min<sub><i>k</i><sub>c</sub></sub> Var<sub><i>xy</i></sub>(<i>τ</i><sub>b</sub>)</b></font>
+  </p>
+  Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral component of both pre-migration wavefront traveltime and post-migration depth interpolations.
+* **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration tailored for sparse data coverage.
+* **Three Kriging Interpolation Approaches & Boundary Condition:** Supports Universal Kriging (default), Ordinary Kriging, and Machine Learning Regression Kriging. The default Universal Kriging drift model uses a quadratic polynomial; additionally, a custom physical drift based on a SIA ice depth model is implemented. Zero traveltime (<i>T</i> = 0 ns) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
+* **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes (nunataks / rock outcrops). When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
+* **Bedrock DEM Post-Processing Spatial Smoothing:** Post-processing DEM spatial smoothing options (`"gaussian"`, `"median"`, or `"fft_lowpass"`) are available.
+* **ML Hole Filling & Geomorphological Margin Blending:** Optional Random Forest machine learning gap-filling to complete spatial coverage across blank regions after the Kriging interpolation. Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
+* **Multi-Format Output Export:** Export final bedrock elevation maps as GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`), CSV (`.csv`), NumPy (`.npy`), or all four formats simultaneously.
+* **Automated High-Resolution Diagnostic Plots:** Automatically generates and optionally exports high-resolution (300 DPI) visual diagnostic figures for each key processing milestone.
+
+---
+
+<a id="methodology-and-workflow"></a>
+## Methodology & Workflow
+
+<p align="center">
+  <a href="images/pysole_processing_pipeline.png">
+    <img src="images/pysole_processing_pipeline.png" width="100%" alt="PySole Processing Pipeline Workflow">
+  </a>
+  <br>
+  <em>Figure 1: Complete step-by-step PySole processing pipeline and computational workflow. Click diagram to view in high resolution.</em>
+</p>
+
+1. **DEM Loading & Spatial Resampling:** Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
+2. **1st-Pass Pre-Migration Traveltime Interpolation:** Applies the DEM surface slope optimization criterion to determine the optimal 1st-pass surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), for the product of traveltime observations and surface slopes, <i>T</i><sub>i</sub> sin(<i>α</i><sub>i</sub>). Subsequently, `PySole` interpolates the traveltime product field <i>P</i><sub>1</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) using Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 ns) to reconstruct a continuous traveltime wavefront field <i>T</i>(<i>x</i>,<i>y</i>).
+3. **3D Ray-Based Migration:**  Based on the approach by Binder et al. (2009), the migration algorithm solves the Eikonal equation to relocate subsurface reflection points. An interactive mode allows users to test different signal propagation velocities alongside plots showing horizontal point displacements induced by the migration process.
+4. **2nd-Pass Post-Migration DEM Surface Slope Optimization:** Analogous to the 1st-pass pre-migration step, `PySole` applies the DEM surface slope optimization criterion to determine the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. In this 2nd-pass stage, optimization evaluates the product of migrated depths (<i>D</i><sub>i</sub>) and local surface slopes, <i>P</i> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>i</sub>). A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical ice depth singularities in low-gradient regions.
+5. **2nd-Pass Bedrock Kriging Product & Uncertainty Display:** Performs spatial Kriging interpolation on point products <i>P</i><sub>i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>i</sub>) using the SIA custom physical drift model 1 / sin(<i>α</i><sub>opt</sub>) by default to reconstruct continuous depth <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i>(<i>x</i>,<i>y</i>) fields. The Kriging standard error <i>σ</i><sub>H</sub>(<i>x</i>,<i>y</i>) is converted to meters (±m) to quantify spatial uncertainty.
+
+---
+
+<a id="installation"></a>
+## Installation
+
+### Standard Installation via PyPI
+
+```bash
+pip install pysole
+```
+
+### Local / Development Installation
+
+To install `PySole` directly from source in editable mode:
+
+```bash
+git clone https://github.com/da0bi/pysole.git
+cd pysole
+pip install -e .
+```
+
+Or using `uv`:
+
+```bash
+uv pip install -e .
+```
+
+---
+
+<a id="configuration-guide"></a>
+## Configuration Guide (`pysole.json`)
+
+All execution options can be fully defined in a single `pysole.json` configuration file:
+
+```json
+{
+    "inputs": {
+        "dem_path": "surface_dem.asc",
+        "outline_path": "creeping_body.shp",
+        "survey_data_path": "sparse_survey.csv",
+        "survey_data_type": "one_way_travel_time"
+    },
+    "spatial_parameters": {
+        "dx": 5.0,
+        "dy": 5.0,
+        "bounds": null
+    },
+    "migration_parameters": {
+        "perform_migration": true,
+        "velocity": 0.16,
+        "interactive_migration": false
+    },
+    "optimization_parameters": {
+        "kc_max": 10.0,
+        "kc_min": 0.01,
+        "d_kc": 0.1,
+        "num_steps": 10,
+        "interactive_optimization": false
+    },
+    "kriging_parameters": {
+        "pre_migration": {
+            "method": "universal",
+            "drift_terms": ["quadratic"],
+            "variogram_model": "spherical",
+            "include_zero_boundary_condition": false
+        },
+        "post_migration": {
+            "method": "universal",
+            "drift_terms": ["sia_thickness"],
+            "variogram_model": "spherical",
+            "include_zero_boundary_condition": true
+        }
+    },
+    "finalization_parameters": {
+        "random_forest_gap_filling": false,
+        "apply_margin_blend": false,
+        "min_gap_dist": 50.0,
+        "smooth_bedrock": false,
+        "smoothing_method": "gaussian",
+        "smoothing_sigma": 1.5,
+        "smoothing_kernel_size": 3,
+        "smoothing_kc_cutoff": null
+    },
+    "outputs": {
+        "output_path": "final_bedrock.tif",
+        "output_format": "tif",
+        "plots_dir": null
+    }
+}
+```
+
+---
+
+<a id="configuration-parameter-reference"></a>
+## Configuration Parameter Reference
+
+| Section | Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **`inputs`** | `dem_path` | `str` | `"surface_dem.asc"` | **(Required)** File path to the surface Digital Elevation Model (`.asc`, `.tif`, `.csv`, `.npy`). |
+| | `outline_path` | `str` | `"creeping_body.shp"` | File path to creeping body / glacier boundary polygon (`.shp`, `.geojson`, `.gpkg`, `.csv`). CRS must match DEM. |
+| | `survey_data_path` | `str` | `"sparse_survey.csv"` | **(Required)** File path to survey profile travel time or thickness observations CSV `[X, Y, value]`. |
+| | `survey_data_type` | `str` | `"one_way_travel_time"` | Observation data type: `"one_way_travel_time"` (OWT), `"two_way_travel_time"` (TWT), or `"thickness"` / `"ice_thickness"` (skips ray migration). |
+| **`spatial_parameters`** | `dx` | `float` | `null` | Target grid resolution along X in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
+| | `dy` | `float` | `null` | Target grid resolution along Y in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
+| | `bounds` | `list[float]` | `null` | Spatial bounding box `[minx, miny, maxx, maxy]`. If `null`, extracted directly from DEM raster metadata. |
+| **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D Eikonal ray migration on travel times. If `false`, migration is cleanly skipped. |
+| | `velocity` | `float` | `0.16` | Signal propagation velocity in m/ns (e.g. `0.16` m/ns for GPR radar wave propagation in ice). |
+| | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual displacement vector plots. |
+| **`optimization_parameters`** | `kc_max` | `float` | `10.0` | Maximum corner frequency for FFT Gaussian low-pass smoothing. If `null`, defaults to `10.0`. |
+| | `kc_min` | `float` | `0.01` | Minimum corner frequency for slope smoothing search. |
+| | `d_kc` | `float` | `0.1` | Corner frequency stepwidth for evaluating basal shear stress spatial variance Var<sub><i>xy</i></sub>(<i>τ</i><sub>b</sub>). |
+| | `num_steps` | `int` | `10` | Number of evaluation steps if `d_kc` is not specified. |
+| | `interactive_optimization` | `bool` | `false` | If `true`, enables interactive CLI prompt to inspect BSS variance curve and enter a custom correlation range (<i>a</i><sub>range</sub>). |
+| **`kriging_parameters`** | `pre_migration` | `dict` | *Sub-section* | Configuration for 1st-pass pre-migration traveltime interpolation (<i>T</i>(<i>x</i>,<i>y</i>) [ns]). |
+| | `pre_migration.method` | `str` | `"universal"` | Kriging approach: `"universal"` (default), `"ordinary"`, or `"regression"`. |
+| | `pre_migration.drift_terms` | `list[str]` | `["quadratic"]` | Drift terms for Universal Kriging: `["quadratic"]` (2nd-order polynomial), `["regional_linear"]`, or `["sia_thickness"]`. |
+| | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
+| | `pre_migration.include_zero_boundary_condition` | `bool` | `false` | If `true`, includes zero traveltime boundary points (<i>T</i> = 0 ns) along the margin outline. |
+| | `post_migration` | `dict` | *Sub-section* | Configuration for 2nd-pass post-migration final bedrock depth interpolation (<i>D</i>(<i>x</i>,<i>y</i>) [m]). |
+| | `post_migration.method` | `str` | `"universal"` | Kriging approach: `"universal"` (default), `"ordinary"`, or `"regression"`. |
+| | `post_migration.drift_terms` | `list[str]` | `["sia_thickness"]` | Drift terms for Universal Kriging: `["sia_thickness"]` (SIA physical drift <i>U</i><sub>SIA</sub> = 1 / sin(<i>α</i><sub>safe</sub>)), `["quadratic"]`, or `["regional_linear"]`. |
+| | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
+| | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the margin outline. |
+| **`finalization_parameters`** | `random_forest_gap_filling` | `bool` | `false` | If `true`, applies Random Forest machine learning gap filling across unmeasured interior regions before margin blending. |
+| | `apply_margin_blend` | `bool` | `false` | If `true`, applies geomorphological margin blending to seamlessly transition bedrock elevation to surrounding DEM terrain. |
+| | `min_gap_dist` | `float` | `50.0` | Minimum gap distance / margin width in meters [m] inside which bedrock is smoothly tapered and blended into surface DEM terrain. |
+| | `smooth_bedrock` | `bool` | `false` | If `true`, applies spatial DEM post-processing smoothing directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>) to eliminate high-frequency slope-division noise. |
+| | `smoothing_method` | `str` | `"gaussian"` | DEM smoothing algorithm choice: `"gaussian"` (default), `"median"`, or `"fft_lowpass"`. |
+| | `smoothing_sigma` | `float` | `1.5` | Standard deviation (<i>σ</i>) of the Gaussian kernel in grid units (for `"gaussian"`). |
+| | `smoothing_kernel_size` | `int` | `3` | Window kernel size (<i>k</i> × <i>k</i>) for median filtering (must be an odd integer, for `"median"`). |
+| | `smoothing_kc_cutoff` | `float` | `null` | Corner frequency cutoff wavenumber (<i>k</i><sub>c,smooth</sub>) for `"fft_lowpass"`. If `null`, defaults to <i>k</i><sub>c,opt</sub>. |
+| **`outputs`** | `output_path` | `str` | `"final_bedrock.tif"` | Target file path or base name for exporting the final predicted bedrock elevation raster. |
+| | `output_format` | `str` / `list[str]` | `"tif"` | Desired export format(s): `"tif"`, `"asc"`, `"csv"`, `"npy"`, a list of formats (e.g. `["tif", "asc", "csv"]`), or `"all"` to export all four formats. |
+| | `plots_dir` | `str` | `null` | Optional target directory where generated diagnostic figures and map plots are saved at high resolution (300 DPI). If `null`, plot saving is disabled. |
+
+---
+
+<a id="technical-and-methodological-notes"></a>
+## Technical & Methodological Notes
+
+<a id="supported-dem-input-formats"></a>
+### 1. Supported DEM Input Formats
+`PySole` supports 5 distinct DEM input formats in `load_dem()`:
+
+1. **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, transform, CRS, pixel resolution, and `nodata` values using `rasterio`.
+2. **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `NODATA_value`.
+3. **CSV Matrix (`.csv`)**: 2D comma-separated matrix of elevation values.
+4. **NumPy Binary Array (`.npy`)**: Fast 2D binary array loaded via `np.load()`.
+5. **NumPy 2D Array (`np.ndarray`)**: Direct in-memory array passed into the `Solver` constructor (`dem=dem_grid`).
+
+<a id="crs-and-coordinate-alignment-verification"></a>
+### 2. CRS & Coordinate Alignment Verification
+All input files (surface DEM, boundary outline, and point survey coordinates) must use the exact same Coordinate Reference System (CRS) and spatial coordinate frame. `PySole` checks CRS definitions and bounding extents upon loading; if a mismatch is detected, an explicit error message is printed and processing stops immediately.
+
+<a id="rock-outcrops-and-nunatak-hole-detection"></a>
+### 3. Rock Outcrops & Nunatak Hole Detection
+Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>D</i> = 0 m), tapering thickness smoothly near outcrop margins.
+
+For rock outcrop holes (nunataks) to be detected correctly from a Shapefile (`.shp`):
+
+1. **Topology**: The outcrop must be stored as an interior ring (`polygon.interiors`) within a single `Polygon` / `MultiPolygon` feature (e.g. created using QGIS "Add Ring" or ArcGIS "Construct Hole").
+2. **Winding Order**: Standard OGC orientation (Clockwise exterior boundary, Counter-Clockwise interior hole rings).
+3. **CRS Alignment**: The shapefile's Coordinate Reference System must match the DEM raster projection.
+4. **Valid Geometries**: Rings must not intersect themselves (`PySole` automatically executes `validate_and_extract_polygons()` on load to auto-repair geometries or fall back to the outer boundary shell if holes fail criteria).
+
+<a id="multi-format-bedrock-output-export"></a>
+### 4. Multi-Format Bedrock Output Export (`output_format`)
+Under `outputs` in `pysole.json`, users can specify which file format(s) to export via `output_format`:
+
+- `"output_format": "tif"` (or `"asc"`, `"csv"`, `"npy"`): Exports a single specified format.
+- `"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.
+- `"output_format": "all"`: Exports all four formats simultaneously.
+
+<a id="shallow-ice-approximation-sia-custom-physical-drift"></a>
+### 5. Shallow Ice Approximation (SIA) Custom Physical Drift for Universal Kriging Interpolation
+`PySole` offers a physically-informed custom drift model based on the **Shallow Ice Approximation (SIA)**. In shallow ice dynamics, basal shear stress is given by <i>τ</i><sub>b</sub> = <i>ρ</i><sub>ice</sub> <i>g</i> <i>D</i> sin(<i>α</i>). Re-arranging for ice depth yields <i>D</i><sub>SIA</sub>(<i>x</i>,<i>y</i>) proportional to 1 / sin(<i>α</i>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the **relative 2D ice thickness distribution pattern** driven directly by the optimized DEM surface slope:
+
+<p align="center">
+  1 / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))
+</p>
+
+The Kriging regression parameter <i>a</i><sub>1</sub> automatically scales 1 / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) relative to the calculated depth point values, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is used by default for the final bedrock interpolation of migrated depth data.
+
+<a id="ice-thickness-field-dem-spatial-smoothing"></a>
+### 6. Ice Thickness Field DEM Spatial Smoothing
+In product-kriging, ice depth is obtained by dividing the Kriged product field <i>P</i>(<i>x</i>,<i>y</i>) by the surface slope sine sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). When post-processing DEM spatial smoothing (`smooth_bedrock: true`) is enabled, `PySole` applies the spatial smoothing operator <i>S</i> **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)**:
+
+<p align="center" style="line-height: 1.8;">
+  <i>D</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) = <i>S</i>(<i>D</i><sub>kriged</sub>(<i>x</i>,<i>y</i>))<br>
+  <i>Z</i><sub>bed,final</sub>(<i>x</i>,<i>y</i>) = <i>Z</i><sub>DEM</sub>(<i>x</i>,<i>y</i>) − <i>D</i><sub>smooth</sub>(<i>x</i>,<i>y</i>)
+</p>
+
+Applying smoothing directly to <i>D</i>(<i>x</i>,<i>y</i>) prevents the high-frequency surface DEM roughness residual (<i>Z</i><sub>DEM</sub> − <i>S</i>(<i>Z</i><sub>DEM</sub>)) from superimposing pixelated raster grid steps onto the ice thickness map, ensuring that both <i>D</i>(<i>x</i>,<i>y</i>) and <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) remain smooth, continuous, and completely free of rectangular grid artifacts.
+
+<a id="ice-depth-uncertainty-derivation"></a>
+### 7. Ice Depth Uncertainty Derivation (± meters)
+Kriging interpolation provides uncertainty estimates by variance of the product field <i>σ</i><sub>P</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>]. The 2D ice depth estimation variance field <i>σ</i><sub>H</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>] is obtained via linear error propagation:
+
+<p align="center">
+  <i>σ</i><sub>H</sub><sup>2</sup>(<i>x</i>,<i>y</i>) = <i>σ</i><sub>P</sub><sup>2</sup>(<i>x</i>,<i>y</i>) / sin<sup>2</sup>(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) &nbsp;&nbsp; [m<sup>2</sup>]
+</p>
+
+Taking the square root converts the variance field into the **Kriging Standard Error <i>σ</i><sub>H</sub>(<i>x</i>,<i>y</i>) in ± meters**:
+
+<p align="center">
+  <i>σ</i><sub>H</sub>(<i>x</i>,<i>y</i>) = √(<i>σ</i><sub>H</sub><sup>2</sup>(<i>x</i>,<i>y</i>)) &nbsp;&nbsp; [±m]
+</p>
+
+Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>H</sub>(<i>x</i>,<i>y</i>) represents the 68.3% confidence margin of error, while ± 1.96 <i>σ</i><sub>H</sub>(<i>x</i>,<i>y</i>) represents the 95% confidence margin of error in ± meters.
+
+---
+
+<a id="package-architecture"></a>
+## Package Architecture
+
+<p align="center">
+  <a href="images/pysole_package_structure.png">
+    <img src="images/pysole_package_structure.png" width="100%" alt="PySole Package Structure & Submodules">
+  </a>
+  <br>
+  <em>Figure 2: Overview of PySole package submodules, class structure, and core processing functions. Click diagram to view in high resolution.</em>
+</p>
+
+<a id="python-api-and-quick-start"></a>
+
+---
+
+## Python API & Quick Start
+
+Run the complete pipeline from a `pysole.json` file in a single line:
+
+```python
+import pysole
+
+# Execute complete workflow defined in pysole.json
+bedrock_map = pysole.run_from_config("pysole.json")
+```
+
+Or initialize the `Solver` instance specifying custom parameters:
+
+```python
+import pysole
+
+# 1. Initialize Solver
+model = pysole.Solver(
+    dem="surface_dem.asc",
+    outline="creeping_body.shp",
+    survey_data_type="one_way_travel_time",
+    kriging_method="universal",
+    perform_migration=True,
+)
+
+# 2. Migrate sparse GPR/Seismic travel times
+bedrock_pts = model.migrate_eikonal(
+    travel_times="sparse_survey.csv",
+    velocity=0.16,
+)
+
+# 3. Iterative BSS variance optimization
+model.optimize_bss(kc_max=10.0, kc_min=0.01, d_kc=0.1)
+
+# 4. Primary Kriging spatial interpolation
+kriged_bedrock, kriged_variance = model.interpolate_kriging(
+    method="universal",
+    plotit=True,
+)
+
+# 5. Finalize topography (applies DEM smoothing and margin blending)
+bedrock_map = model.finalize_topography(
+    interactive=True,
+    smooth_bedrock=True,
+    smoothing_method="gaussian",
+)
+
+# 6. Export results
+bedrock_map.save("final_bedrock.tif")
+```
+
+---
+
+<a id="real-world-example-wurtenkees-glacier"></a>
+## Real-World Example: Wurtenkees Glacier
+
+You can run a complete real-world demonstration on the **Wurtenkees Glacier** dataset (Hohe Tauern, Eastern Alps, Austria) using the provided configuration file [`examples/wuk/pysole_wuk.json`](file:///home/db/Software/pysole/examples/wuk/pysole_wuk.json).
+
+An executable example script is provided in [`examples/wuk/run_wuk_example.py`](file:///home/db/Software/pysole/examples/wuk/run_wuk_example.py):
+
+```bash
+python examples/wuk/run_wuk_example.py
+```
+
+The GPR dataset and DEM inputs are sourced from the Master's thesis by Binder (2011, written in German and available from [ResearchGate](https://www.researchgate.net/publication/369660356_Bestimmung_der_Eismachtigkeitsverteilung_dreier_Gletscher_der_Hohen_Tauern_auf_Basis_von_Ground_Penetrating_Radar_GPR_Daten)).
+
+---
+
+<a id="citation-and-references"></a>
+## Citation & References
+
+### APA
+* **Binder, D., Brückl, E., Roch, K.H., Behm, M., Schöner, W., & Hynek, B. (2009).** Determination of total ice volume and ice-thickness distribution of two glaciers in the Hohe Tauern region, Eastern Alps, from GPR data. *Annals of Glaciology*, 50(51), 71–79. [doi:10.3189/172756409789097522](https://doi.org/10.3189/172756409789097522)
+* **Binder, D. (2011).** *Bestimmung der Eismächtigkeitsverteilung dreier Gletscher der Hohen Tauern auf Basis von Ground Penetrating Radar (GPR) Daten* (Master's thesis, Vienna University of Technology, Vienna, Austria). Available from [ResearchGate](https://www.researchgate.net/publication/369660356_Bestimmung_der_Eismachtigkeitsverteilung_dreier_Gletscher_der_Hohen_Tauern_auf_Basis_von_Ground_Penetrating_Radar_GPR_Daten).
+
+
+### BibTeX
+```bibtex
+@article{binder2009determination,
+  title        = {Determination of total ice volume and ice-thickness distribution of two glaciers in the Hohe Tauern region, Eastern Alps, from GPR data},
+  author       = {Binder, Daniel and Br{\"u}ckl, Ewald and Roch, Karl-Heinz and Behm, Michael and Sch{\"o}ner, Wolfgang and Hynek, Bernhard},
+  journal      = {Annals of Glaciology},
+  volume       = {50},
+  number       = {51},
+  pages        = {71--79},
+  year         = {2009},
+  publisher    = {Cambridge University Press},
+  doi          = {10.3189/172756409789097522}
+}
+@mastersthesis{binder2011bestimmung,
+  author       = {Binder, Daniel},
+  title        = {Bestimmung der Eism{\"a}chtigkeitsverteilung dreier Gletscher der Hohen Tauern auf Basis von Ground Penetrating Radar (GPR) Daten},
+  school       = {Vienna University of Technology (TU Wien)},
+  year         = {2011},
+  address      = {Vienna, Austria},
+  url          = {https://www.researchgate.net/publication/369660356_Bestimmung_der_Eismachtigkeitsverteilung_dreier_Gletscher_der_Hohen_Tauern_auf_Basis_von_Ground_Penetrating_Radar_GPR_Daten}
+}
+```
