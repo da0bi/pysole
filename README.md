@@ -230,11 +230,10 @@ For rock outcrop holes (nunataks) to be detected correctly from a Shapefile (`.s
 
 <a id="multi-format-bedrock-output-export"></a>
 ### 3. Multi-Format Bedrock Output Export (`output_format`)
-Under `outputs` in `pysole.json`, users can specify which file format(s) to export via `output_format`:
-
-- `"output_format": "tif" (or "asc", "csv", "npy")`: Exports a single specified format.
-- `"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.
-- `"output_format": "all"`: Exports all four formats simultaneously.
+Under `outputs` in `pysole.json`, users can specify which file format(s) to export via `output_format`:<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "tif" (or "asc", "csv", "npy")`: Exports a single specified format.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;`"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "all"`: Exports all four formats simultaneously.
 
 <a id="shallow-ice-approximation-custom-physical-drift"></a>
 ### 4. Shallow Ice Approximation Physical Drift Model for Universal Kriging Interpolation
