@@ -19,8 +19,8 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. Ice Thickness Field DEM Spatial Smoothing](#dem-spatial-smoothing)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[6. Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Spatial Smoothing of the Calculated Depth and Bedrock DEMs](#dem-spatial-smoothing)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[6. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
 [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)<br><br>
@@ -256,8 +256,8 @@ In product-kriging, depth is obtained by dividing the Kriged product field <i>P<
 
 Applying smoothing directly to <i>D</i>(<i>x</i>,<i>y</i>) prevents the high-frequency surface DEM roughness residual (<i>Z</i><sub>DEM</sub> − <i>S</i>(<i>Z</i><sub>DEM</sub>)) from superimposing pixelated raster grid steps onto the ice thickness map, ensuring that both <i>D</i>(<i>x</i>,<i>y</i>) and <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) remain smooth, continuous, and completely free of rectangular grid artifacts.
 
-<a id="ice-depth-uncertainty-derivation"></a>
-### 6. Ice Depth Uncertainty Derivation (± meters)
+<a id="depth-uncertainty-derivation"></a>
+### 6. Depth Uncertainty Derivation (± meters)
 Kriging interpolation provides uncertainty estimates by variance of the product field <i>σ</i><sub>P</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>]. The 2D depth estimation variance field <i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>] is obtained via linear error propagation:
 
 <p align="center">
