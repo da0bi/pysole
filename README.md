@@ -10,20 +10,30 @@
 ## Table of Contents
 
 [Key Features](#key-features)
+
 [Workflow & Methodology](#workflow-and-methodology)
+
 [Installation](#installation)
+
 [Configuration Guide (`pysole.json`)](#configuration-guide)
+
 [Configuration Parameter Reference](#configuration-parameter-reference)
+
 [Technical & Methodological Notes](#technical-and-methodological-notes)
+
     1. [Supported DEM Input Formats](#supported-dem-input-formats)
     2. [Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)
     3. [Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)
     4. [Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)
     5. [Ice Thickness Field DEM Spatial Smoothing](#ice-thickness-field-dem-spatial-smoothing)
     6. [Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)
+
 [Package Architecture](#package-architecture)
+
 [Python API & Quick Start](#python-api-and-quick-start)
+
 [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)
+
 [Citation & References](#citation-and-references)
 
 ---
