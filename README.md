@@ -19,7 +19,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. Spatial Smoothing of the Calculated Depth and Bedrock DEMs](#dem-spatial-smoothing)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
@@ -32,7 +32,7 @@
 ## Key Features
 
 * **JSON Configuration Driven (`pysole.json`):** All required and optional input and output parameters can be fully defined in a single `pysole.json` file.
-* **5 Supported DEM Input Formats:** Seamless loading and metadata extraction for GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`, `.txt`), CSV matrix (`.csv`), NumPy binary array (`.npy`), and in-memory NumPy 2D array (`np.ndarray`).
+* **5 Supported Digital Elevation Model (DEM) Input Formats:** Seamless loading and metadata extraction for GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`, `.txt`), CSV matrix (`.csv`), NumPy binary array (`.npy`), and in-memory NumPy 2D array (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (surface DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
 * **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey point data type. In case of direct thickness/depth data the 3D ray-based migration is automatically skipped.
 * **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes (nunataks / rock outcrops). When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
