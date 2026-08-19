@@ -15,12 +15,12 @@
 - [Configuration Guide (`pysole.json`)](#configuration-guide)
 - [Configuration Parameter Reference](#configuration-parameter-reference)
 - [Technical & Methodological Notes](#technical-and-methodological-notes)
-&emsp [1. Supported DEM Input Formats](#supported-dem-input-formats)
-&emsp [2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)
-&emsp [3. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)
-&emsp [4. Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)
-&emsp [5. Ice Thickness Field DEM Spatial Smoothing](#ice-thickness-field-dem-spatial-smoothing)
-&emsp [6. Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)
+    1. [Supported DEM Input Formats](#supported-dem-input-formats)
+    2. [Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)
+    3. [Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)
+    4. [Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)
+    5. [Ice Thickness Field DEM Spatial Smoothing](#ice-thickness-field-dem-spatial-smoothing)
+    6. [Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)
 - [Package Architecture](#package-architecture)
 - [Python API & Quick Start](#python-api-and-quick-start)
 - [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)
@@ -34,11 +34,7 @@
 * **JSON Configuration Driven (`pysole.json`):** All required and optional input and output parameters can be fully defined in a single `pysole.json` file.
 * **5 Supported DEM Input Formats:** Seamless loading and metadata extraction for GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`, `.txt`), CSV matrix (`.csv`), NumPy binary array (`.npy`), and in-memory NumPy 2D array (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (surface DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
-* **Flexible Survey Data Types:**
-    - "one_way_travel_time": Uses One-Way Traveltimes <i>OWT</i> directly.
-    - "two_way_travel_time": Converts Two-Way Traveltimes <i>TWT</i> to <i>OWT</i> (<i>OWT</i> = <i>TWT/2</i>).
-    - "thickness" / "ice_thickness": Treats observations as direct thickness/depth measurements <i>D</i> [m] and skips 3D ray-based migration.
-
+* **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey point data type. In case of direct thickness/depth data the 3D ray-based migration is automatically skipped.
 * **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes (nunataks / rock outcrops). When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
 * **DEM Surface Slope Optimization:** The degree of DEM surface slope smoothing is crucial when estimating thicknesses with the Shallow Ice Approximation (SIA). By adapting the SIA, Binder et al. (2009) introduced an objective optimization criteria for the surface slope smoothing process which is implemented in `PySole`. The optimal degree of DEM surface slope smoothing is derived by enforcing the optimization criterion of minimum spatial variance in basal shear stress:
   <p align="center">
@@ -236,7 +232,7 @@ For rock outcrop holes (nunataks) to be detected correctly from a Shapefile (`.s
 ### 3. Multi-Format Bedrock Output Export (`output_format`)
 Under `outputs` in `pysole.json`, users can specify which file format(s) to export via `output_format`:
 
-- `"output_format": "tif"` (or `"asc"`, `"csv"`, `"npy"`): Exports a single specified format.
+- `"output_format": "tif" (or "asc", "csv", "npy")`: Exports a single specified format.
 - `"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.
 - `"output_format": "all"`: Exports all four formats simultaneously.
 
