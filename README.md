@@ -15,12 +15,12 @@
 - [Configuration Guide (`pysole.json`)](#configuration-guide)
 - [Configuration Parameter Reference](#configuration-parameter-reference)
 - [Technical & Methodological Notes](#technical-and-methodological-notes)
-  - [1. Supported DEM Input Formats](#supported-dem-input-formats)
-  - [2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)
-  - [3. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)
-  - [4. Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)
-  - [5. Ice Thickness Field DEM Spatial Smoothing](#ice-thickness-field-dem-spatial-smoothing)
-  - [6. Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)
+&emsp [1. Supported DEM Input Formats](#supported-dem-input-formats)
+&emsp [2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)
+&emsp [3. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)
+&emsp [4. Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)
+&emsp [5. Ice Thickness Field DEM Spatial Smoothing](#ice-thickness-field-dem-spatial-smoothing)
+&emsp [6. Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)
 - [Package Architecture](#package-architecture)
 - [Python API & Quick Start](#python-api-and-quick-start)
 - [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)
@@ -35,7 +35,6 @@
 * **5 Supported DEM Input Formats:** Seamless loading and metadata extraction for GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`, `.txt`), CSV matrix (`.csv`), NumPy binary array (`.npy`), and in-memory NumPy 2D array (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (surface DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
 * **Flexible Survey Data Types:**
-
     - "one_way_travel_time": Uses One-Way Traveltimes <i>OWT</i> directly.
     - "two_way_travel_time": Converts Two-Way Traveltimes <i>TWT</i> to <i>OWT</i> (<i>OWT</i> = <i>TWT/2</i>).
     - "thickness" / "ice_thickness": Treats observations as direct thickness/depth measurements <i>D</i> [m] and skips 3D ray-based migration.
