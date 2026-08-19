@@ -211,11 +211,11 @@ All execution options can be fully defined in a single `pysole.json` configurati
 ### 1. Supported DEM Input Formats
 `PySole` supports 5 distinct DEM input formats in `load_dem()`:
 
-1. **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, transform, CRS, pixel resolution, and `nodata` values using `rasterio`.
-2. **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `NODATA_value`.
-3. **CSV Matrix (`.csv`)**: 2D comma-separated matrix of elevation values.
-4. **NumPy Binary Array (`.npy`)**: Fast 2D binary array loaded via `np.load()`.
-5. **NumPy 2D Array (`np.ndarray`)**: Direct in-memory array passed into the `Solver` constructor (`dem=dem_grid`).
+- **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, transform, CRS, pixel resolution, and `nodata` values using `rasterio`.
+- **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `NODATA_value`.
+- **CSV Matrix (`.csv`)**: 2D comma-separated matrix of elevation values.
+- **NumPy Binary Array (`.npy`)**: Fast 2D binary array loaded via `np.load()`.
+- **NumPy 2D Array (`np.ndarray`)**: Direct in-memory array passed into the `Solver` constructor (`dem=dem_grid`).
 
 <a id="rock-outcrops-and-nunatak-hole-detection"></a>
 ### 2. Rock Outcrops & Nunatak Hole Detection
@@ -223,10 +223,10 @@ Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containi
 
 For rock outcrop holes (nunataks) to be detected correctly from a Shapefile (`.shp`):
 
-1. **Topology**: The outcrop must be stored as an interior ring (`polygon.interiors`) within a single `Polygon` / `MultiPolygon` feature (e.g. created using QGIS "Add Ring" or ArcGIS "Construct Hole").
-2. **Winding Order**: Standard OGC orientation (Clockwise exterior boundary, Counter-Clockwise interior hole rings).
-3. **CRS Alignment**: The shapefile's Coordinate Reference System must match the DEM raster projection.
-4. **Valid Geometries**: Rings must not intersect themselves (`PySole` automatically executes `validate_and_extract_polygons()` on load to auto-repair geometries or fall back to the outer boundary shell if holes fail criteria).
+- **Topology**: The outcrop must be stored as an interior ring (`polygon.interiors`) within a single `Polygon` / `MultiPolygon` feature (e.g. created using QGIS "Add Ring" or ArcGIS "Construct Hole").
+- **Winding Order**: Standard OGC orientation (Clockwise exterior boundary, Counter-Clockwise interior hole rings).
+- **CRS Alignment**: The shapefile's Coordinate Reference System must match the DEM raster projection.
+- **Valid Geometries**: Rings must not intersect themselves (`PySole` automatically executes `validate_and_extract_polygons()` on load to auto-repair geometries or fall back to the outer boundary shell if holes fail criteria).
 
 <a id="multi-format-bedrock-output-export"></a>
 ### 3. Multi-Format Bedrock Output Export (`output_format`)
