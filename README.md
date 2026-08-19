@@ -19,7 +19,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. Ice Thickness Field DEM Spatial Smoothing](#ice-thickness-field-dem-spatial-smoothing)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Ice Thickness Field DEM Spatial Smoothing](#dem-spatial-smoothing)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
@@ -245,9 +245,9 @@ Under `outputs` in `pysole.json`, users can specify which file format(s) to expo
 
 The Kriging regression automatically scales 1 / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) relative to the calculated depth point values, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is used by default for the final bedrock interpolation of migrated depth data.
 
-<a id="ice-thickness-field-dem-spatial-smoothing"></a>
-### 5. Ice Thickness Field DEM Spatial Smoothing
-In product-kriging, ice depth is obtained by dividing the Kriged product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope sine sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). When post-processing DEM spatial smoothing (`smooth_bedrock: true`) is enabled, `PySole` applies the spatial smoothing operator <i>S</i> **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)**:
+<a id="dem-spatial-smoothing"></a>
+### 5. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
+In product-kriging, depth is obtained by dividing the Kriged product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope sine sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). When post-processing DEM spatial smoothing (`smooth_bedrock: true`) is enabled, `PySole` applies the spatial smoothing operator <i>S</i> **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)**:
 
 <p align="center" style="line-height: 1.8;">
   <i>D</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) = <i>S</i>(<i>D</i>(<i>x</i>,<i>y</i>))<br>
