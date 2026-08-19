@@ -36,9 +36,9 @@
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (surface DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
 * **Flexible Survey Data Types:**
 
-- "one_way_travel_time": Uses One-Way Traveltimes <i>OWT</i> directly.
-- "two_way_travel_time": Converts Two-Way Traveltimes <i>TWT</i> to <i>OWT</i> (<i>OWT</i> = <i>TWT/2</i>).
-- "thickness" / "ice_thickness": Treats observations as direct thickness/depth measurements <i>D</i> [m] and skips 3D ray-based migration.
+    - "one_way_travel_time": Uses One-Way Traveltimes <i>OWT</i> directly.
+    - "two_way_travel_time": Converts Two-Way Traveltimes <i>TWT</i> to <i>OWT</i> (<i>OWT</i> = <i>TWT/2</i>).
+    - "thickness" / "ice_thickness": Treats observations as direct thickness/depth measurements <i>D</i> [m] and skips 3D ray-based migration.
 
 * **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes (nunataks / rock outcrops). When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
 * **DEM Surface Slope Optimization:** The degree of DEM surface slope smoothing is crucial when estimating thicknesses with the Shallow Ice Approximation (SIA). By adapting the SIA, Binder et al. (2009) introduced an objective optimization criteria for the surface slope smoothing process which is implemented in `PySole`. The optimal degree of DEM surface slope smoothing is derived by enforcing the optimization criterion of minimum spatial variance in basal shear stress:
@@ -77,7 +77,7 @@
 <a id="installation"></a>
 ## Installation
 
-### Standard Installation via PyPI <strong style="color:red;">(NOT AVAILABLE YET!!!)</strong>
+### Standard Installation via PyPI <strong><i> -> !!! NOT AVAILABLE YET !!!<i/></strong>
 
 ```bash
 pip install pysole
@@ -270,7 +270,7 @@ Kriging interpolation provides uncertainty estimates by variance of the product 
   <i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>) = <i>σ</i><sub>P</sub><sup>2</sup>(<i>x</i>,<i>y</i>) / sin<sup>2</sup>(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) &nbsp;&nbsp; [m<sup>2</sup>]
 </p>
 
-Taking the square root converts the variance field into the **Kriging Standard Error <i>σ</i><sub>H</sub>(<i>x</i>,<i>y</i>) in ± meters**:
+Taking the square root converts the variance field into the **Kriging Standard Error <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) in ± meters**:
 
 <p align="center">
   <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) = √(<i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>)) &nbsp;&nbsp; [±m]
