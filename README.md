@@ -9,31 +9,21 @@
 
 ## Table of Contents
 
-[Key Features](#key-features)
-
-[Workflow & Methodology](#workflow-and-methodology)
-
-[Installation](#installation)
-
-[Configuration Guide (`pysole.json`)](#configuration-guide)
-
-[Configuration Parameter Reference](#configuration-parameter-reference)
-
-[Technical & Methodological Notes](#technical-and-methodological-notes)
-
-    1. [Supported DEM Input Formats](#supported-dem-input-formats)
-    2. [Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)
-    3. [Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)
-    4. [Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)
-    5. [Ice Thickness Field DEM Spatial Smoothing](#ice-thickness-field-dem-spatial-smoothing)
-    6. [Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)
-
-[Package Architecture](#package-architecture)
-
-[Python API & Quick Start](#python-api-and-quick-start)
-
-[Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)
-
+[Key Features](#key-features)<br><br>
+[Workflow & Methodology](#workflow-and-methodology)<br><br>
+[Installation](#installation)<br><br>
+[Configuration Guide (`pysole.json`)](#configuration-guide)<br><br>
+[Configuration Parameter Reference](#configuration-parameter-reference)<br><br>
+[Technical & Methodological Notes](#technical-and-methodological-notes)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Input Formats](#supported-dem-input-formats)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[3. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[4. Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Ice Thickness Field DEM Spatial Smoothing](#ice-thickness-field-dem-spatial-smoothing)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[6. Ice Depth Uncertainty Derivation](#ice-depth-uncertainty-derivation)<br><br>
+[Package Architecture](#package-architecture)<br><br>
+[Python API & Quick Start](#python-api-and-quick-start)<br><br>
+[Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)<br><br>
 [Citation & References](#citation-and-references)
 
 ---
