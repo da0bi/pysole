@@ -77,7 +77,7 @@
 <a id="installation"></a>
 ## Installation
 
-### Standard Installation via PyPI <strong><i> -> !!! NOT AVAILABLE YET !!!<i/></strong>
+### Standard Installation via PyPI <strong><i> -> !!! NOT AVAILABLE YET !!!</i></strong>
 
 ```bash
 pip install pysole
