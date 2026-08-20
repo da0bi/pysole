@@ -3,7 +3,7 @@
 </p>
 <p style="text-align: center; font-size: 20px;"><strong>Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Datasets</strong></p>
 
-`PySole` is designed to reconstruct the thickness distribution and basal topography (sole) of glaciers, landslides, and other gravity-driven, viscous flow phenomena. It adapts the Shallow Ice Approximation (SIA) to estimate the thickness distribution of gravity-driven viscous bodies based on the fundamental inverse relation between surface slope and depth - where gentler surface slopes corrspond to greater depths, and vice versa. It is specifically engineered for sparse geophysical datasets where traditional 3D wavefield migration to image the bedrock is impossible due to insufficient spatial sampling. `PySole` transforms limited survey points into robust, physically-constrained 3D bedrock models.
+`PySole` is designed to reconstruct the thickness distribution and basal topography (sole) of glaciers, landslides, and other gravity-driven, viscous flow phenomena. It adapts the Shallow Ice Approximation (SIA) to estimate the thickness distribution based on the fundamental inverse relation between surface slope and depth - where gentler surface slopes corrspond to greater depths, and vice versa. It is specifically engineered for sparse geophysical datasets where traditional 3D wavefield migration to image the bedrock is impossible due to insufficient spatial sampling. `PySole` transforms limited survey points into robust, physically-constrained 3D bedrock models.
 
 ---
 
@@ -18,7 +18,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Input Formats](#supported-dem-input-formats)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[4. Shallow Ice Approximation Physical Drift Model](#shallow-ice-approximation-custom-physical-drift)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[4. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[5. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br><br>
 [Package Architecture](#package-architecture)<br><br>
@@ -31,19 +31,19 @@
 <a id="key-features"></a>
 ## Key Features
 
-* **JSON Configuration Driven (`pysole.json`):** All required and optional input and output parameters can be fully defined in a single `pysole.json` file.
+* **JSON Configuration Driven:** All required and optional input and output parameters can be fully defined in a single `pysole.json` file.
 * **5 Supported Digital Elevation Model (DEM) Input Formats:** Seamless loading and metadata extraction for GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`, `.txt`), CSV matrix (`.csv`), NumPy binary array (`.npy`), and in-memory NumPy 2D array (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (surface DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
-* **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey point data type. In case of direct thickness/depth data the 3D ray-based migration is automatically skipped.
+* **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey data type. In case of direct thickness/depth data the 3D ray-based migration is automatically skipped.
 * **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes (nunataks / rock outcrops). When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
-* **DEM Surface Slope Optimization:** The degree of DEM surface slope smoothing is crucial when estimating thicknesses with the Shallow Ice Approximation (SIA). By adapting the SIA, Binder et al. (2009) introduced an objective optimization criteria for the surface slope smoothing process which is implemented in `PySole`. The optimal degree of DEM surface slope smoothing is derived by enforcing the optimization criterion of minimum spatial variance in basal shear stress:
+* **DEM Surface Slope Smoothing:** The degree of DEM surface slope smoothing is crucial when estimating thicknesses with the Shallow Ice Approximation (SIA). By adapting the SIA, Binder et al. (2009) introduced an objective optimization criteria for the surface slope smoothing process which is implemented in `PySole`. The optimal degree of DEM surface slope smoothing is derived by enforcing the optimization criterion of minimum spatial variance in basal shear stress:
   <p align="center">
     <font size="+1"><b>min<sub><i>k</i><sub>c</sub></sub> Var<sub><i>xy</i></sub>(<i>τ</i><sub>b</sub>)</b></font>
   </p>
   Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral component of both pre-migration wavefront traveltime and post-migration depth interpolations.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration tailored for sparse data coverage.
-* **Three Kriging Interpolation Approaches & Boundary Condition:** Supports Universal Kriging (default), Ordinary Kriging, and Machine Learning Regression Kriging of the [PyKrige](https://geostat-framework.readthedocs.io/projects/pykrige/en/stable/) package. The default Universal Kriging drift model uses a quadratic polynomial; additionally, a custom physical drift based on a SIA ice depth model is implemented. Zero traveltime (<i>T</i> = 0 ns) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
-* **Bedrock DEM Post-Processing Spatial Smoothing:** Post-processing DEM spatial smoothing options (`"gaussian"`, `"median"`, or `"fft_lowpass"`) are available.
+* **Three Kriging Interpolation Approaches & Boundary Condition:** Supports Universal Kriging (default), Ordinary Kriging, and Machine Learning Regression Kriging of the [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige/en/stable/) package. The default Universal Kriging drift model uses a quadratic polynomial; additionally, a custom physical drift based on the SIA is implemented. Zero traveltime (<i>T</i> = 0 ns) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
+* **Bedrock DEM Spatial Smoothing:** Bedrock DEM post-processing spatial smoothing options (`"gaussian"`, `"median"`, or `"fft_lowpass"`) are available.
 * **ML Hole Filling & Geomorphological Margin Blending:** Optional Random Forest machine learning gap-filling to complete spatial coverage across blank regions after the Kriging interpolation. Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
 * **Multi-Format Output Export:** Export final bedrock elevation maps as GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`), CSV (`.csv`), NumPy (`.npy`), or all four formats simultaneously.
 * **Automated High-Resolution Diagnostic Plots:** Automatically generates and optionally exports visual diagnostic figures for each key processing milestone.
@@ -62,10 +62,10 @@
 </p>
 
 1. **DEM Loading & Spatial Resampling:** Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
-2. **1st-Pass Pre-Migration Traveltime Interpolation:** Applies the DEM surface slope optimization criterion to determine the optimal 1st-pass surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), for the product of traveltime observations and surface slopes, <i>T</i><sub>i</sub> sin(<i>α</i><sub>i</sub>). Subsequently, `PySole` interpolates the traveltime product field <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) using Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 ns) to reconstruct a continuous traveltime wavefront field <i>T</i>(<i>x</i>,<i>y</i>).
-3. **3D Ray-Based Migration:**  Based on the approach by Binder et al. (2009), the migration algorithm solves the Eikonal equation to relocate subsurface reflection points. An interactive mode allows users to test different signal propagation velocities alongside plots showing horizontal point displacements induced by the migration process.
-4. **2nd-Pass Post-Migration DEM Surface Slope Optimization:** Analogous to the 1st-pass pre-migration step, `PySole` applies the DEM surface slope optimization criterion to determine the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. In this 2nd-pass stage, optimization evaluates the product of migrated depths (<i>D</i><sub>i</sub>) and local surface slopes, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>i</sub>). A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical ice depth singularities in low-gradient regions.
-5. **2nd-Pass Bedrock Kriging Product & Uncertainty Display:** Performs spatial Kriging interpolation on point products <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>i</sub>) using the SIA custom physical drift model 1 / sin(<i>α</i><sub>opt</sub>) by default to reconstruct continuous depth <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i>(<i>x</i>,<i>y</i>) fields. The Kriging standard error <i>σ</i><sub>H</sub>(<i>x</i>,<i>y</i>) is converted to meters (±m) to quantify spatial uncertainty.
+2. **1st-Pass Pre-Migration Traveltime Interpolation:** Applies the DEM surface slope optimization criterion to determine the optimal 1st-pass surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), to calculate the product of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>). Subsequently, `PySole` interpolates <i>P</i><sub>T,i</sub> using Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 ns) to receive the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous traveltime wavefront field <i>T</i>(<i>x</i>,<i>y</i>) is eventually reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)).
+3. **3D Ray-Based Migration:**  Based on the approach by Binder et al. (2009), the migration algorithm solves the Eikonal equation to relocate subsurface reflection points. An interactive mode allows users to test different signal propagation velocities alongside plots showing the migrated depths and the corresponding horizontal survey point displacements induced by the migration process.
+4. **2nd-Pass Post-Migration DEM Surface Slope Optimization:** Analogous to the 1st-pass pre-migration step, `PySole` applies the DEM surface slope optimization criterion to determine the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. In this 2nd-pass stage, optimization evaluates the product of migrated depths (<i>D</i><sub>i</sub>) and the corresponding surface slopes, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>). A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical ice depth singularities in low-gradient regions.
+5. **2nd-Pass Bedrock Kriging Product & Uncertainty Display:** Performs spatial Kriging interpolation on point products <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>i</sub>) using the SIA custom physical drift model 1 / sin(<i>α</i><sub>opt</sub>) by default to reconstruct continuous depth <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i>(<i>x</i>,<i>y</i>) fields. The Kriging standard error <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) is converted to meters (±m) to quantify spatial uncertainty.
 
 ---
 
@@ -235,19 +235,19 @@ Under `outputs` in `pysole.json`, users can specify which file format(s) to expo
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "all"`: Exports all four formats simultaneously.
 
-<a id="shallow-ice-approximation-custom-physical-drift"></a>
-### 4. Shallow Ice Approximation Physical Drift Model for Universal Kriging Interpolation
+<a id="shallow-ice-approximation-custom-drift"></a>
+### 4. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
 `PySole` offers a physically-informed custom drift model based on the **Shallow Ice Approximation (SIA)**. In shallow ice dynamics, basal shear stress is given by <i>τ</i><sub>b</sub> = <i>ρ</i><sub>ice</sub> <i>g</i> <i>D</i> sin(<i>α</i>). Re-arranging for ice depth yields <i>D</i><sub>SIA</sub>(<i>x</i>,<i>y</i>) proportional to 1 / sin(<i>α</i>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the **relative thickness distribution pattern** driven directly by the optimized DEM surface slope:
 
 <p align="center">
   1 / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))
 </p>
 
-The Kriging regression automatically scales 1 / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) relative to the calculated depth point values, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is used by default for the final bedrock interpolation of migrated depth data.
+Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is used by default for the final bedrock interpolation of migrated depth data.
 
 <a id="dem-spatial-smoothing"></a>
 ### 5. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
-In product-kriging, depth is obtained by dividing the Kriged product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope sine sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). When post-processing DEM spatial smoothing (`smooth_bedrock: true`) is enabled, `PySole` applies the spatial smoothing operator <i>S</i> **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)**:
+In product-kriging, depth is obtained by dividing the Kriged product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). When post-processing DEM spatial smoothing (`smooth_bedrock: true`) is enabled, `PySole` applies the spatial smoothing operator <i>S</i> **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)**:
 
 <p align="center" style="line-height: 1.8;">
   <i>D</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) = <i>S</i>(<i>D</i>(<i>x</i>,<i>y</i>))<br>
