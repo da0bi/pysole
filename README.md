@@ -274,7 +274,7 @@ Kriging interpolation provides uncertainty estimates by variance of the product 
 Taking the square root converts the variance field into the **Kriging Standard Error <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) in ± meters**:
 
 <p align="center">
-  <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) = √(<i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>)) &nbsp;&nbsp; [±m]
+  <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) = √(<i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>)) &nbsp;&nbsp; [± m]
 </p>
 
 Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 68.3% confidence margin of error, while ± 1.96 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 95% confidence margin of error in ± meters.
