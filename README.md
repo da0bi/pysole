@@ -50,7 +50,7 @@
   where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, the product of ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration tailored for sparse data coverage.
 * **Three Kriging Interpolation Approaches & Boundary Condition:** Universal Kriging (default), Ordinary Kriging, and Machine Learning Regression Kriging of the [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige/en/stable/) package are available in `PySole`. The default Universal Kriging drift model uses a quadratic polynomial; additionally, a custom physical drift based on the SIA is implemented. Zero traveltime (<i>T</i> = 0 s) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
-* **Bedrock DEM Spatial Smoothing:** Bedrock DEM post-processing spatial smoothing options are available.
+* **Bedrock DEM Spatial Smoothing:** As a post-processing step, spatial smoothing options are available for the calculated bedrock DEM.
 * **ML Hole Filling & Geomorphological Margin Blending:** Optional Random Forest machine learning gap-filling to complete spatial coverage across blank regions after the Kriging interpolation. The Random Forest implementation of [`scikit-learn`](https://scikit-learn.org) is used for this optional step. Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
 * **Multi-Format Output Export:** Export final bedrock elevation maps as GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`), CSV (`.csv`), NumPy (`.npy`), or all four formats simultaneously.
 * **Automated High-Resolution Diagnostic Plots:** Automatically generates and optionally exports visual diagnostic figures for each key processing milestone.
@@ -65,7 +65,7 @@
     <img src="images/pysole_processing_pipeline.png" width="100%" alt="PySole Processing Pipeline Workflow">
   </a>
   <br>
-  <em>Figure 1: Complete step-by-step PySole processing pipeline and computational workflow. Click diagram to view in high resolution.</em>
+  <em>Figure 1: Complete step-by-step PySole computational workflow. Click diagram to view in high resolution.</em>
 </p>
 
 1. **DEM Loading & Spatial Resampling:** Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
@@ -289,7 +289,7 @@ Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,
     <img src="images/pysole_package_structure.png" width="100%" alt="PySole Package Structure & Submodules">
   </a>
   <br>
-  <em>Figure 2: Overview of PySole package submodules, class structure, and core processing functions. Click diagram to view in high resolution.</em>
+  <em>Figure 2: Overview of PySole package submodules, class structure, and core processing functions. Solver functions and related submodules are color-coded. Click diagram to view in high resolution.</em>
 </p>
 
 <a id="python-api-and-quick-start"></a>
