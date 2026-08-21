@@ -40,11 +40,14 @@
   <p align="center">
     <font size="+1"><b>min<sub><i>k</i><sub>c</sub></sub> Var<sub><i>xy</i></sub>(<i>τ</i><sub>b</sub>)</b></font>
   </p>
-  In shallow ice dynamics, basal shear stress is given by
+
+In shallow ice dynamics, basal shear stress is given by
+
   <p align="center">
     <font size="+1"><b>τ<sub>b</sub> = ρ<sub>ice</sub> g D sin(α)</b></font>
   </p>
-  from which ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed constant. Thus, the product of ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated for the optimization process. Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths.
+
+from which ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed constant. Thus, the product of ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated for the optimization process. Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration tailored for sparse data coverage.
 * **Three Kriging Interpolation Approaches & Boundary Condition:** Universal Kriging (default), Ordinary Kriging, and Machine Learning Regression Kriging of the [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige/en/stable/) package are available in `PySole`. The default Universal Kriging drift model uses a quadratic polynomial; additionally, a custom physical drift based on the SIA is implemented. Zero traveltime (<i>T</i> = 0 s) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
 * **Bedrock DEM Spatial Smoothing:** Bedrock DEM post-processing spatial smoothing options are available.
@@ -66,9 +69,9 @@
 </p>
 
 1. **DEM Loading & Spatial Resampling:** Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
-2. **Pre-Migration Traveltime Interpolation:** Applies the optimization criterion to determine the optimal surface slope smoothing degree by evaluating the product of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>). Once the optimal smoothing degree is determined, `PySole` interpolates <i>P</i><sub>T,i</sub> using Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 s) to receive the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous signal traveltime field <i>T</i>(<i>x</i>,<i>y</i>) is eventually reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)).
+2. **Pre-Migration Traveltime Interpolation:** Applies the optimization criterion to determine the optimal surface slope smoothing degree by evaluating the product of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>). Once the optimal smoothing degree is determined, `PySole` interpolates <i>P</i><sub>T,i</sub> using Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 s) to receive the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous signal traveltime field <i>T</i>(<i>x</i>,<i>y</i>) is eventually reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical singularities in low-gradient regions.
 3. **3D Ray-Based Migration:**  Based on the approach by Binder et al. (2009), the migration algorithm solves the Eikonal equation to relocate subsurface reflection points. An interactive mode allows users to test different signal propagation velocities alongside plots showing the migrated depths and the corresponding horizontal survey point displacements induced by the migration process.
-4. **Post-Migration Surface Slope Optimization:** Analogous to the pre-migration interpolation step, `PySole` applies the optimization criterion to determine the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. In this 2nd optimization pass stage the product of migrated depths (<i>D</i><sub>i</sub>) and the corresponding smoothed surface slopes, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), is evaluated. A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical ice depth singularities in low-gradient regions.
+4. **Post-Migration Surface Slope Optimization:** Analogous to the pre-migration interpolation step, `PySole` applies the optimization criterion to determine the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. In this 2nd optimization pass stage the product of migrated depths (<i>D</i><sub>i</sub>) and the corresponding smoothed surface slopes, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), is evaluated.
 5. **Final Depth Interpolation & Uncertainty Display:** Performs spatial Kriging interpolation on point products <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) to reconstruct continuous depth <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i>(<i>x</i>,<i>y</i>) fields. The Kriging standard error <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) is converted to meters (±m) to quantify spatial uncertainty.
 
 ---
@@ -243,9 +246,9 @@ Under `outputs` in `pysole.json`, users can specify which file format(s) to expo
 ### 4. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
 `PySole` offers a physically-informed custom drift model based on the **Shallow Ice Approximation (SIA)**. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth yields <i>D</i><sub>SIA</sub>(<i>x</i>,<i>y</i>) proportional to 1 / sin(<i>α</i>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the **relative thickness distribution pattern** driven directly by the optimized DEM surface slope:
 
-<p align="center">
-  1 / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))
-</p>
+  <p align="center">
+    <font size="+1"><b>D ~ 1 / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))</b></font>
+  </p>
 
 Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is used by default for the final interpolation of migrated depth data.
 
