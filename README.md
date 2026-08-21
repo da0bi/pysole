@@ -1,7 +1,7 @@
 <p align="center">
   <img src="images/pysole_nano_logo_v2_transparent.png" width="360" alt="PySole Logo">
 </p>
-<p style="text-align: center; font-size: 20px;"><strong>Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Datasets</strong></p>
+<p style="text-align: center; font-size: 20px;"><strong>Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Geophysical Datasets</strong></p>
 
 `PySole` is designed to reconstruct the thickness distribution and basal topography (sole) of glaciers, landslides, and other gravity-driven, viscous flow phenomena. It adapts the **Shallow Ice Approximation** to estimate the thickness distribution based on the fundamental inverse relation between surface slope and depth - where gentler surface slopes corrspond to greater depths, and vice versa. It is specifically engineered for sparse geophysical datasets where traditional 3D wavefield migration to image the bedrock is impossible due to insufficient spatial sampling. `PySole` transforms limited survey points into robust, physically-constrained 3D bedrock models.
 
