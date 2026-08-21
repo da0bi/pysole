@@ -244,10 +244,10 @@ Under `outputs` in `pysole.json`, users can specify which file format(s) to expo
 
 <a id="shallow-ice-approximation-custom-drift"></a>
 ### 4. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
-`PySole` offers a physically-informed custom drift model based on the **Shallow Ice Approximation (SIA)**. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth yields <i>D</i><sub>SIA</sub>(<i>x</i>,<i>y</i>) proportional to sin(<i>α</i>(<i>x</i>,<i>y</i>))<sup>-1</sup>. Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the **relative thickness distribution pattern** driven directly by the optimized DEM surface slope:
+`PySole` offers a physically-informed custom drift model based on the **Shallow Ice Approximation (SIA)**. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth yields the inverse relationship between <i>D</i><sub>SIA</sub>(<i>x</i>,<i>y</i>) and sin(<i>α</i>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the **relative thickness distribution pattern** driven directly by the optimized DEM surface slope:
 
   <p align="center">
-    <font>D ~ sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup></font>
+    <font>D &prop; sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup></font>
   </p>
 
 Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is used by default for the final interpolation of migrated depth data.
