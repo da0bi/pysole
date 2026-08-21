@@ -40,7 +40,7 @@
   <p align="center">
     <font size="+1"><b>min<sub><i>k</i><sub>c</sub></sub> Var<sub><i>xy</i></sub>(<i>τ</i><sub>b</sub>)</b></font>
   </p>
-  Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral interpolation component of both pre-migration wavefront traveltimes and post-migration depths.
+  Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration tailored for sparse data coverage.
 * **Three Kriging Interpolation Approaches & Boundary Condition:** Supports Universal Kriging (default), Ordinary Kriging, and Machine Learning Regression Kriging of the [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige/en/stable/) package. The default Universal Kriging drift model uses a quadratic polynomial; additionally, a custom physical drift based on the SIA is implemented. Zero traveltime (<i>T</i> = 0 s) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
 * **Bedrock DEM Spatial Smoothing:** Bedrock DEM post-processing spatial smoothing options (`"gaussian"`, `"median"`, or `"fft_lowpass"`) are available.
@@ -62,7 +62,7 @@
 </p>
 
 1. **DEM Loading & Spatial Resampling:** Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
-2. **Pre-Migration Traveltime Interpolation:** Applies the DEM surface slope optimization criterion to determine the optimal surface slope smoothing degree by evaluating the product of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>). Once the optimal smoothing degree is determined, `PySole` interpolates <i>P</i><sub>T,i</sub> using Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 s) to receive the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous traveltime wavefront field <i>T</i>(<i>x</i>,<i>y</i>) is eventually reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)).
+2. **Pre-Migration Traveltime Interpolation:** Applies the DEM surface slope optimization criterion to determine the optimal surface slope smoothing degree by evaluating the product of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>). Once the optimal smoothing degree is determined, `PySole` interpolates <i>P</i><sub>T,i</sub> using Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 s) to receive the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous signal traveltime field <i>T</i>(<i>x</i>,<i>y</i>) is eventually reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)).
 3. **3D Ray-Based Migration:**  Based on the approach by Binder et al. (2009), the migration algorithm solves the Eikonal equation to relocate subsurface reflection points. An interactive mode allows users to test different signal propagation velocities alongside plots showing the migrated depths and the corresponding horizontal survey point displacements induced by the migration process.
 4. **Post-Migration Surface Slope Optimzation:** Analogous to the pre-migration interpolation step, `PySole` applies the DEM surface slope optimization criterion to determine the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. In this 2nd optimization pass stage the product of migrated depths (<i>D</i><sub>i</sub>) and the corresponding smoothed surface slopes, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), is evaluated. A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical ice depth singularities in low-gradient regions.
 5. **Final Depth Interpolation & Uncertainty Display:** Performs spatial Kriging interpolation on point products <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) to reconstruct continuous depth <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i>(<i>x</i>,<i>y</i>) fields. The Kriging standard error <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) is converted to meters (±m) to quantify spatial uncertainty.
@@ -211,7 +211,7 @@ All execution options can be fully defined in a single `pysole.json` configurati
 ### 1. Supported DEM Input Formats
 `PySole` supports 5 distinct DEM input formats in `load_dem()`:
 
-- **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, transform, CRS, pixel resolution, and `nodata` values using `rasterio`.
+- **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, transform, CRS, pixel resolution, and `nodata` values using [`rasterio`](https://rasterio.readthedocs.io).
 - **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `NODATA_value`.
 - **CSV Matrix (`.csv`)**: 2D comma-separated matrix of elevation values.
 - **NumPy Binary Array (`.npy`)**: Fast 2D binary array loaded via `np.load()`.
@@ -270,7 +270,7 @@ Taking the square root converts the variance field into the **Kriging Standard E
   <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) = √(<i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>)) &nbsp;&nbsp; [±m]
 </p>
 
-Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>H</sub>(<i>x</i>,<i>y</i>) represents the 68.3% confidence margin of error, while ± 1.96 <i>σ</i><sub>H</sub>(<i>x</i>,<i>y</i>) represents the 95% confidence margin of error in ± meters.
+Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 68.3% confidence margin of error, while ± 1.96 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 95% confidence margin of error in ± meters.
 
 ---
 
