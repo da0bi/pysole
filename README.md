@@ -65,7 +65,7 @@
     <img src="images/pysole_processing_pipeline.png" width="100%" alt="PySole Processing Pipeline Workflow">
   </a>
   <br>
-  <em>Figure 1:  End-to-end computational workflow of the `PySole` solver processing pipeline. Click diagram to view in high resolution.</em>
+  <em>Figure 1:  End-to-end computational workflow of the PySole solver processing pipeline. Click diagram to view in high resolution.</em>
 </p>
 
 1. **DEM Loading & Spatial Resampling:** Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
@@ -289,7 +289,7 @@ Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,
     <img src="images/pysole_package_structure.png" width="100%" alt="PySole Package Structure & Submodules">
   </a>
   <br>
-  <em>Figure 2: Overview of `PySole` package submodules, class structure, and core processing functions. Solver functions and related submodules are color-coded. Click diagram to view in high resolution.</em>
+  <em>Figure 2: Overview of PySole package submodules, class structure, and core processing functions. Solver functions and related submodules are color-coded. Click diagram to view in high resolution.</em>
 </p>
 
 <a id="python-api-and-quick-start"></a>
