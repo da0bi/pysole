@@ -19,8 +19,8 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br><br>
-&nbsp;&nbsp;&nbsp;&nbsp;[6. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[6. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
 [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)<br><br>
