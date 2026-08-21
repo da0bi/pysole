@@ -35,19 +35,19 @@
 * **5 Supported Digital Elevation Model (DEM) Input Formats:** Seamless loading and metadata extraction for GeoTIFF (`.tif`), ESRI ASCII Grid (`.asc`, `.txt`), CSV matrix (`.csv`), NumPy binary array (`.npy`), and in-memory NumPy 2D array (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (surface DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
 * **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey data type. In case of direct thickness/depth data the 3D ray-based migration is automatically skipped.
-* **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes (nunataks / rock outcrops). When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
+* **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes. When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
 * **DEM Surface Slope Smoothing:** The degree of DEM surface slope smoothing is crucial when estimating thicknesses with the Shallow Ice Approximation (SIA). By adapting the SIA, Binder et al. (2009) introduced an objective optimization criteria for the surface slope smoothing process which is implemented in `PySole`. The optimal degree of DEM surface slope smoothing is derived by enforcing the optimization criterion of minimum spatial variance in basal shear stress:
   <p align="center">
     <font size="+1"><b>min<sub><i>k</i><sub>c</sub></sub> Var<sub><i>xy</i></sub>(<i>τ</i><sub>b</sub>)</b></font>
   </p>
 
-  In shallow ice dynamics, basal shear stress is given by
+  In shallow ice dynamics, basal shear stress is given by:
 
   <p align="center">
     <font size="+1"><b>τ<sub>b</sub> = ρ<sub>ice</sub> g D sin(α)</b></font>
   </p>
 
-  from which ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed constant. Thus, the product of ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated for the optimization process. Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths.
+  where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, the product of ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration tailored for sparse data coverage.
 * **Three Kriging Interpolation Approaches & Boundary Condition:** Universal Kriging (default), Ordinary Kriging, and Machine Learning Regression Kriging of the [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige/en/stable/) package are available in `PySole`. The default Universal Kriging drift model uses a quadratic polynomial; additionally, a custom physical drift based on the SIA is implemented. Zero traveltime (<i>T</i> = 0 s) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
 * **Bedrock DEM Spatial Smoothing:** Bedrock DEM post-processing spatial smoothing options are available.
