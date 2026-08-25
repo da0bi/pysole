@@ -78,18 +78,6 @@ Applies the optimization criterion to determine the optimal surface slope smooth
     <font><i>T</i>(<i>x</i>,<i>y</i>) = <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))</font>
   </p>
 
-<p align="center" style="margin: 20px 0;">
-  <span style="display: inline-flex; align-items: center; font-size: 1.2em;">
-    <i>T</i>(<i>x</i>,<i>y</i>) &nbsp;=&nbsp;
-    <span style="display: inline-flex; flex-direction: column; align-items: center; text-align: center; vertical-align: middle;">
-      <span style="border-bottom: 1px solid; width: 100%; padding: 0 4px; padding-bottom: 2px;"><i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>)</span>
-      <span style="padding-top: 2px;">sin(<i>&alpha;</i><sub>opt</sub>(<i>x</i>,<i>y</i>))</span>
-    </span>
-  </span>
-</p>
-
-
-
 A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical singularities in low-gradient regions.
 
 #### 3. 3D Ray-Based Migration
