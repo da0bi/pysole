@@ -71,7 +71,7 @@
 #### 1. DEM Loading & Spatial Resampling
 Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
 
-### 2. Pre-Migration Traveltime Interpolation
+#### 2. Pre-Migration Traveltime Interpolation
 Applies the optimization criterion to determine the optimal surface slope smoothing degree by evaluating the product of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>). Once the optimal smoothing degree is determined, `PySole` interpolates <i>P</i><sub>T,i</sub> using Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 s) to receive the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous signal traveltime field <i>T</i>(<i>x</i>,<i>y</i>) is ultimately reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)):
 
   <p align="center">
@@ -80,13 +80,13 @@ Applies the optimization criterion to determine the optimal surface slope smooth
 
 A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical singularities in low-gradient regions.
 
-### 3. 3D Ray-Based Migration
+#### 3. 3D Ray-Based Migration
 The migration algorithm solves the Eikonal equation to relocate subsurface reflection points, particuarly improving the imaging of steep slopes and overdeepenings. An interactive mode allows users to test different signal propagation velocities and evaluate them through visualizations of migrated depths and the corresponding horizontal survey point displacements induced by the migration process.
 
-### 4. Post-Migration Surface Slope Optimization
+#### 4. Post-Migration Surface Slope Optimization
 Analogous to the pre-migration interpolation step, `PySole` applies the optimization criterion to determine the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. In this second optimization pass the product of migrated depths (<i>D</i><sub>i</sub>) and the corresponding smoothed surface slopes, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), is evaluated.
 
-### 5. Final Depth Interpolation & Uncertainty Display
+#### 5. Final Depth Interpolation & Uncertainty Display
 Performs spatial Kriging interpolation on the products <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) to reconstruct continuous depth <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) fields. The Kriging standard error for the interpolated depths is converted to meters to quantify depth uncertainty.
 
 ---
@@ -230,7 +230,7 @@ All execution options can be fully defined in a single `pysole.json` configurati
 ## Technical & Methodological Notes
 
 <a id="supported-dem-input-formats"></a>
-### 1. Supported DEM Input Formats
+#### 1. Supported DEM Input Formats
 `PySole` supports 5 distinct DEM input formats in `load_dem()`:
 
 - **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, transform, CRS, pixel resolution, and `nodata` values using [`rasterio`](https://rasterio.readthedocs.io).
@@ -240,7 +240,7 @@ All execution options can be fully defined in a single `pysole.json` configurati
 - **NumPy 2D Array (`np.ndarray`)**: Direct in-memory array passed into the `Solver` constructor (`dem=dem_grid`).
 
 <a id="rock-outcrops-and-nunatak-hole-detection"></a>
-### 2. Rock Outcrops & Nunatak Hole Detection
+#### 2. Rock Outcrops & Nunatak Hole Detection
 Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>D</i> = 0 m).
 
 For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
@@ -251,7 +251,7 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 - **Valid Geometries**: Rings must not intersect themselves (`PySole` automatically executes `validate_and_extract_polygons()` on load to auto-repair geometries or fall back to the outer boundary shell if holes fail criteria).
 
 <a id="shallow-ice-approximation-custom-drift"></a>
-### 3. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
+#### 3. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
 `PySole` offers a physically-informed custom drift model based on the **Shallow Ice Approximation (SIA)**. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the **relative thickness distribution pattern** driven directly by the optimized DEM surface slope:
 
   <p align="center">
@@ -261,7 +261,7 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is used by default for the final interpolation of migrated depth data.
 
 <a id="dem-spatial-smoothing"></a>
-### 4. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
+#### 4. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
 The depth field <i>D</i>(<i>x</i>,<i>y</i>) is obtained by dividing the Kriged product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) with the optimal smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). When post-processing DEM spatial smoothing is enabled (`smooth_bedrock: true`), `PySole` applies the spatial smoothing operator <i>S</i> **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)**:
 
 <p align="center" style="line-height: 1.8;">
@@ -272,7 +272,7 @@ The depth field <i>D</i>(<i>x</i>,<i>y</i>) is obtained by dividing the Kriged p
 Applying smoothing directly to <i>D</i>(<i>x</i>,<i>y</i>) prevents the high-frequency surface DEM roughness residual (<i>Z</i><sub>surface</sub> − <i>S</i>(<i>Z</i><sub>surface</sub>)) from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both <i>D</i>(<i>x</i>,<i>y</i>) and <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
 <a id="depth-uncertainty-derivation"></a>
-### 5. Depth Uncertainty Derivation in Meters
+#### 5. Depth Uncertainty Derivation in Meters
 Kriging interpolation provides uncertainty estimates by variance of the product field <i>σ</i><sub>P</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>]. The 2D depth estimation variance field <i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>] is obtained via linear error propagation:
 
 <p align="center">
@@ -288,7 +288,7 @@ Taking the square root converts the variance field into the **Kriging Standard E
 Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 68.3% confidence margin of error, while ± 1.96 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 95% confidence margin of error.
 
 <a id="multi-format-bedrock-output-export"></a>
-### 6. Multi-Format Bedrock Output Export
+#### 6. Multi-Format Bedrock Output Export
 Under `outputs` in `pysole.json`, users can specify which file format(s) to export via `output_format`:<br><br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "tif" (or "asc", "csv", "npy")`: Exports a single specified format.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.<br>
