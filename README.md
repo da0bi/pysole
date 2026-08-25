@@ -76,7 +76,7 @@
   </p>
 
 
-  A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical singularities in low-gradient regions.
+A minimum smoothed surface slope threshold of 2.0° is enforced to prevent numerical instabilities and unphysical singularities in low-gradient regions.
 
 3. **3D Ray-Based Migration:** The migration algorithm solves the Eikonal equation to relocate subsurface reflection points, particuarly improving the imaging of steep slopes and overdeepenings. An interactive mode allows users to test different signal propagation velocities and evaluate them through visualizations of migrated depths and the corresponding horizontal survey point displacements induced by the migration process.
 4. **Post-Migration Surface Slope Optimization:** Analogous to the pre-migration interpolation step, `PySole` applies the optimization criterion to determine the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. In this second optimization pass the product of migrated depths (<i>D</i><sub>i</sub>) and the corresponding smoothed surface slopes, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), is evaluated.
