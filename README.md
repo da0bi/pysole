@@ -68,7 +68,7 @@
   <em>Figure 1:  End-to-end computational workflow of the PySole solver processing pipeline. Click diagram to view in high resolution.</em>
 </p>
 
-### 1. DEM Loading & Spatial Resampling
+#### 1. DEM Loading & Spatial Resampling
 Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
 
 ### 2. Pre-Migration Traveltime Interpolation
