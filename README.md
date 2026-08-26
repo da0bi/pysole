@@ -37,11 +37,17 @@
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
 * **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes. When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
 * **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey data type. In case of direct thickness/depth data the 3D ray-based migration is automatically skipped.
-<ul>
-  <li style="list-style-type: none; margin-left: -20px; text-indent: -20px; margin-top: 10px;">
-    💡 <b>DEM Surface Slope Smoothing:</b> The degree of DEM surface slope smoothing is crucial when estimating ice thickness with the Shallow Ice Approximation (SIA).
-  </li>
-</ul>
+
+<table border="0">
+  <tr style="border: none; background: transparent;">
+    <td valign="top" style="border: none; padding-right: 10px; font-size: 1.2em;">
+      💡
+    </td>
+    <td valign="top" style="border: none;">
+      <b>DEM Surface Slope Smoothing:</b> The degree of DEM surface slope smoothing is crucial when estimating ice thickness with the Shallow Ice Approximation (SIA).
+    </td>
+  </tr>
+</table>
 
 
 
