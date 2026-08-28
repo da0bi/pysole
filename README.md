@@ -288,7 +288,7 @@ Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,
 
 <a id="multi-format-dem-export"></a>
 #### 6. Multi-Format DEM Export
-Under `outputs` in `pysole.json`, users can specify which file format(s) to export calculated depth and bedrock DEMs via `output_format`:<br><br>
+Under `outputs` in `pysole.json`, users can specify via `output_format` which file format(s) to export calculated depth and bedrock DEMs:<br><br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "tif" (or "asc", "csv", "npy")`: Exports a single specified format.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "all"`: Exports all four formats simultaneously.
