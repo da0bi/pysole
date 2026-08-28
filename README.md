@@ -20,7 +20,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[5. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[6. Multi-Format Bedrock Output Export](#multi-format-bedrock-output-export)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[6. Multi-Format DEM Export](#multi-format-dem-export)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
 [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)<br><br>
@@ -286,9 +286,9 @@ Taking the square root converts the variance field into the **Kriging Standard E
 
 Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 68.3% confidence margin of error, while ± 1.96 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 95% confidence margin of error.
 
-<a id="multi-format-bedrock-output-export"></a>
-#### 6. Multi-Format Bedrock Output Export
-Under `outputs` in `pysole.json`, users can specify which file format(s) to export via `output_format`:<br><br>
+<a id="multi-format-dem-export"></a>
+#### 6. Multi-Format DEM Export
+Under `outputs` in `pysole.json`, users can specify which file format(s) to export calculated depth and bedrock DEMs via `output_format`:<br><br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "tif" (or "asc", "csv", "npy")`: Exports a single specified format.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "all"`: Exports all four formats simultaneously.
