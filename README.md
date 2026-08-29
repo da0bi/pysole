@@ -16,7 +16,7 @@
 [Configuration Parameter Reference](#configuration-parameter-reference)<br><br>
 [Technical & Methodological Notes](#technical-and-methodological-notes)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Input Formats](#supported-dem-input-formats)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[2. Rock Outcrops & Nunatak Hole Detection](#rock-outcrops-and-nunatak-hole-detection)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop & Nunatak Input Files](#parsing-rock-outcrops)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[5. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
@@ -238,8 +238,8 @@ All execution options can be fully defined in a single `pysole.json` configurati
 - **NumPy Binary Array (`.npy`)**: Fast 2D binary array loaded via `np.load()`.
 - **NumPy 2D Array (`np.ndarray`)**: Direct in-memory array passed into the `Solver` constructor (`dem=dem_grid`).
 
-<a id="rock-outcrops-and-nunatak-hole-detection"></a>
-#### 2. Rock Outcrops & Nunatak Hole Detection
+<a id="parsing-rock-outcrops"></a>
+#### 2. Parsing of Rock Outcrop & Nunatak Input Files
 Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>D</i> = 0 m).
 
 For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
