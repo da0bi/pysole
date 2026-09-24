@@ -4,10 +4,70 @@ Ported from MATLAB scripts INREAD.m and RAND.m by Daniel Binder (2011).
 Handles Shapefiles/GeoJSON with internal holes (nunataks) and DEM grid resampling.
 """
 
+import os
+from dataclasses import dataclass
+from functools import cached_property
 from typing import Tuple, Dict, Any, Optional, Union, List
 import numpy as np
-import os
 from scipy.interpolate import RegularGridInterpolator, griddata
+from shapely.geometry import Polygon, MultiPolygon
+from .logging import logger
+
+
+@dataclass
+class GridGeometry:
+    """
+    Standardized spatial metadata container for DEM grids.
+    Stores shape, resolution (dx, dy), 1D coordinates (x_coords, y_coords),
+    bounding box (minx, miny, maxx, maxy), and Matplotlib extent [minx, maxx, miny, maxy].
+    """
+    shape: Tuple[int, int]
+    dx: float
+    dy: float
+    x_coords: np.ndarray
+    y_coords: np.ndarray
+    bounds: Tuple[float, float, float, float]
+
+    @property
+    def extent(self) -> List[float]:
+        """Returns Matplotlib plot extent [minx, maxx, miny, maxy]."""
+        return [self.bounds[0], self.bounds[2], self.bounds[1], self.bounds[3]]
+
+    @cached_property
+    def meshgrid(self) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Lazy-evaluated cached 2D spatial meshgrid (xx, yy).
+        Generates 2D spatial coordinate matrices ONCE in memory and caches the result.
+        """
+        return np.meshgrid(self.x_coords, self.y_coords)
+
+    @classmethod
+    def create(
+        cls,
+        shape: Tuple[int, int],
+        dx: float = 1.0,
+        dy: float = 1.0,
+        bounds: Optional[Tuple[float, float, float, float]] = None,
+        x_coords: Optional[np.ndarray] = None,
+        y_coords: Optional[np.ndarray] = None,
+    ) -> "GridGeometry":
+        x_c, y_c, b = ensure_spatial_coords(shape, dx=dx, dy=dy, bounds=bounds, x_coords=x_coords, y_coords=y_coords)
+        return cls(shape=shape, dx=float(dx), dy=float(dy), x_coords=x_c, y_coords=y_c, bounds=b)
+
+    def create_interpolator(
+        self, grid: np.ndarray, fill_value: Any = np.nan, method: str = "linear"
+    ) -> RegularGridInterpolator:
+        """
+        Factory creating a RegularGridInterpolator bound to this spatial geometry.
+        Automatically aligns (y_coords, x_coords) and disables bounds_error.
+        """
+        return RegularGridInterpolator(
+            (self.y_coords, self.x_coords),
+            grid,
+            bounds_error=False,
+            fill_value=fill_value,
+            method=method,
+        )
 
 
 class BedrockMap:
@@ -88,7 +148,10 @@ class BedrockMap:
                 transform = self.transform
                 if transform is None:
                     transform = from_bounds(*self.bounds, width, height)
+                if self.crs is None:
+                    logger.warning(f"Exporting GeoTIFF '{target_path}' without Coordinate Reference System (CRS) metadata.")
 
+                grid_export = self.grid[::-1, :]
                 with rasterio.open(
                     target_path,
                     "w",
@@ -101,14 +164,14 @@ class BedrockMap:
                     transform=transform,
                     nodata=np.nan,
                 ) as dst:
-                    dst.write(self.grid, 1)
+                    dst.write(grid_export, 1)
 
             elif fmt in ["asc", "txt"]:
                 height, width = self.shape
                 minx, miny, maxx, maxy = self.bounds
                 cellsize = (maxx - minx) / float(width)
 
-                grid_asc = np.nan_to_num(self.grid, nan=-9999.0)
+                grid_asc = np.nan_to_num(self.grid[::-1, :], nan=-9999.0)
                 header = (
                     f"ncols         {width}\n"
                     f"nrows         {height}\n"
@@ -165,11 +228,60 @@ def ensure_spatial_coords(
     return x_coords, y_coords, bounds
 
 
+def check_projected_metric_crs(
+    crs: Any = None,
+    coords: Optional[np.ndarray] = None,
+    bounds: Optional[Tuple[float, float, float, float]] = None,
+) -> None:
+    """
+    Verifies that input spatial coordinates use a projected metric coordinate system (e.g. UTM meters).
+    Performs dual-level verification:
+    1. CRS metadata check via PyProj (is_projected vs is_geographic).
+    2. Empirical numerical bounds check (detecting lat/lon degrees in range [-180, 180] x [-90, 90]).
+    """
+    if crs is not None:
+        try:
+            from pyproj import CRS
+
+            c = CRS.from_user_input(crs)
+            if c.is_geographic or not c.is_projected:
+                err_msg = (
+                    f"\n[Unprojected Geographic CRS Error] Input CRS '{c.name}' ({c.to_epsg() or 'Custom'}) "
+                    f"uses geographic degrees instead of projected metric units!\n"
+                    f"PySole requires a projected metric Coordinate Reference System (e.g. UTM) for Euclidean variogram calculations."
+                )
+                logger.error(err_msg)
+                raise ValueError(err_msg)
+        except ValueError:
+            raise
+        except Exception:
+            pass
+
+    # Level 2: Empirical numerical bounds check for unprojected Lat/Lon degrees
+    if coords is not None and len(coords) > 0:
+        minx, miny = float(coords[:, 0].min()), float(coords[:, 1].min())
+        maxx, maxy = float(coords[:, 0].max()), float(coords[:, 1].max())
+        # Lat/Lon degrees typically span non-zero coordinates outside origin (0, 0) within [-180, 180] x [-90, 90]
+        is_origin_grid = (minx == 0.0 and miny == 0.0)
+        if not is_origin_grid and (-180.0 <= minx and maxx <= 180.0) and (-90.0 <= miny and maxy <= 90.0):
+            err_msg = (
+                f"\n[Geographic Coordinates Detected] Survey profile coordinates appear to be unprojected geographic degrees (X in [-180, 180], Y in [-90, 90]).\n"
+                f"PySole requires a projected metric coordinate system in meters (e.g. UTM) for variogram Euclidean distance calculations."
+            )
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+
 def check_crs_alignment(dem_crs: Any, vector_crs: Any) -> None:
     """
-    Checks if DEM CRS and vector/profile CRS match strictly.
-    If they differ, prints a prominent error message and raises ValueError.
+    Checks if DEM CRS and vector/profile CRS match strictly and use projected metric coordinates.
+    If they differ or use unprojected geographic degrees, logs error and raises ValueError.
     """
+    if dem_crs is not None:
+        check_projected_metric_crs(crs=dem_crs)
+    if vector_crs is not None:
+        check_projected_metric_crs(crs=vector_crs)
+
     if dem_crs is None or vector_crs is None:
         return
 
@@ -185,7 +297,7 @@ def check_crs_alignment(dem_crs: Any, vector_crs: Any) -> None:
                 f"  - Vector/Profile CRS: {c2.name} ({c2.to_epsg() or 'Custom'})\n"
                 f"All input datasets (DEM, outline, survey profiles) must use the exact same Coordinate Reference System."
             )
-            print(err_msg)
+            logger.error(err_msg)
             raise ValueError(err_msg)
     except ValueError:
         raise
@@ -270,6 +382,10 @@ def load_dem(
         grid = dem_input.astype(np.float64)
         height, width = grid.shape
         if calc_bounds is None:
+            logger.warning(
+                f"DEM input passed as raw in-memory np.ndarray without spatial bounds. "
+                f"Defaulting origin to (0.0, 0.0) with pixel spacing dx={native_dx:.2f} m, dy={native_dy:.2f} m."
+            )
             calc_bounds = (0.0, 0.0, float(width) * native_dx, float(height) * native_dy)
     elif isinstance(dem_input, str):
         ext = os.path.splitext(dem_input)[1].lower()
@@ -279,7 +395,7 @@ def load_dem(
             import rasterio
 
             with rasterio.open(dem_input) as src:
-                grid = src.read(1).astype(np.float64)
+                grid = np.array(src.read(1), dtype=np.float64, copy=True)
                 if src.nodata is not None:
                     grid[grid == src.nodata] = np.nan
                 transform = src.transform
@@ -340,12 +456,18 @@ def load_dem(
     if grid is None:
         raise ValueError(f"Could not load DEM dataset from {dem_input}")
 
+    # Standard GIS rasters (GeoTIFF, ASCII Grid, CSV, NPY) store Row 0 at Y_max (top-down).
+    # PySole's spatial coordinate vector y_coords[0] represents Y_min (bottom-up).
+    # Flip grid vertically on file load so Row 0 aligns with y_coords[0] (Y_min).
+    if isinstance(dem_input, str):
+        grid = grid[::-1, :]
+
     calc_dx = dx if dx is not None else native_dx
     calc_dy = dy if dy is not None else native_dy
 
     # Perform DEM resampling if dx and dy target resolutions are specified
     if (dx is not None and abs(dx - native_dx) > 1e-4) or (dy is not None and abs(dy - native_dy) > 1e-4):
-        print(f"Resampling DEM grid from native ({native_dx:.2f}m x {native_dy:.2f}m) to target ({calc_dx:.2f}m x {calc_dy:.2f}m)...")
+        logger.info(f"Resampling DEM grid from native ({native_dx:.2f}m x {native_dy:.2f}m) to target ({calc_dx:.2f}m x {calc_dy:.2f}m)...")
         grid_out, calc_bounds = resample_dem(
             grid,
             native_dx=native_dx,
@@ -369,24 +491,6 @@ def load_dem(
     return grid_out, meta
 
 
-def _point_in_ring(x: float, y: float, ring: np.ndarray) -> bool:
-    """Ray casting algorithm to test if point (x, y) is inside ring polygon."""
-    n = len(ring)
-    inside = False
-    p1x, p1y = ring[0]
-    for i in range(n + 1):
-        p2x, p2y = ring[i % n]
-        if y > min(p1y, p2y):
-            if y <= max(p1y, p2y):
-                if x <= max(p1x, p2x):
-                    if p1y != p2y:
-                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                    if p1x == p2x or x <= xinters:
-                        inside = not inside
-        p1x, p1y = p2x, p2y
-    return inside
-
-
 def validate_and_extract_polygons(gdf: Any) -> List[Any]:
     """
     Validates vector geometries for internal hole compliance.
@@ -394,10 +498,6 @@ def validate_and_extract_polygons(gdf: Any) -> List[Any]:
     prints an error message and falls back to using the outer boundary shell only.
     """
     valid_geoms = []
-    try:
-        from shapely.geometry import Polygon, MultiPolygon
-    except ImportError:
-        return list(gdf.geometry)
 
     for idx, row in gdf.iterrows():
         geom = row.geometry
@@ -405,7 +505,7 @@ def validate_and_extract_polygons(gdf: Any) -> List[Any]:
             continue
 
         if not geom.is_valid:
-            print(f"[Error] Boundary geometry at feature #{idx} is invalid. Extracting outer boundary shell only for processing.")
+            logger.warning(f"Boundary geometry at feature #{idx} is invalid. Extracting outer boundary shell only for processing.")
             try:
                 if isinstance(geom, Polygon):
                     geom = Polygon(geom.exterior)
@@ -420,7 +520,7 @@ def validate_and_extract_polygons(gdf: Any) -> List[Any]:
                 hole_poly = Polygon(hole)
                 if not hole_poly.is_valid or hole_poly.area <= 0:
                     has_invalid_hole = True
-                    print(f"[Error] Interior hole #{h_idx} in feature #{idx} fails shapefile criteria. Falling back to outer boundary shell only.")
+                    logger.warning(f"Interior hole #{h_idx} in feature #{idx} fails shapefile criteria. Falling back to outer boundary shell only.")
                     break
 
         if has_invalid_hole:
@@ -549,3 +649,79 @@ def load_outline(
             pass
 
     return ~np.isnan(dem_grid)
+
+
+def load_survey_points(
+    survey_input: Union[str, np.ndarray, os.PathLike],
+    bounds: Optional[Tuple[float, float, float, float]] = None,
+    dem_grid: Optional[np.ndarray] = None,
+    x_coords: Optional[np.ndarray] = None,
+    y_coords: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    Unified ingestion and validation for scattered survey point datasets.
+    Loads CSV, whitespace-delimited files, or NumPy arrays, converts coordinates, and validates bounds.
+    """
+    if isinstance(survey_input, (str, os.PathLike)):
+        filepath = str(survey_input)
+        try:
+            pts = np.loadtxt(filepath, delimiter="," if filepath.endswith(".csv") else None)
+        except ValueError:
+            import pandas as pd
+            df_tmp = pd.read_csv(filepath)
+            pts = df_tmp.select_dtypes(include=[np.number]).to_numpy()
+    else:
+        pts = np.array(survey_input, dtype=np.float64)
+
+    if pts.ndim == 1:
+        pts = pts.reshape(1, -1)
+
+    if len(pts) > 0:
+        check_projected_metric_crs(coords=pts[:, :2])
+
+    if bounds is not None and len(pts) > 0:
+        minx, miny, maxx, maxy = bounds
+        px_min, py_min = pts[:, 0].min(), pts[:, 1].min()
+        px_max, py_max = pts[:, 0].max(), pts[:, 1].max()
+
+        buf_x = max((maxx - minx) * 0.1, 1.0)
+        buf_y = max((maxy - miny) * 0.1, 1.0)
+
+        if (px_max < minx - buf_x) or (px_min > maxx + buf_x) or (py_max < miny - buf_y) or (py_min > maxy + buf_y):
+            err_msg = (
+                f"\n[Spatial Coordinate System Error] Survey profile coordinates do not match DEM spatial bounds!\n"
+                f"  - Survey Points Extent: X=[{px_min:.2f}, {px_max:.2f}], Y=[{py_min:.2f}, {py_max:.2f}]\n"
+                f"  - Surface DEM Bounds:  X=[{minx:.2f}, {maxx:.2f}], Y=[{miny:.2f}, {maxy:.2f}]\n"
+                f"All input datasets (DEM, outline, survey profiles) must use the exact same Coordinate Reference System."
+            )
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+    # 3-column point set [X, Y, value] -> sample surface DEM elevation Z for column 3
+    if pts.shape[1] == 3 and dem_grid is not None and x_coords is not None and y_coords is not None:
+        interp_z = RegularGridInterpolator((y_coords, x_coords), dem_grid, bounds_error=False, fill_value=np.nan)
+        pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
+        z_surf = interp_z(pts_xy)
+        pts = np.column_stack((pts[:, 0], pts[:, 1], z_surf, pts[:, 2]))
+
+    # Deduplicate / consolidate duplicate survey points with identical (X, Y) coordinates
+    if len(pts) > 1:
+        coords_rounded = np.round(pts[:, :2], decimals=1)
+        unique_coords, inverse_indices = np.unique(coords_rounded, axis=0, return_inverse=True)
+        if len(unique_coords) < len(pts):
+            n_dups = len(pts) - len(unique_coords)
+            logger.warning(
+                f"Detected {n_dups} duplicate survey point coordinate(s) (X, Y). "
+                f"Consolidating duplicate points by averaging values to ensure numerical stability in Kriging."
+            )
+            n_cols = pts.shape[1]
+            consolidated = np.zeros((len(unique_coords), n_cols), dtype=np.float64)
+            for idx in range(len(unique_coords)):
+                mask = (inverse_indices == idx)
+                consolidated[idx, :2] = pts[mask, :2].mean(axis=0)
+                for col in range(2, n_cols):
+                    consolidated[idx, col] = np.nanmean(pts[mask, col])
+            pts = consolidated
+
+    return pts
+

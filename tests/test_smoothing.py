@@ -36,17 +36,16 @@ class TestSmoothingWuk(unittest.TestCase):
         self.assertFalse(np.isnan(smoothed).any())
 
     def test_blend_margin_topography_wuk(self):
+        from pysole.raster import GridGeometry
         thick = np.where(self.outline_mask, 50.0, 0.0)
         bedrock_in = self.dem - thick
+        geometry = GridGeometry.create(self.dem.shape, dx=self.meta["dx"], dy=self.meta["dy"], bounds=self.meta["bounds"])
 
         blended = blend_margin_topography(
             dem=self.dem,
             bedrock_input=bedrock_in,
             boundary_mask=self.outline_mask,
-            dx=self.meta["dx"],
-            dy=self.meta["dy"],
-            x_coords=self.x_coords,
-            y_coords=self.y_coords,
+            geometry=geometry,
             min_gap_dist=30.0,
         )
 

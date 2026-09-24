@@ -17,11 +17,14 @@
 [Technical & Methodological Notes](#technical-and-methodological-notes)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Input Formats](#supported-dem-input-formats)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop & Nunatak Input Files](#parsing-rock-outcrops)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[3. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[4. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[6. Multi-Format DEM Export](#multi-format-dem-export)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[3. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[4. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[6. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[7. Multi-Format DEM Export](#multi-format-dem-export)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[8. Dynamic Variogram Lag Binning & Minimum Pair Threshold](#dynamic-variogram-binning)<br><br>
 [Package Architecture](#package-architecture)<br><br>
+[Command-Line Interface (CLI) Execution](#cli-execution)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
 [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)<br><br>
 [Citation & References](#citation-and-references)
@@ -31,7 +34,7 @@
 <a id="key-features"></a>
 ## Key Features
 
-* **JSON Configuration Driven:** All required and optional input and output parameters can be fully defined in a single `pysole.json` file.
+* **JSON Configuration & Terminal CLI Driven:** All processing workflow options can be defined in a `pysole.json` file and executed via Python API or directly from the terminal using the `pysole` command line tool.
 * **Automated High-Resolution Diagnostic Plots:** Automatically generates and optionally exports diagnostic figures for each key processing milestone.
 * **5 Supported Digital Elevation Model (DEM) Input and Output Formats:** Seamless loading and exporting of GeoTIFFs (`.tif`), ESRI ASCII Grids (`.asc`, `.txt`), CSV matrices (`.csv`), NumPy binary arrays (`.npy`), and in-memory NumPy 2D arrays (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
@@ -50,8 +53,9 @@
 
   where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. Surface slope smoothing is performed in the frequency domain, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine the variogram correlation range. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration—introduced by Binder et al. (2009) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage.
-* **Three Kriging Interpolation Approaches & Boundary Condition:** `PySole` leverages the [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package to provide 2D Universal Kriging (default), 2D Ordinary Kriging, and 2D Regression Kriging. A custom Universal Kriging drift model based on the SIA is available. Zero traveltime (<i>T</i> = 0 s) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
+* **Kriging Interpolation & Boundary Condition:** Provides a numerically optimized and parallelized 2D Universal Kriging algorithm (default). Optionally, `PySole` supports 2D Universal Kriging, 2D Ordinary Kriging, and 2D Regression Kriging of the [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package. A custom Universal Kriging drift model based on the SIA is available (default). Zero traveltime (<i>T</i> = 0 s) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
 * **ML Hole Filling & Geomorphological Margin Blending:** Employs [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
+* **Multi-Core Parallel Acceleration:** `PySole` supports multi-core CPU parallelization across computationally intensive processing steps—including FFT surface slope smoothing, native Kriging interpolation, and Random Forest machine learning gap filling.
 * **Final DEMs Spatial Smoothing:** As a post-processing step, spatial smoothing options are available for the calculated DEMs.
 
 ---
@@ -109,12 +113,6 @@ cd pysole
 pip install -e .
 ```
 
-Or using `uv`:
-
-```bash
-uv pip install -e .
-```
-
 ---
 
 <a id="configuration-guide"></a>
@@ -128,7 +126,11 @@ All execution options can be fully defined in a single `pysole.json` configurati
         "dem_path": "surface_dem.asc",
         "outline_path": "creeping_body.shp",
         "survey_data_path": "sparse_survey.csv",
-        "survey_data_type": "one_way_travel_time"
+        "survey_data_type": "one_way_travel_time",
+        "ice_density": 900.0,
+        "g": 9.81,
+        "n_cores": -1,
+        "log_level": "INFO"
     },
     "spatial_parameters": {
         "dx": 5.0,
@@ -144,13 +146,16 @@ All execution options can be fully defined in a single `pysole.json` configurati
         "kc_max": 10.0,
         "kc_min": 0.01,
         "d_kc": 0.1,
-        "num_steps": 10,
+        "num_steps": null,
+        "nrbins": null,
+        "slope_floor_deg": 5.0,
         "interactive_optimization": false
     },
     "kriging_parameters": {
+        "built_in_kriging": true,
         "pre_migration": {
             "method": "universal",
-            "drift_terms": ["quadratic"],
+            "drift_terms": ["sia_thickness"],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": false
         },
@@ -190,25 +195,32 @@ All execution options can be fully defined in a single `pysole.json` configurati
 | | `outline_path` | `str` | `"creeping_body.shp"` | File path to creeping body / glacier boundary polygon (`.shp`, `.geojson`, `.gpkg`, `.csv`). CRS must match DEM. |
 | | `survey_data_path` | `str` | `"sparse_survey.csv"` | **(Required)** File path to survey profile travel time or thickness observations CSV `[X, Y, value]`. |
 | | `survey_data_type` | `str` | `"one_way_travel_time"` | Observation data type: `"one_way_travel_time"` (OWT), `"two_way_travel_time"` (TWT), or `"thickness"` / `"ice_thickness"` (skips ray migration). |
+| | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (e.g. `900.0` kg/m³ for temperate glacier ice). Used to calculate basal shear stress $\tau_{\text{b}}$. |
+| | `g` | `float` | `9.81` | Gravitational acceleration constant in m/s² (`9.81` m/s²). Used to calculate basal shear stress $\tau_{\text{b}}$. |
+| | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
+| | `log_level` | `str` | `"INFO"` | Package logging level verbosity: `"INFO"` (default), `"DEBUG"`, `"WARNING"`, `"ERROR"`, or `"CRITICAL"`. Appends timestamped logs to `./pysole.log`. |
 | **`spatial_parameters`** | `dx` | `float` | `null` | Target grid resolution along X in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `dy` | `float` | `null` | Target grid resolution along Y in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `bounds` | `list[float]` | `null` | Spatial bounding box `[minx, miny, maxx, maxy]`. If `null`, extracted directly from DEM raster metadata. |
 | **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D Eikonal ray migration on travel times. If `false`, migration is cleanly skipped. |
-| | `velocity` | `float` | `0.16` | Signal propagation velocity in m/ns (e.g. `0.16` m/ns for GPR radar wave propagation in ice). |
+| | `velocity` | `float` | `0.16` | Signal propagation velocity (e.g. `0.16` m/ns for GPR radar wave propagation in temperate ice). |
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual displacement vector plots. |
 | **`optimization_parameters`** | `kc_max` | `float` | `10.0` | Maximum corner frequency for FFT Gaussian low-pass smoothing. If `null`, defaults to `10.0`. |
 | | `kc_min` | `float` | `0.01` | Minimum corner frequency for slope smoothing search. |
 | | `d_kc` | `float` | `0.1` | Corner frequency stepwidth for evaluating basal shear stress spatial variance Var<sub><i>xy</i></sub>(<i>τ</i><sub>b</sub>). |
-| | `num_steps` | `int` | `10` | Number of evaluation steps if `d_kc` is not specified. |
+| | `num_steps` | `int` | `null` | Number of evaluation steps linearly spaced between `kc_max` and `kc_min` (used if `d_kc` is `null`). |
+| | `nrbins` | `int` | `null` | Number of variogram lag distance bins. If `null`, dynamically calculated to guarantee at least 30 point pairs per bin. |
+| | `slope_floor_deg` | `float` | `5.0` | Minimum surface slope angle threshold in degrees [°] enforced during surface slope optimization to prevent numerical division singularities. |
 | | `interactive_optimization` | `bool` | `false` | If `true`, enables interactive CLI prompt to inspect BSS variance curve and enter a custom correlation range (<i>a</i><sub>range</sub>). |
-| **`kriging_parameters`** | `pre_migration` | `dict` | *Sub-section* | Configuration for 1st-pass pre-migration traveltime interpolation (<i>T</i>(<i>x</i>,<i>y</i>) [ns]). |
+| **`kriging_parameters`** | `built_in_kriging` | `bool` | `true` | If `true` (default), uses PySole's native numerically optimized and parallelized Dual Kriging engine (supporting Ordinary and Universal Kriging). If `false`, Kriging implementations from the PyKrige package are applied. |
+| | `pre_migration` | `dict` | *Sub-section* | Configuration for pre-migration traveltime interpolation (<i>T</i>(<i>x</i>,<i>y</i>) [ns]). |
 | | `pre_migration.method` | `str` | `"universal"` | Kriging approach: `"universal"` (default), `"ordinary"`, or `"regression"`. |
-| | `pre_migration.drift_terms` | `list[str]` | `["quadratic"]` | Drift terms for Universal Kriging: `["quadratic"]` (2nd-order polynomial), `["regional_linear"]`, or `["sia_thickness"]`. |
+| | `pre_migration.drift_terms` | `list[str]` | `["sia_thickness"]` | Drift terms for Universal Kriging: `["sia_thickness"]` (SIA physical drift), `["quadratic"]`, or `["regional_linear"]`. |
 | | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `false` | If `true`, includes zero traveltime boundary points (<i>T</i> = 0 ns) along the margin outline. |
-| | `post_migration` | `dict` | *Sub-section* | Configuration for 2nd-pass post-migration final bedrock depth interpolation (<i>D</i>(<i>x</i>,<i>y</i>) [m]). |
+| | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth interpolation (<i>D</i>(<i>x</i>,<i>y</i>) [m]). |
 | | `post_migration.method` | `str` | `"universal"` | Kriging approach: `"universal"` (default), `"ordinary"`, or `"regression"`. |
-| | `post_migration.drift_terms` | `list[str]` | `["sia_thickness"]` | Drift terms for Universal Kriging: `["sia_thickness"]` (SIA physical drift <i>U</i><sub>SIA</sub> = 1 / sin(<i>α</i><sub>safe</sub>)), `["quadratic"]`, or `["regional_linear"]`. |
+| | `post_migration.drift_terms` | `list[str]` | `["sia_thickness"]` | Drift terms for Universal Kriging: `["sia_thickness"]` (SIA physical drift), `["quadratic"]`, or `["regional_linear"]`. |
 | | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the margin outline. |
 | **`finalization_parameters`** | `random_forest_gap_filling` | `bool` | `false` | If `true`, applies Random Forest machine learning gap filling across unmeasured interior regions before margin blending. |
@@ -216,12 +228,12 @@ All execution options can be fully defined in a single `pysole.json` configurati
 | | `min_gap_dist` | `float` | `50.0` | Minimum gap distance / margin width in meters [m] inside which bedrock is smoothly tapered and blended into surface DEM terrain. |
 | | `smooth_bedrock` | `bool` | `false` | If `true`, applies spatial DEM post-processing smoothing directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>) to eliminate high-frequency slope-division noise. |
 | | `smoothing_method` | `str` | `"gaussian"` | DEM smoothing algorithm choice: `"gaussian"` (default), `"median"`, or `"fft_lowpass"`. |
-| | `smoothing_sigma` | `float` | `1.5` | Standard deviation (<i>σ</i>) of the Gaussian kernel in grid units (for `"gaussian"`). |
+| | `smoothing_sigma` | `float` | `1.5` | Standard deviation of the Gaussian kernel in grid units (for `"gaussian"`). |
 | | `smoothing_kernel_size` | `int` | `3` | Window kernel size (<i>k</i> × <i>k</i>) for median filtering (must be an odd integer, for `"median"`). |
 | | `smoothing_kc_cutoff` | `float` | `null` | Corner frequency cutoff wavenumber (<i>k</i><sub>c,smooth</sub>) for `"fft_lowpass"`. If `null`, defaults to <i>k</i><sub>c,opt</sub>. |
 | **`outputs`** | `output_path` | `str` | `"final_bedrock.tif"` | Target file path or base name for exporting the final predicted bedrock elevation raster. |
 | | `output_format` | `str` / `list[str]` | `"tif"` | Desired export format(s): `"tif"`, `"asc"`, `"csv"`, `"npy"`, a list of formats (e.g. `["tif", "asc", "csv"]`), or `"all"` to export all four formats. |
-| | `plots_dir` | `str` | `null` | Optional target directory where generated diagnostic figures and map plots are saved at high resolution (300 DPI). If `null`, plot saving is disabled. |
+| | `plots_dir` | `str` | `null` | Optional target directory where generated diagnostic figures are saved. If `null`, plot saving is disabled. |
 
 ---
 
@@ -249,8 +261,31 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 - **CRS Alignment**: The shapefile's Coordinate Reference System must match the DEM raster projection.
 - **Valid Geometries**: Rings must not intersect themselves (`PySole` automatically executes `validate_and_extract_polygons()` on load to auto-repair geometries or fall back to the outer boundary shell if holes fail criteria).
 
+<a id="dual-kriging-vector-engine"></a>
+#### 3. High-Performance Dual Kriging Vector Engine
+`PySole` features a native, highly optimized geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike standard Kriging implementations (Primal Kriging) that solve node-specific linear systems point-by-point for every target grid node (requiring millions of repetitive matrix inversions across a high-resolution DEM), Dual Kriging solves the global linear system only once for the entire sample observation set:
+
+<p align="center">
+  <b>K</b> <b>w</b><sub>z</sub> = <b>z</b><sub>aug</sub>
+</p>
+
+where <b>K</b> is the augmented sample-to-sample covariance/variogram matrix, <b>z</b><sub>aug</sub> = [<i>z</i><sub>1</sub>, ..., <i>z</i><sub><i>N</i></sub>, 0, ..., 0]<sup>T</sup> contains the known observation picks augmented with zero drift constraints, and <b>w</b><sub>z</sub> = [<b>w</b><sub>sample</sub><sup>T</sup>, <b>w</b><sub>drift</sub><sup>T</sup>]<sup>T</sup> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>, <i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>]<sup>T</sup> is the single global dual weight vector solved via <i>Lower-Upper</i> (LU) matrix decomposition. Once <b>w</b><sub>z</sub> is computed, spatial interpolation across all target grid nodes simplifies to a single <i>Basic Linear Algebra Subprograms</i> (BLAS)-accelerated 1D vector dot product:
+
+<p align="center">
+  <i>Z</i><sub>grid</sub> = <b>w</b><sub>sample</sub> · <b>Γ</b><sub>grid</sub> + <b>w</b><sub>drift</sub> · <b>F</b><sub>grid</sub>
+</p>
+
+where:
+- <i>Z</i><sub>grid</sub> is the predicted output value (e.g., bedrock elevation or ice depth) at target grid node (<i>x</i>, <i>y</i>).
+- <b>w</b><sub>sample</sub> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>] are the solved dual spatial weights for each of the <i>N</i> observation pick points.
+- <b>Γ</b><sub>grid</sub> = [&gamma;(<i>x</i><sub>1</sub>, <i>x</i><sub>grid</sub>), ..., &gamma;(<i>x</i><sub><i>N</i></sub>, <i>x</i><sub>grid</sub>)]<sup>T</sup> is the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each pick and target node (<i>x</i>, <i>y</i>).
+- <b>w</b><sub>drift</sub> = [<i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>] are the solved dual drift model coefficients.
+- <b>F</b><sub>grid</sub> is the drift function vector evaluated at target node (<i>x</i>, <i>y</i>) (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
+
+To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a microscopic offset (10<sup>−8</sup>) to the main diagonal of <b>K</b>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
+
 <a id="shallow-ice-approximation-custom-drift"></a>
-#### 3. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
+#### 4. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
 `PySole` offers a physically-informed custom drift model based on the **Shallow Ice Approximation (SIA)**. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the **relative thickness distribution pattern** driven directly by the optimized DEM surface slope:
 
   <p align="center">
@@ -260,7 +295,7 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is used by default for the final interpolation of migrated depth data.
 
 <a id="depth-uncertainty-derivation"></a>
-#### 4. Depth Uncertainty Derivation in Meters
+#### 5. Depth Uncertainty Derivation in Meters
 Kriging interpolation provides uncertainty estimates by variance of the product field <i>σ</i><sub>P</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>]. The 2D depth estimation variance field <i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>] is obtained via linear error propagation:
 
 <p align="center">
@@ -276,7 +311,7 @@ Taking the square root converts the variance field into the **Kriging Standard E
 Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 68.3% confidence margin of error, while ± 1.96 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 95% confidence margin of error.
 
 <a id="dem-spatial-smoothing"></a>
-#### 5. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
+#### 6. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
 The depth field <i>D</i>(<i>x</i>,<i>y</i>) is obtained by dividing the Kriged product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) with the optimal smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). When post-processing DEM spatial smoothing is enabled (`smooth_bedrock: true`), `PySole` applies the spatial smoothing operator <i>S</i> **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)**:
 
 <p align="center" style="line-height: 1.8;">
@@ -287,11 +322,21 @@ The depth field <i>D</i>(<i>x</i>,<i>y</i>) is obtained by dividing the Kriged p
 Applying smoothing directly to <i>D</i>(<i>x</i>,<i>y</i>) prevents the high-frequency surface DEM roughness residual (<i>Z</i><sub>surface</sub> − <i>S</i>(<i>Z</i><sub>surface</sub>)) from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both <i>D</i>(<i>x</i>,<i>y</i>) and <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
 <a id="multi-format-dem-export"></a>
-#### 6. Multi-Format DEM Export
+#### 7. Multi-Format DEM Export
 Under `outputs` in `pysole.json`, users can specify via `output_format` which file format(s) to export calculated depth and bedrock DEMs:<br><br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "tif" (or "asc", "csv", "npy")`: Exports a single specified format.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "all"`: Exports all four formats simultaneously.
+
+<a id="dynamic-variogram-binning"></a>
+#### 8. Dynamic Variogram Lag Binning & Minimum Pair Threshold
+Experimental variogram lag distance bins are calculated strictly from the spatial pairwise distances ($d_{ij}$) between survey points, independently of DEM grid size. Users can specify a fixed number of lag bins via `"nrbins"` under `"optimization_parameters"` in `pysole.json`. When `"nrbins"` is set to `null` (default), `PySole` dynamically determines the optimal distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
+
+<p align="center">
+  <b>nrbins</b> = max(3, ⌊<i>N</i><sub>pairs</sub> / 30⌋)
+</p>
+
+Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with the Central Limit Theorem and established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice.
 
 ---
 
@@ -306,13 +351,60 @@ Under `outputs` in `pysole.json`, users can specify via `output_format` which fi
   <em>Figure 2: Overview of PySole package submodules, class structure, and core processing functions. Solver functions and related submodules are color-coded. Click diagram to view in high resolution.</em>
 </p>
 
-<a id="python-api-and-quick-start"></a>
+---
+
+<a id="cli-execution"></a>
+## Command-Line Interface (CLI) Execution
+
+`PySole` provides a convenient terminal entry point for executing processing workflows directly from your command line without writing Python scripts.
+
+### 1. Convenient Execution & `$PATH` Setup
+
+When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automatically creates the `pysole` executable binary script in your Python environment's binary directory (`bin/` on Linux/macOS or `Scripts\` on Windows).
+
+* **Virtual Environment (Recommended):**
+  When your virtual environment is activated (`source .venv/bin/activate` or `conda activate myenv`), its `bin/` directory is automatically prepended to your `$PATH`. You can immediately execute `pysole` from **any** working directory:
+
+  ```bash
+  pysole pysole.json
+  ```
+
+* **User Installation without Virtual Environment (`pip install --user .`):**
+  If installed without a virtual environment using `--user`, Python places entry point scripts in `~/.local/bin` (Linux/macOS) or `%APPDATA%\Python\Scripts` (Windows). If `pysole` is not recognized by your terminal, add `~/.local/bin` to your `$PATH` variable by placing the following line in your `~/.bashrc` or `~/.zshrc`:
+
+  ```bash
+  export PATH="$HOME/.local/bin:$PATH"
+  ```
+
+### 2. Available CLI Commands
+
+* **Generate a Default `pysole.json` Template:**
+  ```bash
+  pysole --init
+  ```
+  *(Creates a clean, fully commented `pysole.json` configuration file in your current working directory).*
+
+* **Run the PySole Solver with a Configuration File:**
+  ```bash
+  pysole pysole.json
+  ```
+  *(Executes the full pipeline defined in `pysole.json` and exports predicted bedrock rasters and diagnostic plots).*
+
+* **Display CLI Help & Usage Options:**
+  ```bash
+  pysole --help
+  ```
 
 ---
 
+<a id="python-api-and-quick-start"></a>
 ## Python API & Quick Start
 
-Run the complete pipeline from a `pysole.json` file in a single line:
+`PySole` provides a dual-layer Python API: a **High-Level Solver Orchestrator** for streamlined pipeline execution, and **Decoupled Specialized Sub-Engines** for custom advanced research workflows.
+
+### 1. High-Level One-Liner Execution
+
+Run the complete pipeline from a `pysole.json` configuration file in a single line:
 
 ```python
 import pysole
@@ -321,44 +413,101 @@ import pysole
 bedrock_map = pysole.run_from_config("pysole.json")
 ```
 
-Or initialize the `Solver` instance specifying custom parameters:
+---
+
+### 2. High-Level `Solver` Orchestrator API
+
+Initialize the central `Solver` facade to steer the pipeline through processing milestones. When instantiated, `Solver` creates and manages underlying specialized sub-engine instances (`self.migrator`, `self.bss_optimizer`, `self.kriging_engine`, `self.finalizer`):
 
 ```python
 import pysole
 
-# 1. Initialize Solver
+# 1. Initialize High-Level Solver Orchestrator
 model = pysole.Solver(
     dem="surface_dem.asc",
     outline="creeping_body.shp",
     survey_data_type="one_way_travel_time",
-    kriging_method="universal",
+    pre_kriging_method="universal",
+    post_kriging_method="universal",
     perform_migration=True,
 )
 
-# 2. Migrate sparse GPR/Seismic travel times
+# Inspect underlying specialized sub-engine instances managed by Solver
+print(model.geometry)        # GridGeometry spatial container instance
+print(model.migrator)        # EikonalMigrator sub-engine instance
+print(model.bss_optimizer)   # BSSOptimizer sub-engine instance
+print(model.kriging_engine)  # KrigingEngine sub-engine instance
+print(model.finalizer)       # BedrockFinalizer sub-engine instance
+
+# 2. Migrate sparse GPR/Seismic travel times (delegates to model.migrator)
 bedrock_pts = model.migrate_eikonal(
     travel_times="sparse_survey.csv",
     velocity=0.16,
 )
 
-# 3. Iterative BSS variance optimization
+# 3. Iterative BSS variance optimization (delegates to model.bss_optimizer)
 model.optimize_bss(kc_max=10.0, kc_min=0.01, d_kc=0.1)
 
-# 4. Primary Kriging spatial interpolation
+# 4. Primary Kriging spatial interpolation (delegates to model.kriging_engine)
 kriged_bedrock, kriged_variance = model.interpolate_kriging(
     method="universal",
     plotit=True,
 )
 
-# 5. Finalize topography (applies DEM smoothing and margin blending)
+# 5. Finalize topography (delegates to model.finalizer for gap filling & margin blending)
 bedrock_map = model.finalize_topography(
     interactive=True,
     smooth_bedrock=True,
     smoothing_method="gaussian",
 )
 
-# 6. Export results
+# 6. Export predicted bedrock elevation raster
 bedrock_map.save("final_bedrock.tif")
+```
+
+---
+
+### 3. Decoupled Sub-Engines API (Standalone Custom Workflows)
+
+Advanced users and researchers can bypass the `Solver` orchestrator entirely and instantiate specialized sub-engines directly for modular, custom research scripts:
+
+```python
+import pysole
+from pysole import (
+    load_dem,
+    load_outline,
+    load_survey_points,
+    GridGeometry,
+    EikonalMigrator,
+    BSSOptimizer,
+    KrigingEngine,
+    BedrockFinalizer,
+)
+
+# 1. Load raster inputs and construct spatial GridGeometry container
+dem_grid, meta = load_dem("surface_dem.asc")
+outline_mask = load_outline("creeping_body.shp", dem_grid=dem_grid, meta=meta)
+geometry = GridGeometry.create(dem_grid.shape, dx=meta["dx"], dy=meta["dy"], bounds=meta["bounds"])
+survey_pts = load_survey_points("sparse_survey.csv", bounds=geometry.bounds, dem_grid=dem_grid)
+
+# 2. Standalone 3D Ray Migration Sub-Engine (pysole.migration.EikonalMigrator)
+migrator = EikonalMigrator(dem=dem_grid, geometry=geometry, outline_mask=outline_mask)
+# mig_res = migrator.migrate(travel_time_grid=tt_grid, survey_points=survey_pts, velocity=0.16)
+
+# 3. Standalone Basal Shear Stress Optimization Sub-Engine (pysole.variogram.BSSOptimizer)
+bss_optimizer = BSSOptimizer(dem=dem_grid, geometry=geometry)
+opt_res = bss_optimizer.optimize(survey_points=survey_pts, kc_max=10.0, kc_min=0.01, d_kc=0.1)
+print(f"Optimal Corner Frequency: {opt_res.optimal_kc:.4f} rad/m")
+
+# 4. Standalone Dual Kriging Vector Sub-Engine (pysole.interpolation.KrigingEngine)
+krig_engine = KrigingEngine(dem=dem_grid, geometry=geometry, outline_mask=outline_mask)
+krig_res = krig_engine.interpolate(sample_points=survey_pts, method="universal", variogram_model="spherical")
+# Returns typed KrigingResult dataclass containing krig_res.bedrock_grid and krig_res.variance_grid
+
+# 5. Standalone Bedrock Finalizer Sub-Engine (pysole.interpolation.BedrockFinalizer)
+finalizer = BedrockFinalizer(dem=dem_grid, geometry=geometry, outline_mask=outline_mask)
+rf_filled = finalizer.fill_holes(krig_res.bedrock_grid)
+blended_bedrock = finalizer.blend_margin(rf_filled, min_gap_dist=50.0)
 ```
 
 ---
@@ -386,7 +535,8 @@ If you use `PySole` for your publications, please cite the underlying methodolog
 ### APA
 * **Binder, D., Brückl, E., Roch, K.H., Behm, M., Schöner, W., & Hynek, B. (2009).** Determination of total ice volume and ice-thickness distribution of two glaciers in the Hohe Tauern region, Eastern Alps, from GPR data. *Annals of Glaciology*, 50(51), 71–79. [doi:10.3189/172756409789097522](https://doi.org/10.3189/172756409789097522)
 * **Binder, D. (2011).** *Bestimmung der Eismächtigkeitsverteilung dreier Gletscher der Hohen Tauern auf Basis von Ground Penetrating Radar (GPR) Daten* (Master's thesis, Vienna University of Technology, Vienna, Austria). Available from [ResearchGate](https://www.researchgate.net/publication/369660356_Bestimmung_der_Eismachtigkeitsverteilung_dreier_Gletscher_der_Hohen_Tauern_auf_Basis_von_Ground_Penetrating_Radar_GPR_Daten).
-
+* **Matheron, G. (1981).** Splines and kriging: Their formal equivalence. In D. F. Merriam (Ed.), Down-to-Earth statistics: Solutions looking for geological problems (Vol. 8, pp. 77–95). Syracuse University. (Syracuse University Geology Contribution No. 8).
+* **Webster, R., & Oliver, M. A. (2007).** Geostatistics for Environmental Scientists (2nd ed.). John Wiley & Sons. [doi:10.1002/9780470517277](https://onlinelibrary.wiley.com/doi/book/10.1002/9780470517277)
 
 ### BibTeX
 ```bibtex
@@ -401,6 +551,7 @@ If you use `PySole` for your publications, please cite the underlying methodolog
   publisher    = {Cambridge University Press},
   doi          = {10.3189/172756409789097522}
 }
+
 @mastersthesis{binder2011bestimmung,
   author       = {Binder, Daniel},
   title        = {Bestimmung der Eism{\"a}chtigkeitsverteilung dreier Gletscher der Hohen Tauern auf Basis von Ground Penetrating Radar (GPR) Daten},
@@ -408,5 +559,29 @@ If you use `PySole` for your publications, please cite the underlying methodolog
   year         = {2011},
   address      = {Vienna, Austria},
   url          = {https://www.researchgate.net/publication/369660356_Bestimmung_der_Eismachtigkeitsverteilung_dreier_Gletscher_der_Hohen_Tauern_auf_Basis_von_Ground_Penetrating_Radar_GPR_Daten}
+}
+
+@incollection{matheron1981splines,
+  author    = {Matheron, Georges},
+  title     = {Splines and Kriging: Their Formal Equivalence},
+  editor    = {Merriam, D. F.},
+  booktitle = {Down-to-Earth Statistics: Solutions Looking for Geological Problems},
+  series    = {Syracuse University Geology Contribution},
+  volume    = {8},
+  pages     = {77--95},
+  publisher = {Syracuse University},
+  address   = {Syracuse, New York},
+  year      = {1981}
+}
+
+@book{webster2007geostatistics,
+  title     = {Geostatistics for Environmental Scientists},
+  author    = {Webster, Richard and Oliver, Margaret A.},
+  edition   = {2nd},
+  year      = {2007},
+  publisher = {John Wiley \& Sons},
+  address   = {Chichester, UK},
+  isbn      = {978-0-470-84418-2},
+  doi       = {10.1002/9780470517277}
 }
 ```

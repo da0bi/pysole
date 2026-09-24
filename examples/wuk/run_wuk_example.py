@@ -2,6 +2,7 @@
 Wurtenkees Glacier Example: Running PySole Workflow from Configuration
 """
 
+import numpy as np
 import pysole
 
 def main():
@@ -13,7 +14,7 @@ def main():
 
     print("\nWurtenkees example completed successfully!")
     print(f"Final Bedrock Raster Saved: {bedrock_map.name}")
-    print(f"Bedrock Elevation Range: [{bedrock_map.grid.min():.2f} m, {bedrock_map.grid.max():.2f} m]")
+    print(f"Bedrock Elevation Range: [{np.nanmin(bedrock_map.grid):.2f} m, {np.nanmax(bedrock_map.grid):.2f} m]")
 
 
 if __name__ == "__main__":

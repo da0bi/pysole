@@ -19,6 +19,13 @@ class TestConfigWorkflowWuk(unittest.TestCase):
         self.assertEqual(solver.dem_grid.shape, (179, 213))
         self.assertEqual(solver.dx, 5.0)
         self.assertEqual(solver.dy, 5.0)
+        self.assertEqual(solver.n_cores, -1)
+        self.assertTrue(solver.built_in_kriging)
+
+        gok_config = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/gok/pysole_gok.json"))
+        solver_gok = pysole.Solver.from_config(gok_config)
+        self.assertEqual(solver_gok.n_cores, -1)
+        self.assertTrue(solver_gok.built_in_kriging)
 
         bedrock_map = pysole.run_from_config(wuk_config)
         self.assertIsInstance(bedrock_map, pysole.BedrockMap)

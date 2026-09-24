@@ -5,8 +5,8 @@ Unit tests for variogram calculation and BSS surface slope optimization using Wu
 import unittest
 import os
 import numpy as np
-from pysole.raster import load_dem, load_outline, ensure_spatial_coords
-from pysole.variogram import calculate_variogram, fit_variogram_model, optimize_bss_variance
+from pysole.raster import load_dem, load_outline, GridGeometry
+from pysole.variogram import calculate_variogram, fit_variogram_model, optimize_bss_variance, OptimizationResult
 
 
 class TestVariogramWuk(unittest.TestCase):
@@ -31,17 +31,13 @@ class TestVariogramWuk(unittest.TestCase):
     def test_optimize_bss_variance_wuk(self):
         dem, meta = load_dem(self.wuk_dem)
         outline_mask = load_outline(self.wuk_outline, dem, meta)
-        x_coords, y_coords, bounds = ensure_spatial_coords(dem.shape, dx=meta["dx"], dy=meta["dy"], bounds=meta["bounds"])
+        geometry = GridGeometry.create(dem.shape, dx=meta["dx"], dy=meta["dy"], bounds=meta["bounds"])
         survey = np.loadtxt(self.wuk_survey, delimiter=",", skiprows=1)
 
-        opt_kc, opt_slope, min_var, all_slopes = optimize_bss_variance(
+        opt_res = optimize_bss_variance(
             dem=dem,
             survey_points=survey,
-            dx=meta["dx"],
-            dy=meta["dy"],
-            x_coords=x_coords,
-            y_coords=y_coords,
-            bounds=bounds,
+            geometry=geometry,
             kc_max=10.0,
             kc_min=0.01,
             d_kc=0.1,
@@ -52,9 +48,39 @@ class TestVariogramWuk(unittest.TestCase):
             interactive=False,
         )
 
-        self.assertGreater(opt_kc, 0)
-        self.assertEqual(opt_slope.shape, dem.shape)
-        self.assertGreater(len(all_slopes), 0)
+        self.assertIsInstance(opt_res, OptimizationResult)
+        self.assertGreater(opt_res.optimal_kc, 0)
+        self.assertEqual(opt_res.optimal_slope_grid.shape, dem.shape)
+        self.assertGreater(len(opt_res.all_smoothed_slopes), 0)
+
+    def test_n_cores_parallelization_wuk(self):
+        dem, meta = load_dem(self.wuk_dem)
+        geometry = GridGeometry.create(dem.shape, dx=meta["dx"], dy=meta["dy"], bounds=meta["bounds"])
+        survey = np.loadtxt(self.wuk_survey, delimiter=",", skiprows=1)
+
+        res_single = optimize_bss_variance(
+            dem=dem, survey_points=survey, geometry=geometry, num_steps=3, n_cores=1
+        )
+        res_multi = optimize_bss_variance(
+            dem=dem, survey_points=survey, geometry=geometry, num_steps=3, n_cores=-1
+        )
+
+        self.assertAlmostEqual(res_single.optimal_kc, res_multi.optimal_kc, places=6)
+        np.testing.assert_allclose(res_single.optimal_slope_grid, res_multi.optimal_slope_grid)
+
+    def test_variogram_override_warning(self):
+        survey = np.loadtxt(self.wuk_survey, delimiter=",", skiprows=1)
+        coords = np.column_stack((survey[:, 0], survey[:, 1]))
+        # Small subset of 20 points -> N_pairs = 190 -> max_bins = 190//30 = 6 bins
+        sub_coords = coords[:20]
+        sub_vals = survey[:20, 3]
+
+        # Requesting nrbins=50 should log warning about violating 30 pairs/bin threshold but honor override
+        with self.assertLogs("pysole", level="WARNING") as cm:
+            var_res = calculate_variogram(sub_coords, sub_vals, nrbins=50)
+
+        self.assertTrue(any("violating recommended minimum threshold of 30 pairs/bin" in msg for msg in cm.output))
+        self.assertIn("distance", var_res)
 
 
 if __name__ == "__main__":

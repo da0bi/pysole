@@ -3,7 +3,11 @@
         "dem_path": "surface_dem.asc",
         "outline_path": "creeping_body.shp",
         "survey_data_path": "sparse_survey.csv",
-        "survey_data_type": "one_way_travel_time"
+        "survey_data_type": "one_way_travel_time",
+        "ice_density": 900.0,
+        "g": 9.81,
+        "n_cores": -1,
+        "log_level": "INFO"
     },
     "spatial_parameters": {
         "dx": null,
@@ -23,9 +27,10 @@
         "interactive_optimization": false
     },
     "kriging_parameters": {
+        "built_in_kriging": true,
         "pre_migration": {
             "method": "universal",
-            "drift_terms": ["quadratic"],
+            "drift_terms": ["sia_thickness"],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": false
         },

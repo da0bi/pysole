@@ -3,7 +3,11 @@
         "dem_path": "examples/gok/input_data/dgm_tin_sbk.tif",
         "outline_path": "examples/gok/input_data/gok_obu_rand_poly.csv",
         "survey_data_path": "examples/gok/input_data/Gok_EisdickePicks_2003_04.csv",
-        "survey_data_type": "one_way_travel_time"
+        "survey_data_type": "one_way_travel_time",
+        "ice_density": 900.0,
+        "g": 9.81,
+        "n_cores": -1,
+        "log_level": "INFO"
     },
     "spatial_parameters": {
         "dx": null,
@@ -19,13 +23,16 @@
         "kc_max": 10.0,
         "kc_min": 0.01,
         "d_kc": 0.1,
-        "num_steps": 20,
+        "num_steps": null,
+        "nrbins": 15.0,
+        "slope_floor_deg": 5.0,
         "interactive_optimization": false
     },
     "kriging_parameters": {
+        "built_in_kriging": true,
         "pre_migration": {
             "method": "universal",
-            "drift_terms": ["quadratic"],
+            "drift_terms": ["sia_thickness"],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": false
         },
@@ -49,6 +56,6 @@
     "outputs": {
         "output_path": "examples/gok/gok_final_bedrock.tif",
         "output_format": "tif",
-        "plots_dir": "examples/gok/"
+        "plots_dir": "examples/gok/figures"
     }
 }
