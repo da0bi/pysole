@@ -17,12 +17,12 @@
 [Technical & Methodological Notes](#technical-and-methodological-notes)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Input Formats](#supported-dem-input-formats)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop & Nunatak Input Files](#parsing-rock-outcrops)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[3. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[4. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[6. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[7. Multi-Format DEM Export](#multi-format-dem-export)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[8. Dynamic Variogram Lag Binning & Minimum Pair Threshold](#dynamic-variogram-binning)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[3. Dynamic Variogram Lag Binning & Minimum Pair Threshold](#dynamic-variogram-binning)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[4. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[6. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[7. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[8. Multi-Format DEM Export](#multi-format-dem-export)<br>
 [Package Architecture](#package-architecture)<br><br>
 [Command-Line Interface (CLI) Execution](#cli-execution)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
@@ -35,6 +35,7 @@
 ## Key Features
 
 * **JSON Configuration & Terminal CLI Driven:** All processing workflow options can be defined in a `pysole.json` file and executed via Python API or directly from the terminal using the `pysole` command line tool.
+* **Multi-Core Parallel Acceleration:** `PySole` supports multi-core CPU parallelization across computationally intensive processing steps—including FFT surface slope smoothing, native Kriging interpolation, and Random Forest machine learning gap filling.
 * **Automated High-Resolution Diagnostic Plots:** Automatically generates and optionally exports diagnostic figures for each key processing milestone.
 * **5 Supported Digital Elevation Model (DEM) Input and Output Formats:** Seamless loading and exporting of GeoTIFFs (`.tif`), ESRI ASCII Grids (`.asc`, `.txt`), CSV matrices (`.csv`), NumPy binary arrays (`.npy`), and in-memory NumPy 2D arrays (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
@@ -55,7 +56,6 @@
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration—introduced by Binder et al. (2009) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage.
 * **Kriging Interpolation & Boundary Condition:** Provides a numerically optimized and parallelized 2D Universal Kriging algorithm (default). Optionally, `PySole` supports 2D Universal Kriging, 2D Ordinary Kriging, and 2D Regression Kriging of the [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package. A custom Universal Kriging drift model based on the SIA is available (default). Zero traveltime (<i>T</i> = 0 s) and zero thickness (<i>D</i> = 0 m) along the perimeter boundary can optionally be enforced as boundary condition. Corresponding Kriging interpolation uncertainty fields are calculated.
 * **ML Hole Filling & Geomorphological Margin Blending:** Employs [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
-* **Multi-Core Parallel Acceleration:** `PySole` supports multi-core CPU parallelization across computationally intensive processing steps—including FFT surface slope smoothing, native Kriging interpolation, and Random Forest machine learning gap filling.
 * **Final DEMs Spatial Smoothing:** As a post-processing step, spatial smoothing options are available for the calculated DEMs.
 
 ---
@@ -261,8 +261,18 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 - **CRS Alignment**: The shapefile's Coordinate Reference System must match the DEM raster projection.
 - **Valid Geometries**: Rings must not intersect themselves (`PySole` automatically executes `validate_and_extract_polygons()` on load to auto-repair geometries or fall back to the outer boundary shell if holes fail criteria).
 
+<a id="dynamic-variogram-binning"></a>
+#### 3. Dynamic Variogram Lag Binning & Minimum Pair Threshold
+Experimental variogram lag distance bins are calculated strictly from the spatial pairwise distances ($d_{ij}$) between survey points, independently of DEM grid size. Users can specify a fixed number of lag bins via `"nrbins"` under `"optimization_parameters"` in `pysole.json`. When `"nrbins"` is set to `null` (default), `PySole` dynamically determines the optimal distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
+
+<p align="center">
+  <b>nrbins</b> = max(3, ⌊<i>N</i><sub>pairs</sub> / 30⌋)
+</p>
+
+Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with the Central Limit Theorem and established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice.
+
 <a id="dual-kriging-vector-engine"></a>
-#### 3. High-Performance Dual Kriging Vector Engine
+#### 4. High-Performance Dual Kriging Vector Engine
 `PySole` features a native, highly optimized geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike standard Kriging implementations (Primal Kriging) that solve node-specific linear systems point-by-point for every target grid node (requiring millions of repetitive matrix inversions across a high-resolution DEM), Dual Kriging solves the global linear system only once for the entire sample observation set:
 
 <p align="center">
@@ -285,7 +295,7 @@ where:
 To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a microscopic offset (10<sup>−8</sup>) to the main diagonal of <b>K</b>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
 
 <a id="shallow-ice-approximation-custom-drift"></a>
-#### 4. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
+#### 5. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
 `PySole` offers a physically-informed custom drift model based on the **Shallow Ice Approximation (SIA)**. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the **relative thickness distribution pattern** driven directly by the optimized DEM surface slope:
 
   <p align="center">
@@ -295,7 +305,7 @@ To guarantee numerical stability during matrix decomposition, diagonal Tikhonov 
 Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is used by default for the final interpolation of migrated depth data.
 
 <a id="depth-uncertainty-derivation"></a>
-#### 5. Depth Uncertainty Derivation in Meters
+#### 6. Depth Uncertainty Derivation in Meters
 Kriging interpolation provides uncertainty estimates by variance of the product field <i>σ</i><sub>P</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>]. The 2D depth estimation variance field <i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>] is obtained via linear error propagation:
 
 <p align="center">
@@ -311,7 +321,7 @@ Taking the square root converts the variance field into the **Kriging Standard E
 Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 68.3% confidence margin of error, while ± 1.96 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 95% confidence margin of error.
 
 <a id="dem-spatial-smoothing"></a>
-#### 6. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
+#### 7. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
 The depth field <i>D</i>(<i>x</i>,<i>y</i>) is obtained by dividing the Kriged product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) with the optimal smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). When post-processing DEM spatial smoothing is enabled (`smooth_bedrock: true`), `PySole` applies the spatial smoothing operator <i>S</i> **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)**:
 
 <p align="center" style="line-height: 1.8;">
@@ -322,21 +332,11 @@ The depth field <i>D</i>(<i>x</i>,<i>y</i>) is obtained by dividing the Kriged p
 Applying smoothing directly to <i>D</i>(<i>x</i>,<i>y</i>) prevents the high-frequency surface DEM roughness residual (<i>Z</i><sub>surface</sub> − <i>S</i>(<i>Z</i><sub>surface</sub>)) from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both <i>D</i>(<i>x</i>,<i>y</i>) and <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
 <a id="multi-format-dem-export"></a>
-#### 7. Multi-Format DEM Export
+#### 8. Multi-Format DEM Export
 Under `outputs` in `pysole.json`, users can specify via `output_format` which file format(s) to export calculated depth and bedrock DEMs:<br><br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "tif" (or "asc", "csv", "npy")`: Exports a single specified format.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`"output_format": "all"`: Exports all four formats simultaneously.
-
-<a id="dynamic-variogram-binning"></a>
-#### 8. Dynamic Variogram Lag Binning & Minimum Pair Threshold
-Experimental variogram lag distance bins are calculated strictly from the spatial pairwise distances ($d_{ij}$) between survey points, independently of DEM grid size. Users can specify a fixed number of lag bins via `"nrbins"` under `"optimization_parameters"` in `pysole.json`. When `"nrbins"` is set to `null` (default), `PySole` dynamically determines the optimal distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
-
-<p align="center">
-  <b>nrbins</b> = max(3, ⌊<i>N</i><sub>pairs</sub> / 30⌋)
-</p>
-
-Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with the Central Limit Theorem and established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice.
 
 ---
 
