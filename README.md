@@ -266,7 +266,7 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 Experimental variogram lag distance bins are calculated strictly from the spatial pairwise distances ($d_{ij}$) between survey points, independently of DEM grid size. Users can specify a fixed number of lag bins via `"nrbins"` under `"optimization_parameters"` in `pysole.json`. When `"nrbins"` is set to `null` (default), `PySole` dynamically determines the optimal distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
 
 <p align="center">
-  <b>nrbins</b> = max(3, ⌊<i>N</i><sub>pairs</sub> / 30⌋)
+  nrbins = max(3, ⌊<i>N</i><sub>pairs</sub> / 30⌋)
 </p>
 
 Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with the Central Limit Theorem and established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice.
@@ -276,23 +276,23 @@ Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns 
 `PySole` features a native, highly optimized geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike standard Kriging implementations (Primal Kriging) that solve node-specific linear systems point-by-point for every target grid node (requiring millions of repetitive matrix inversions across a high-resolution DEM), Dual Kriging solves the global linear system only once for the entire sample observation set:
 
 <p align="center">
-  <b>K</b> <b>w</b><sub>z</sub> = <b>z</b><sub>aug</sub>
+  <i>K</i> <i>w</i><sub>z</sub> = z<sub>aug</sub>
 </p>
 
-where <b>K</b> is the augmented sample-to-sample covariance/variogram matrix, <b>z</b><sub>aug</sub> = [<i>z</i><sub>1</sub>, ..., <i>z</i><sub><i>N</i></sub>, 0, ..., 0]<sup>T</sup> contains the known observation picks augmented with zero drift constraints, and <b>w</b><sub>z</sub> = [<b>w</b><sub>sample</sub><sup>T</sup>, <b>w</b><sub>drift</sub><sup>T</sup>]<sup>T</sup> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>, <i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>]<sup>T</sup> is the single global dual weight vector solved via <i>Lower-Upper</i> (LU) matrix decomposition. Once <b>w</b><sub>z</sub> is computed, spatial interpolation across all target grid nodes simplifies to a single <i>Basic Linear Algebra Subprograms</i> (BLAS)-accelerated 1D vector dot product:
+where <i>K</i> is the augmented sample-to-sample covariance/variogram matrix, <i>z</i><sub>aug</sub> = [<i>z</i><sub>1</sub>, ..., <i>z</i><sub><i>N</i></sub>, 0, ..., 0]<sup>T</sup> contains the known observation picks augmented with zero drift constraints, and <i>w</i><sub>z</sub> = [<i>w</i><sub>sample</sub><sup>T</sup>, <i>w</i><sub>drift</sub><sup>T</sup>]<sup>T</sup> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>, <i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>]<sup>T</sup> is the single global dual weight vector solved via <i>Lower-Upper</i> (LU) matrix decomposition. Once <i>w</i><sub>z</sub> is computed, spatial interpolation across all target grid nodes simplifies to a single <i>Basic Linear Algebra Subprograms</i> (BLAS)-accelerated 1D vector dot product:
 
 <p align="center">
-  <i>Z</i><sub>grid</sub> = <b>w</b><sub>sample</sub> · <b>Γ</b><sub>grid</sub> + <b>w</b><sub>drift</sub> · <b>F</b><sub>grid</sub>
+  <i>Z</i><sub>grid</sub> = <i>w</i><sub>sample</sub> · <i>Γ</i><sub>grid</sub> + <i>w</i><sub>drift</sub> · <i>F</i><sub>grid</sub>
 </p>
 
 where:
 - <i>Z</i><sub>grid</sub> is the predicted output value (e.g., bedrock elevation or ice depth) at target grid node (<i>x</i>, <i>y</i>).
-- <b>w</b><sub>sample</sub> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>] are the solved dual spatial weights for each of the <i>N</i> observation pick points.
-- <b>Γ</b><sub>grid</sub> = [&gamma;(<i>x</i><sub>1</sub>, <i>x</i><sub>grid</sub>), ..., &gamma;(<i>x</i><sub><i>N</i></sub>, <i>x</i><sub>grid</sub>)]<sup>T</sup> is the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each pick and target node (<i>x</i>, <i>y</i>).
-- <b>w</b><sub>drift</sub> = [<i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>] are the solved dual drift model coefficients.
-- <b>F</b><sub>grid</sub> is the drift function vector evaluated at target node (<i>x</i>, <i>y</i>) (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
+- <i>w</i><sub>sample</sub> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>] are the solved dual spatial weights for each of the <i>N</i> observation pick points.
+- <i>Γ</i><sub>grid</sub> = [&gamma;(<i>x</i><sub>1</sub>, <i>x</i><sub>grid</sub>), ..., &gamma;(<i>x</i><sub><i>N</i></sub>, <i>x</i><sub>grid</sub>)]<sup>T</sup> is the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each pick and target node (<i>x</i>, <i>y</i>).
+- <i>w</i><sub>drift</sub> = [<i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>] are the solved dual drift model coefficients.
+- <i>F</i><sub>grid</sub> is the drift function vector evaluated at target node (<i>x</i>, <i>y</i>) (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
 
-To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a microscopic offset (10<sup>−8</sup>) to the main diagonal of <b>K</b>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
+To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a microscopic offset (10<sup>−8</sup>) to the main diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
 
 <a id="shallow-ice-approximation-custom-drift"></a>
 #### 5. Shallow Ice Approximation Drift Model for Universal Kriging Interpolation
