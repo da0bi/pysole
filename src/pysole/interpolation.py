@@ -16,7 +16,7 @@ from scipy.linalg import lu_factor, lu_solve
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 from sklearn.ensemble import RandomForestRegressor
 from .raster import GridGeometry
-from .logging import logger
+from .logging import logger, get_progress_bar
 
 
 @dataclass
@@ -54,6 +54,7 @@ class KrigingEngine:
         include_zero_boundary_condition: bool = True,
         n_cores: int = -1,
         built_in_kriging: bool = True,
+        show_progress: bool = True,
     ) -> KrigingResult:
         """Executes Kriging interpolation using engine spatial geometry settings."""
         return kriging_interpolation(
@@ -68,6 +69,7 @@ class KrigingEngine:
             include_zero_boundary_condition=include_zero_boundary_condition,
             n_cores=n_cores,
             built_in_kriging=built_in_kriging,
+            show_progress=show_progress,
         )
 
 
@@ -87,7 +89,7 @@ class BedrockFinalizer:
         self.geometry = geometry
         self.outline_mask = outline_mask
 
-    def fill_holes(self, bedrock_grid: np.ndarray, n_cores: int = -1) -> np.ndarray:
+    def fill_holes(self, bedrock_grid: np.ndarray, n_cores: int = -1, show_progress: bool = True) -> np.ndarray:
         """Trains Random Forest ML model to fill bedrock holes inside creeping body."""
         return random_forest_hole_filling(
             dem=self.dem,
@@ -95,6 +97,7 @@ class BedrockFinalizer:
             boundary_mask=self.outline_mask,
             geometry=self.geometry,
             n_cores=n_cores,
+            show_progress=show_progress,
         )
 
     def blend_margin(
@@ -210,6 +213,7 @@ def built_in_kriging_interpolation(
     variogram_model: str = "spherical",
     external_drift_grid: Optional[np.ndarray] = None,
     n_cores: int = -1,
+    show_progress: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Robust native NumPy/SciPy Ordinary & Universal Kriging solver with zero-centered
@@ -379,15 +383,29 @@ def built_in_kriging_interpolation(
 
     if len(chunks) > 1 and effective_n_cores > 1:
         with ThreadPoolExecutor(max_workers=effective_n_cores) as executor:
-            chunk_results = list(executor.map(_process_chunk, chunks))
-        for start_idx, end_idx, z_sub, var_sub in chunk_results:
-            z_interp_flat[start_idx:end_idx] = z_sub
-            var_interp_flat[start_idx:end_idx] = var_sub
+            chunk_results = list(
+                get_progress_bar(
+                    executor.map(_process_chunk, chunks),
+                    total=len(chunks),
+                    desc="   [Dual Kriging Engine] Interpolating DEM grid",
+                    unit="chunks",
+                    disable=not show_progress,
+                )
+            )
     else:
-        for chunk_tuple in chunks:
-            start_idx, end_idx, z_sub, var_sub = _process_chunk(chunk_tuple)
-            z_interp_flat[start_idx:end_idx] = z_sub
-            var_interp_flat[start_idx:end_idx] = var_sub
+        chunk_results = [
+            _process_chunk(chunk_tuple)
+            for chunk_tuple in get_progress_bar(
+                chunks,
+                desc="   [Dual Kriging Engine] Interpolating DEM grid",
+                unit="chunks",
+                disable=not show_progress,
+            )
+        ]
+
+    for start_idx, end_idx, z_sub, var_sub in chunk_results:
+        z_interp_flat[start_idx:end_idx] = z_sub
+        var_interp_flat[start_idx:end_idx] = var_sub
 
     z_interp = z_interp_flat.reshape((M, N))
     var_interp = var_interp_flat.reshape((M, N))
@@ -408,6 +426,7 @@ def kriging_interpolation(
     n_cores: int = -1,
     built_in_kriging: bool = True,
     slope_floor_deg: float = 5.0,
+    show_progress: bool = True,
 ) -> KrigingResult:
     """
     Applies Kriging spatial interpolation on scattered points supporting four distinct approaches:
@@ -478,6 +497,7 @@ def kriging_interpolation(
         variogram_model=variogram_model,
         external_drift_grid=external_sia_grid,
         n_cores=n_cores,
+        show_progress=show_progress,
     )
     return KrigingResult(bedrock_grid=z_b, variance_grid=v_b)
 
@@ -488,6 +508,7 @@ def random_forest_hole_filling(
     boundary_mask: np.ndarray,
     geometry: GridGeometry,
     n_cores: int = -1,
+    show_progress: bool = True,
 ) -> np.ndarray:
     """
     Random Forest Machine Learning model for intelligent bedrock hole filling.
@@ -506,6 +527,8 @@ def random_forest_hole_filling(
         Standardized spatial geometry container for raster grids.
     n_cores : int
         Number of CPU cores for parallelized tree fitting (-1 for all available cores).
+    show_progress : bool
+        If True (default), displays progress bar during tree fitting and gap prediction.
 
     Returns
     -------
@@ -531,21 +554,31 @@ def random_forest_hole_filling(
         return bedrock_grid.copy()
 
     effective_n_cores = (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
-    rf = RandomForestRegressor(n_estimators=100, max_depth=15, random_state=42, n_jobs=effective_n_cores)
-    rf.fit(features[valid_train], target[valid_train])
 
-    logger.info("   [RF Gap Filling] Finished learning Random Forest regression model")
+    with get_progress_bar(
+        total=100,
+        desc="   [RF Gap Filling] Training estimator & predicting gaps",
+        unit="trees",
+        disable=not show_progress,
+    ) as pbar:
+        rf = RandomForestRegressor(n_estimators=100, max_depth=15, random_state=42, n_jobs=effective_n_cores)
+        rf.fit(features[valid_train], target[valid_train])
+        pbar.update(50)
 
-    # [VECTORIZATION OPTION 3]: Mask-scoped feature extraction & prediction for ML gap filling.
-    # Avoids evaluating RF regression predictions across all M*N grid pixels; predicts strictly
-    # on pixels inside target missing data holes (holes_flat), saving 80%-90% RAM and CPU overhead.
-    holes_flat = mask_flat & ((dem.ravel() - target) <= 0.1)
-    filled_bedrock = bedrock_grid.copy()
+        logger.info("   [RF Gap Filling] Finished learning Random Forest regression model")
 
-    if np.any(holes_flat):
-        hole_features = features[holes_flat]
-        hole_predictions = rf.predict(hole_features)
-        filled_bedrock.ravel()[holes_flat] = hole_predictions
+        # [VECTORIZATION OPTION 3]: Mask-scoped feature extraction & prediction for ML gap filling.
+        # Avoids evaluating RF regression predictions across all M*N grid pixels; predicts strictly
+        # on pixels inside target missing data holes (holes_flat), saving 80%-90% RAM and CPU overhead.
+        holes_flat = mask_flat & ((dem.ravel() - target) <= 0.1)
+        filled_bedrock = bedrock_grid.copy()
+
+        if np.any(holes_flat):
+            hole_features = features[holes_flat]
+            hole_predictions = rf.predict(hole_features)
+            filled_bedrock.ravel()[holes_flat] = hole_predictions
+
+        pbar.update(50)
 
     filled_bedrock = np.minimum(filled_bedrock, dem)
     return filled_bedrock

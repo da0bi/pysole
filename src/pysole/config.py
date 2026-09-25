@@ -18,6 +18,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "g": 9.81,
         "n_cores": -1,
         "log_level": "INFO",
+        "show_progress": True,
     },
     "spatial_parameters": {
         "dx": None,

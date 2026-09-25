@@ -11,6 +11,7 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from .smoothing import compute_gradients
 from .raster import GridGeometry
+from .logging import get_progress_bar
 
 
 @dataclass
@@ -52,6 +53,7 @@ class EikonalMigrator:
         velocity: float = 0.16,
         plots_dir: Optional[str] = None,
         interactive: bool = False,
+        show_progress: bool = True,
     ) -> MigrationResult:
         """Executes 3D Eikonal ray migration using engine instance settings."""
         return migrate_eikonal_points(
@@ -64,6 +66,7 @@ class EikonalMigrator:
             plots_dir=plots_dir,
             interactive=interactive,
             dem_grads=self.dem_grads,
+            show_progress=show_progress,
         )
 
 
@@ -77,6 +80,7 @@ def migrate_eikonal_points(
     plots_dir: Optional[str] = None,
     interactive: bool = False,
     dem_grads: Optional[Dict[str, np.ndarray]] = None,
+    show_progress: bool = True,
 ) -> MigrationResult:
     """
     Migrates zero-offset GPR/seismic survey points into 3D space using the 3D Eikonal Ray Migration algorithm.
@@ -167,11 +171,19 @@ def migrate_eikonal_points(
     # 5. Vectorized multi-channel interpolation of 3D ray displacement vectors at scattered survey locations
     # [VECTORIZATION OPTION 5]: Zero-copy coordinate indexing via 2D slice selection survey_points[:, [1, 0]] (Y, X)
     # Avoids intermediate array memory allocations and tuple copying prior to spatial interpolator evaluation.
-    pts_xy = np.column_stack((survey_points[:, 1], survey_points[:, 0]))  # (Y, X)
+    with get_progress_bar(
+        total=len(survey_points),
+        desc="   [3D Ray Migration] Relocating survey picks",
+        unit="picks",
+        disable=not show_progress,
+    ) as pbar:
+        pts_xy = np.column_stack((survey_points[:, 1], survey_points[:, 0]))  # (Y, X)
 
-    displacement_stack = np.stack([dx_grid, dy_grid, dz_grid], axis=-1)
-    interp_vectors = geometry.create_interpolator(displacement_stack, fill_value=0.0)
-    interpolated_disp = interp_vectors(pts_xy)
+        displacement_stack = np.stack([dx_grid, dy_grid, dz_grid], axis=-1)
+        interp_vectors = geometry.create_interpolator(displacement_stack, fill_value=0.0)
+        interpolated_disp = interp_vectors(pts_xy)
+
+        pbar.update(len(survey_points))
 
     dxi = np.nan_to_num(interpolated_disp[:, 0], nan=0.0)
     dyi = np.nan_to_num(interpolated_disp[:, 1], nan=0.0)

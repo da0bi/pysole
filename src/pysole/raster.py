@@ -399,7 +399,7 @@ def load_dem(
             import rasterio
 
             with rasterio.open(dem_input) as src:
-                grid = np.array(src.read(1), dtype=np.float64, copy=True)
+                grid = src.read(1).astype(np.float64)
                 if src.nodata is not None:
                     grid[grid == src.nodata] = np.nan
                 transform = src.transform

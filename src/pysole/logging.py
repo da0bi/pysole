@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 from typing import Optional, Union
+from tqdm import tqdm
 
 # Global PySole logger
 logger = logging.getLogger("pysole")
@@ -72,3 +73,44 @@ def setup_logging(
             logger.warning(f"Could not initialize log file '{log_file}': {e}")
 
     return logger
+
+
+def get_progress_bar(
+    iterable=None,
+    total: Optional[int] = None,
+    desc: str = "",
+    unit: str = "it",
+    disable: bool = False,
+):
+    """Creates a styled tqdm progress bar adhering to PySole's Modern Unicode Block design system.
+
+    Parameters
+    ----------
+    iterable : iterable, optional
+        Iterable to wrap with progress bar.
+    total : int, optional
+        Total number of iterations.
+    desc : str
+        Description tag shown in front of the progress bar.
+    unit : str
+        Unit label for iterations (e.g. 'kc', 'picks', 'chunks', 'bins', 'pixels').
+    disable : bool
+        If True, disables the progress bar animation entirely.
+
+    Returns
+    -------
+    tqdm
+        Styled tqdm instance.
+    """
+    bar_format = "{desc} {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} {unit} [{elapsed}<{remaining}, {rate_fmt}]"
+    return tqdm(
+        iterable=iterable,
+        total=total,
+        desc=desc,
+        unit=unit,
+        ascii=" ▕█░▏",
+        bar_format=bar_format,
+        disable=disable,
+        leave=True,
+    )
+

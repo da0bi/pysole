@@ -46,6 +46,7 @@ class Solver:
         g: float = 9.81,
         base_dir: Optional[str] = None,
         survey_data_path: Optional[str] = None,
+        show_progress: bool = True,
     ):
         """
         Parameters
@@ -89,6 +90,8 @@ class Solver:
             General workspace directory for all output files. If None, defaults to parent directory of survey_data_path.
         survey_data_path : str, optional
             Path to survey data file (used for base_dir resolution fallback if base_dir is None).
+        show_progress : bool
+            If True (default), displays terminal progress bars during heavy processing steps.
         """
         self.dem_grid, self.meta = load_dem(dem, dx=dx, dy=dy, bounds=bounds)
         self.outline_mask = load_outline(outline, self.dem_grid, self.meta)
@@ -126,6 +129,7 @@ class Solver:
         self.nrbins = int(nrbins) if nrbins is not None else None
         self.ice_density = float(ice_density)
         self.g = float(g)
+        self.show_progress = bool(show_progress)
 
         # Gradient and Smoothed Slope Caches
         self._gradient_cache: Optional[Dict[str, np.ndarray]] = None
@@ -238,6 +242,8 @@ class Solver:
         ice_density = inputs.get("ice_density", 900.0)
         g_val = inputs.get("g", 9.81)
 
+        show_progress_val = inputs.get("show_progress", True)
+
         solver = cls(
             dem=inputs.get("dem_path"),
             outline=inputs.get("outline_path"),
@@ -262,6 +268,7 @@ class Solver:
             g=g_val,
             base_dir=inputs.get("base_dir"),
             survey_data_path=inputs.get("survey_data_path"),
+            show_progress=show_progress_val,
         )
         solver.config = cfg
         solver.config_path = str(config_path)
@@ -348,6 +355,7 @@ class Solver:
             include_zero_boundary_condition=self.pre_zero_boundary,
             n_cores=self.n_cores,
             built_in_kriging=self.built_in_kriging,
+            show_progress=self.show_progress,
         )
         prod_grid1 = krig1_res.bedrock_grid
 
@@ -369,6 +377,7 @@ class Solver:
             plots_dir=self.plots_dir,
             interactive=interactive,
             dem_grads=cached_dem_grads,
+            show_progress=self.show_progress,
         )
         self.migrated_points = mig_res.migrated_points
 
@@ -391,6 +400,7 @@ class Solver:
                                 plots_dir=self.plots_dir,
                                 interactive=interactive,
                                 dem_grads=cached_dem_grads,
+                                show_progress=self.show_progress,
                             )
                             self.migrated_points = mig_res2.migrated_points
                     else:
@@ -449,6 +459,7 @@ class Solver:
             interactive=interactive,
             n_cores=self.n_cores,
             nrbins=nrbins,
+            show_progress=self.show_progress,
         )
 
         self.opt_kc = opt_res.optimal_kc
@@ -501,6 +512,7 @@ class Solver:
             include_zero_boundary_condition=self.post_zero_boundary,
             n_cores=self.n_cores,
             built_in_kriging=self.built_in_kriging,
+            show_progress=self.show_progress,
         )
         prod_grid = krig_res.bedrock_grid
         prod_var = krig_res.variance_grid
@@ -545,7 +557,7 @@ class Solver:
         if self.kriged_bedrock is None:
             self.interpolate_kriging()
 
-        self.rf_filled_bedrock = self.finalizer.fill_holes(self.kriged_bedrock, n_cores=self.n_cores)
+        self.rf_filled_bedrock = self.finalizer.fill_holes(self.kriged_bedrock, n_cores=self.n_cores, show_progress=self.show_progress)
         return self.rf_filled_bedrock
 
     def apply_geomorph_smoothing(self, min_gap_dist: Optional[float] = None) -> np.ndarray:

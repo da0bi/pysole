@@ -8,7 +8,8 @@
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,
-        "log_level": "INFO"
+        "log_level": "INFO",
+        "show_progress": true
     },
     "spatial_parameters": {
         "dx": null,

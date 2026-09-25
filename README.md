@@ -131,7 +131,8 @@ All execution options can be fully defined in a single `pysole.json` configurati
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,
-        "log_level": "INFO"
+        "log_level": "INFO",
+        "show_progress": true
     },
     "spatial_parameters": {
         "dx": 5.0,
@@ -200,16 +201,17 @@ All execution options can be fully defined in a single `pysole.json` configurati
 | | `g` | `float` | `9.81` | Gravitational acceleration constant in m/s² (`9.81` m/s²). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
 | | `log_level` | `str` | `"INFO"` | Package logging level verbosity: `"INFO"` (default), `"DEBUG"`, `"WARNING"`, `"ERROR"`, or `"CRITICAL"`. Appends timestamped logs to `pysole.log`. |
+| | `show_progress` | `bool` | `true` | If `true` (default), displays terminal progress bars during heavy processing steps. |
 | **`spatial_parameters`** | `dx` | `float` | `null` | Target grid resolution along X in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `dy` | `float` | `null` | Target grid resolution along Y in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `bounds` | `list[float]` | `null` | Spatial bounding box `[minx, miny, maxx, maxy]`. If `null`, extracted directly from DEM raster metadata. |
 | **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal traveltimes. If `false`, migration is skipped. |
-| | `velocity` | `float` | `0.16` | Signal propagation velocity (e.g. `0.16` m/ns for GPR radar wave propagation in temperate ice). |
+| | `velocity` | `float` | `0.16` | Signal propagation velocity (e.g. `0.16` m/ns for radar wave propagation in temperate ice). |
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual displacement vector plots. |
 | **`optimization_parameters`** | `kc_max` | `float` | `10.0` | Maximum corner frequency for FFT Gaussian low-pass smoothing. |
 | | `kc_min` | `float` | `0.01` | Minimum corner frequency for FFT Gaussian low-pass smoothing. |
 | | `d_kc` | `float` | `0.1` | Corner frequency stepwidth for evaluating basal shear stress spatial variance Var<sub><i>xy</i></sub>(<i>τ</i><sub>b</sub>). |
-| | `nrbins` | `int` | `null` | Number of variogram lag distance bins. If `null`, dynamically calculated to guarantee at least 30 point pairs per bin. |
+| | `nrbins` | `int` | `null` | Number of variogram lag distance bins. If `null` (default), dynamically calculated as `max(3, N_pairs // 30)` (~30 point pairs/bin, floor of 3 bins). |
 | | `slope_floor_deg` | `float` | `5.0` | Minimum surface slope angle threshold in degrees [°] enforced during surface slope optimization to prevent numerical division singularities. |
 | | `interactive_optimization` | `bool` | `false` | If `true`, enables interactive CLI prompt to inspect BSS variance curve and adjust corner frequency spectrum parameters (`kc_min`, `kc_max`, `d_kc`), lag distance bin count (`nrbins`), and correlation range (<i>a</i><sub>range</sub>). |
 | **`kriging_parameters`** | `built_in_kriging` | `bool` | `true` | If `true` (default), uses native numerically optimized and parallelized Dual Kriging engine (supporting Ordinary and Universal Kriging). If `false`, Kriging implementations from the PyKrige package are applied. |
@@ -266,7 +268,7 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances across a total of <i>N</i> survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole initially determines a minimum distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
 
 <p align="center">
-  <i>nrbins</i> = <i>max( 3, N<sub>pairs</sub> / 30 )</i>
+  <i>nrbins</i> = max( 3, <i>N</i><sub>pairs</sub> / 30 )
 </p>
 
 Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields, however, fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice. An absolute lower floor of 3 lag distance bins is enforced across all calculations.

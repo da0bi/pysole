@@ -20,7 +20,7 @@ from .smoothing import (
     fft_gaussian_smooth_precomputed,
 )
 from .raster import GridGeometry
-from .logging import logger
+from .logging import logger, get_progress_bar
 
 
 @dataclass
@@ -60,6 +60,7 @@ class BSSOptimizer:
         interactive: bool = False,
         n_cores: int = -1,
         nrbins: Optional[int] = None,
+        show_progress: bool = True,
     ) -> OptimizationResult:
         """Executes BSS slope filter optimization across corner frequency spectrum."""
         return optimize_bss_variance(
@@ -75,7 +76,9 @@ class BSSOptimizer:
             interactive=interactive,
             n_cores=n_cores,
             nrbins=nrbins,
+            show_progress=show_progress,
         )
+
 
 
 def calculate_variogram(
@@ -99,8 +102,8 @@ def calculate_variogram(
     maxdist : float, optional
         Maximum lag distance. Defaults to half the maximum pairwise distance.
     nrbins : int, optional
-        Number of distance lag bins. If None, dynamically calculated to guarantee
-        at least 30 point pairs per bin (nrbins = max(3, N_pairs // 30)).
+        Number of distance lag bins. If None, dynamically calculated as
+        max(3, N_pairs // 30) (~30 point pairs per bin, floor of 3 bins).
     precomputed_dists : np.ndarray, optional
         Pre-calculated pdist(coords) array to avoid redundant distance calculations.
     warn_low_pairs : bool, optional
@@ -177,6 +180,7 @@ def fit_variogram_model(
     distances: np.ndarray,
     semivars: np.ndarray,
     model_type: str = "spherical",
+    show_progress: bool = False,
 ) -> Tuple[float, float, float, Dict[str, np.ndarray]]:
     """
     Fits a theoretical variogram model (Spherical) to experimental variogram data.
@@ -193,30 +197,38 @@ def fit_variogram_model(
     model_curve : dict
         Dict with 'h' and 'gamma' fine curve points for plotting.
     """
-    if len(distances) < 3 or len(semivars) < 3:
-        a_default = float(np.max(distances)) if len(distances) > 0 else 1000.0
-        sill_default = float(np.var(semivars)) if len(semivars) > 0 else 1.0
-        h_fine = np.linspace(0, a_default * 1.5, 100)
-        return a_default, sill_default, 0.0, {"h": h_fine, "gamma": np.full_like(h_fine, sill_default)}
+    with get_progress_bar(
+        total=max(1, len(distances)),
+        desc="   [Variogram Fitting] Fitting model curve",
+        unit="bins",
+        disable=not show_progress,
+    ) as pbar:
+        if len(distances) < 3 or len(semivars) < 3:
+            a_default = float(np.max(distances)) if len(distances) > 0 else 1000.0
+            sill_default = float(np.var(semivars)) if len(semivars) > 0 else 1.0
+            h_fine = np.linspace(0, a_default * 1.5, 100)
+            pbar.update(max(1, len(distances)))
+            return a_default, sill_default, 0.0, {"h": h_fine, "gamma": np.full_like(h_fine, sill_default)}
 
-    max_dist = float(np.max(distances))
-    var_val = float(np.var(semivars)) if np.var(semivars) > 0 else float(np.mean(semivars))
-    p0 = [max_dist * 0.5, var_val * 0.8, 0.0]
-    bounds = ([1e-3, 1e-6, 0.0], [max_dist * 3.0, var_val * 10.0, var_val * 2.0])
+        max_dist = float(np.max(distances))
+        var_val = float(np.var(semivars)) if np.var(semivars) > 0 else float(np.mean(semivars))
+        p0 = [max_dist * 0.5, var_val * 0.8, 0.0]
+        bounds = ([1e-3, 1e-6, 0.0], [max_dist * 3.0, var_val * 10.0, var_val * 2.0])
 
-    try:
-        popt, _ = curve_fit(spherical_variogram, distances, semivars, p0=p0, bounds=bounds, maxfev=2000)
-        a_range, sill, nugget = float(popt[0]), float(popt[1]), float(popt[2])
-    except Exception:
-        a_range = max_dist * 0.5
-        sill = var_val
-        nugget = 0.0
+        try:
+            popt, _ = curve_fit(spherical_variogram, distances, semivars, p0=p0, bounds=bounds, maxfev=2000)
+            a_range, sill, nugget = float(popt[0]), float(popt[1]), float(popt[2])
+        except Exception:
+            a_range = max_dist * 0.5
+            sill = var_val
+            nugget = 0.0
 
-    h_fine = np.linspace(0, max_dist * 1.2, 150)
-    gamma_fine = spherical_variogram(h_fine, a_range, sill, nugget)
-    model_curve = {"h": h_fine, "gamma": gamma_fine}
+        h_fine = np.linspace(0, max_dist * 1.2, 150)
+        gamma_fine = spherical_variogram(h_fine, a_range, sill, nugget)
+        model_curve = {"h": h_fine, "gamma": gamma_fine}
 
-    return a_range, sill, nugget, model_curve
+        pbar.update(len(distances))
+        return a_range, sill, nugget, model_curve
 
 
 def optimize_bss_variance(
@@ -232,6 +244,7 @@ def optimize_bss_variance(
     interactive: bool = False,
     n_cores: int = -1,
     nrbins: Optional[int] = None,
+    show_progress: bool = True,
 ) -> OptimizationResult:
     """
     Iterative optimization process to determine optimum DEM surface slope smoothing degree kc.
@@ -438,7 +451,16 @@ def optimize_bss_variance(
 
         # Step 2: Parallel execution across all kc_values using ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=effective_n_cores) as executor:
-            kc_eval_results = list(executor.map(_eval_single_kc, valid_kc_list))
+            kc_eval_results = list(
+                get_progress_bar(
+                    executor.map(_eval_single_kc, valid_kc_list),
+                    total=len(valid_kc_list),
+                    desc="   [BSS Optimization] Searching k_c spectrum",
+                    unit="kc",
+                    disable=not show_progress,
+                )
+            )
+
 
         for res in kc_eval_results:
             if res is None:
