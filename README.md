@@ -269,7 +269,7 @@ Experimental variogram lag distance bins are calculated from the pairwise Euclid
   <i>nrbins</i> = <i>max(3, N<sub>pairs</sub> / 30)</i>
 </p>
 
-Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice.
+Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields, however, fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice. An absolute lower floor of 3 lag distance bins is enforced across all calculations.
 
 <a id="dual-kriging-vector-engine"></a>
 #### 4. High-Performance Dual Kriging Vector Engine
