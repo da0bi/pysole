@@ -17,7 +17,7 @@
 [Technical & Methodological Notes](#technical-and-methodological-notes)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Input Formats](#supported-dem-input-formats)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop & Nunatak Input Files](#parsing-rock-outcrops)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[3. Dynamic Variogram Binning with Minimum Pair Threshold](#dynamic-variogram-binning)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[3. Variogram Binning with Minimum Pair Threshold](#variogram-binning)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[5. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
@@ -261,9 +261,9 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 - **CRS Alignment**: The shapefile's Coordinate Reference System must match the DEM raster projection.
 - **Valid Geometries**: Rings must not intersect themselves (`PySole` automatically executes `validate_and_extract_polygons()` on load to auto-repair geometries or fall back to the outer boundary shell if holes fail criteria).
 
-<a id="dynamic-variogram-binning"></a>
-#### 3. Dynamic Variogram Binning with Minimum Pair Threshold
-Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances across a total of <i>N</i> survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole dynamically determines a minimum distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
+<a id="variogram-binning"></a>
+#### 3. Variogram Binning with Minimum Pair Threshold
+Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances across a total of <i>N</i> survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole initially determines a minimum distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
 
 <p align="center">
   <i>nrbins</i> = <i>max( 3, N<sub>pairs</sub> / 30 )</i>
