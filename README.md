@@ -36,7 +36,7 @@
 
 * **JSON Configuration & Terminal CLI Driven:** All processing workflow options can be defined in a `pysole.json` file and executed via Python API or directly from the terminal using the `pysole` command line tool.
 * **Multi-Core Parallel Acceleration:** `PySole` supports multi-core CPU parallelization across computationally intensive processing steps.
-* **Automated High-Resolution Diagnostic Plots:** Automatically generates and optionally exports diagnostic figures for each key processing milestone.
+* **Automated High-Resolution Diagnostic Plots:** Automatically generates and exports diagnostic figures for each key processing milestone.
 * **5 Supported Digital Elevation Model (DEM) Input and Output Formats:** Seamless loading and exporting of GeoTIFFs (`.tif`), ESRI ASCII Grids (`.asc`, `.txt`), CSV matrices (`.csv`), NumPy binary arrays (`.npy`), and in-memory NumPy 2D arrays (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
 * **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes. When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
@@ -203,7 +203,7 @@ All execution options can be fully defined in a single `pysole.json` configurati
 | **`spatial_parameters`** | `dx` | `float` | `null` | Target grid resolution along X in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `dy` | `float` | `null` | Target grid resolution along Y in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `bounds` | `list[float]` | `null` | Spatial bounding box `[minx, miny, maxx, maxy]`. If `null`, extracted directly from DEM raster metadata. |
-| **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal travel times. If `false`, migration is skipped. |
+| **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal traveltimes. If `false`, migration is skipped. |
 | | `velocity` | `float` | `0.16` | Signal propagation velocity (e.g. `0.16` m/ns for GPR radar wave propagation in temperate ice). |
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual displacement vector plots. |
 | **`optimization_parameters`** | `kc_max` | `float` | `10.0` | Maximum corner frequency for FFT Gaussian low-pass smoothing. |
@@ -439,7 +439,7 @@ print(model.bss_optimizer)   # BSSOptimizer sub-engine instance
 print(model.kriging_engine)  # KrigingEngine sub-engine instance
 print(model.finalizer)       # BedrockFinalizer sub-engine instance
 
-# 2. Migrate sparse GPR/Seismic travel times (delegates to model.migrator)
+# 2. Migrate sparse GPR/Seismic traveltimes (delegates to model.migrator)
 bedrock_pts = model.migrate_eikonal(
     travel_times="sparse_survey.csv",
     velocity=0.16,
