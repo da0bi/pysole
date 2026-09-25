@@ -263,7 +263,7 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 
 <a id="dynamic-variogram-binning"></a>
 #### 3. Dynamic Variogram Binning with Minimum Pair Threshold
-Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances between all <i>N</i> survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole dynamically determines the minimum distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
+Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances across a total of <i>N</i> survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole dynamically determines the minimum distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
 
 <p align="center">
   <i>nrbins</i> = <i>max(3, N<sub>pairs</sub> / 30)</i>
