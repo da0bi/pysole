@@ -201,7 +201,7 @@ All execution options can be fully defined in a single `pysole.json` configurati
 | | `g` | `float` | `9.81` | Gravitational acceleration constant in m/s² (`9.81` m/s²). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
 | | `log_level` | `str` | `"INFO"` | Package logging level verbosity: `"INFO"` (default), `"DEBUG"`, `"WARNING"`, `"ERROR"`, or `"CRITICAL"`. Appends timestamped logs to `pysole.log`. |
-| | `show_progress` | `bool` | `true` | If `true` (default), displays terminal progress bars during heavy processing steps. |
+| | `show_progress` | `bool` | `true` | If `true` (default), displays terminal progress bars during heavy processing steps. Set to `false` if running `PySole` in batch processing scripts. |
 | **`spatial_parameters`** | `dx` | `float` | `null` | Target grid resolution along X in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `dy` | `float` | `null` | Target grid resolution along Y in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `bounds` | `list[float]` | `null` | Spatial bounding box `[minx, miny, maxx, maxy]`. If `null`, extracted directly from DEM raster metadata. |
