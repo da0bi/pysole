@@ -81,7 +81,7 @@ Applies the optimization criterion to determine the optimal surface slope smooth
     <font><i>T</i>(<i>x</i>,<i>y</i>) = <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))</font>
   </p>
 
-A minimum smoothed surface slope threshold (`slope_floor_deg`) is enforced to prevent numerical instabilities and unphysical singularities in low-gradient regions (default value is 5°).
+A minimum smoothed surface slope threshold (`slope_floor_deg`) is enforced to prevent numerical instabilities and unphysical singularities in low-gradient regions (default value is <i>5°</i>).
 
 #### 3. 3D Ray-Based Migration
 The migration algorithm solves the Eikonal equation to relocate subsurface reflection points, particuarly improving the imaging of steep slopes and overdeepenings. An interactive mode allows users to test different signal propagation velocities and evaluate them through visualizations of migrated depths and the corresponding horizontal survey point displacements induced by the migration process.
