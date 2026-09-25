@@ -193,7 +193,7 @@ All execution options can be fully defined in a single `pysole.json` configurati
 | :--- | :--- | :--- | :--- | :--- |
 | **`inputs`** | `dem_path` | `str` | `null` | **(Required)** File path to the surface Digital Elevation Model (`.asc`, `.tif`, `.csv`, `.npy`). |
 | | `outline_path` | `str` | `null` | File path to creeping body / glacier boundary polygon (`.shp`, `.geojson`, `.gpkg`, `.csv`). If `null`, domain is derived from non-NaN DEM pixels. |
-| | `survey_data_path` | `str` | `null` | **(Required)** File path to signal travel time or thickness observations CSV `[X, Y, value]`. |
+| | `survey_data_path` | `str` | `null` | **(Required)** File path to signal traveltime or thickness observations CSV `[X, Y, value]`. |
 | | `base_dir` | `str` | `null` | General workspace directory for all output files. If `null` (default), automatically falls back to the parent directory of `survey_data_path`. All relative output paths are resolved relative to `base_dir`. Absolute output paths override `base_dir`. |
 | | `survey_data_type` | `str` | `"one_way_travel_time"` | Observation data type: `"one_way_travel_time"`, `"two_way_travel_time"`, or `"thickness"` / `"ice_thickness"` (skips ray migration). |
 | | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (e.g. `900.0` kg/m³ for temperate glacier ice). Used to calculate basal shear stress $\tau_{\text{b}}$. |
