@@ -16,7 +16,6 @@ from scipy.optimize import curve_fit
 from scipy.interpolate import RegularGridInterpolator
 from .smoothing import (
     compute_gradients,
-    fft_gaussian_smooth,
     precompute_fft_grid,
     fft_gaussian_smooth_precomputed,
 )
@@ -55,7 +54,6 @@ class BSSOptimizer:
         kc_max: float = 10.0,
         kc_min: float = 0.01,
         d_kc: float = 0.1,
-        num_steps: int = 10,
         plots_dir: Optional[str] = None,
         prefix: str = "01_",
         stage_name: str = "stage1",
@@ -71,7 +69,6 @@ class BSSOptimizer:
             kc_max=kc_max,
             kc_min=kc_min,
             d_kc=d_kc,
-            num_steps=num_steps,
             plots_dir=plots_dir,
             prefix=prefix,
             stage_name=stage_name,
@@ -229,7 +226,6 @@ def optimize_bss_variance(
     kc_max: float = 10.0,
     kc_min: float = 0.01,
     d_kc: float = 0.1,
-    num_steps: int = 10,
     plots_dir: Optional[str] = None,
     prefix: str = "01_",
     stage_name: str = "stage1",
@@ -245,6 +241,9 @@ def optimize_bss_variance(
     in a single comparison plot, normalizing individual variograms with their individual product mean value squared.
     Saves all evaluated filtered DEM surface slope grids into a dictionary cache.
     Accelerated with multi-core CPU parallelization via n_cores.
+    If interactive is True, enables an interactive CLI prompt allowing inspection of the BSS variance curve
+    and adjustment of corner frequency search spectrum (kc_min, kc_max, d_kc), lag distance bin count (nrbins),
+    and correlation range (a_range).
     """
     dx = geometry.dx
     dy = geometry.dy
@@ -350,22 +349,16 @@ def optimize_bss_variance(
                 if val_min:
                     kc_min = float(val_min)
 
-                default_dkc = d_kc
-                val_step = input(f"Enter Corner Frequency Stepwidth d_kc (default = {default_dkc:.4f}): ").strip()
+                val_step = input(f"Enter Corner Frequency Stepwidth d_kc (default = {d_kc:.4f}): ").strip()
                 if val_step:
                     d_kc = float(val_step)
-                    num_steps = None
             except Exception as e:
                 logger.warning(f"Input error, using defaults: {e}")
 
-        if d_kc is not None and d_kc > 0:
-            kc_values = np.arange(kc_max, kc_min - 1e-9, -abs(d_kc))
-            if len(kc_values) > 0 and kc_values[-1] > kc_min + 1e-6:
-                kc_values = np.append(kc_values, kc_min)
-        elif num_steps is not None and num_steps > 0:
-            kc_values = np.linspace(kc_max, kc_min, num_steps)
-        else:
-            kc_values = np.linspace(kc_max, kc_min, 10)
+        effective_dkc = abs(d_kc) if d_kc > 0 else 0.1
+        kc_values = np.arange(kc_max, kc_min - 1e-9, -effective_dkc)
+        if len(kc_values) > 0 and kc_values[-1] > kc_min + 1e-6:
+            kc_values = np.append(kc_values, kc_min)
 
         step_variances = []
         evaluated_variograms = []

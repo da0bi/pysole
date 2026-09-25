@@ -40,8 +40,7 @@ class TestVariogramWuk(unittest.TestCase):
             geometry=geometry,
             kc_max=10.0,
             kc_min=0.01,
-            d_kc=0.1,
-            num_steps=3,
+            d_kc=4.0,
             plots_dir=None,
             prefix="01_",
             stage_name="stage1",
@@ -59,10 +58,10 @@ class TestVariogramWuk(unittest.TestCase):
         survey = np.loadtxt(self.wuk_survey, delimiter=",", skiprows=1)
 
         res_single = optimize_bss_variance(
-            dem=dem, survey_points=survey, geometry=geometry, num_steps=3, n_cores=1
+            dem=dem, survey_points=survey, geometry=geometry, d_kc=4.0, n_cores=1
         )
         res_multi = optimize_bss_variance(
-            dem=dem, survey_points=survey, geometry=geometry, num_steps=3, n_cores=-1
+            dem=dem, survey_points=survey, geometry=geometry, d_kc=4.0, n_cores=-1
         )
 
         self.assertAlmostEqual(res_single.optimal_kc, res_multi.optimal_kc, places=6)

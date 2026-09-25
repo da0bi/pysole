@@ -9,9 +9,10 @@ import os
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "inputs": {
-        "dem_path": "surface_dem.asc",
-        "outline_path": "creeping_body.shp",
-        "survey_data_path": "sparse_survey.csv",
+        "dem_path": None,
+        "outline_path": None,
+        "survey_data_path": None,
+        "base_dir": None,
         "survey_data_type": "one_way_travel_time",
         "ice_density": 900.0,
         "g": 9.81,
@@ -32,7 +33,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "kc_max": 10.0,
         "kc_min": 0.01,
         "d_kc": 0.1,
-        "num_steps": None,
         "nrbins": None,
         "slope_floor_deg": 5.0,
         "interactive_optimization": False,
@@ -43,7 +43,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "method": "universal",
             "drift_terms": ["sia_thickness"],
             "variogram_model": "spherical",
-            "include_zero_boundary_condition": False,
+            "include_zero_boundary_condition": True,
         },
         "post_migration": {
             "method": "universal",
@@ -63,9 +63,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "smoothing_kc_cutoff": None,
     },
     "outputs": {
-        "output_path": "final_bedrock.tif",
         "output_format": "tif",
-        "plots_dir": None,
+        "output_name": "final_bedrock",
+        "plots_dir": "figures",
     },
 }
 
@@ -97,8 +97,22 @@ def load_config(config_path: Union[str, os.PathLike] = "pysole.json") -> Dict[st
             else:
                 config[key] = section
 
-    log_level = config.get("inputs", {}).get("log_level", "INFO")
-    setup_logging(log_file="pysole.log", log_level=log_level)
+    inputs = config.get("inputs", {})
+    base_dir = inputs.get("base_dir")
+    survey_data_path = inputs.get("survey_data_path")
+    if base_dir:
+        eff_base = os.path.expanduser(base_dir)
+    elif survey_data_path and isinstance(survey_data_path, (str, os.PathLike)):
+        eff_base = os.path.dirname(os.path.expanduser(str(survey_data_path)))
+    else:
+        eff_base = ""
+
+    log_file = "pysole.log"
+    if eff_base and not os.path.isabs(log_file):
+        log_file = os.path.join(eff_base, log_file)
+
+    log_level = os.environ.get("PYSOLE_LOG_LEVEL") or inputs.get("log_level", "INFO")
+    setup_logging(log_file=log_file, log_level=log_level)
     return config
 
 
@@ -147,7 +161,6 @@ def main_cli() -> None:
     """
     import argparse
     import sys
-    from .logging import setup_logging, logger
 
     parser = argparse.ArgumentParser(
         description="PySole: Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Geophysical Datasets."
@@ -162,11 +175,6 @@ def main_cli() -> None:
         "--init",
         action="store_true",
         help="Creates a template pysole.json configuration file in current directory.",
-    )
-    parser.add_argument(
-        "--log-file",
-        default="pysole.log",
-        help="Path to output log file (default: pysole.log).",
     )
     parser.add_argument(
         "-v",
@@ -186,12 +194,13 @@ def main_cli() -> None:
     args = parser.parse_args()
 
     if args.init:
+        from .logging import logger
         target = create_template_config(args.config if args.config != "pysole.json" else "pysole.json")
         logger.info(f"Created template configuration file at: {target}")
         sys.exit(0)
 
-    log_level = "DEBUG" if args.debug else "INFO"
-    setup_logging(log_file=args.log_file, log_level=log_level)
+    if args.debug:
+        os.environ["PYSOLE_LOG_LEVEL"] = "DEBUG"
 
     run_from_config(args.config)
 

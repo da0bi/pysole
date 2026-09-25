@@ -1,8 +1,9 @@
 {
     "inputs": {
-        "dem_path": "surface_dem.asc",
-        "outline_path": "creeping_body.shp",
-        "survey_data_path": "sparse_survey.csv",
+        "dem_path": null,
+        "outline_path": null,
+        "survey_data_path": null,
+        "base_dir": null,
         "survey_data_type": "one_way_travel_time",
         "ice_density": 900.0,
         "g": 9.81,
@@ -23,7 +24,6 @@
         "kc_max": 10.0,
         "kc_min": 0.01,
         "d_kc": 0.1,
-        "num_steps": 10,
         "interactive_optimization": false
     },
     "kriging_parameters": {
@@ -32,7 +32,7 @@
             "method": "universal",
             "drift_terms": ["sia_thickness"],
             "variogram_model": "spherical",
-            "include_zero_boundary_condition": false
+            "include_zero_boundary_condition": true
         },
         "post_migration": {
             "method": "universal",
@@ -52,8 +52,8 @@
         "smoothing_kc_cutoff": null
     },
     "outputs": {
-        "output_path": "final_bedrock.tif",
         "output_format": "tif",
-        "plots_dir": null
+        "output_name": "final_bedrock",
+        "plots_dir": "figures"
     }
 }

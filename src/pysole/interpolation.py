@@ -51,7 +51,7 @@ class KrigingEngine:
         variogram_model: str = "spherical",
         opt_slope_grid: Optional[np.ndarray] = None,
         drift_terms: Optional[List[str]] = None,
-        include_zero_boundary_condition: bool = False,
+        include_zero_boundary_condition: bool = True,
         n_cores: int = -1,
         built_in_kriging: bool = True,
     ) -> KrigingResult:
@@ -404,7 +404,7 @@ def kriging_interpolation(
     opt_slope_grid: Optional[np.ndarray] = None,
     drift_terms: Optional[List[str]] = None,
     outline_mask: Optional[np.ndarray] = None,
-    include_zero_boundary_condition: bool = False,
+    include_zero_boundary_condition: bool = True,
     n_cores: int = -1,
     built_in_kriging: bool = True,
     slope_floor_deg: float = 5.0,
@@ -415,6 +415,9 @@ def kriging_interpolation(
     2. 'sia_thickness' / 'sia' (Shallow Ice Approximation custom physical drift U_sia = 1 / sin(alpha_safe))
     3. 'ordinary' / 'ordinary_kriging' (Ordinary Kriging assuming constant mean)
     4. 'regression' / 'regression_kriging' (Regression Kriging combining ML regressor with residual Kriging)
+
+    When include_zero_boundary_condition is True, enforces zero-value boundary points (T=0 ns or D=0 m)
+    along both the outer perimeter and any interior rock outcrop/nunatak margin boundaries.
     """
     M, N = geometry.shape
     x_coords = geometry.x_coords

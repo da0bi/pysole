@@ -76,6 +76,16 @@ class TestRasterWuk(unittest.TestCase):
             if os.path.exists(test_out):
                 os.remove(test_out)
 
+    def test_bedrock_map_save_directory_path(self):
+        raw_grid = np.zeros((5, 5), dtype=np.float64)
+        bmap = BedrockMap(grid=raw_grid, bounds=(0.0, 0.0, 5.0, 5.0), crs=None)
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            res = bmap.save(tmpdir)
+            expected = os.path.join(tmpdir, "final_bedrock.tif")
+            self.assertEqual(res, expected)
+            self.assertTrue(os.path.exists(expected))
+
 
     def test_projected_metric_crs_check(self):
         from pysole.raster import check_projected_metric_crs

@@ -10,7 +10,7 @@ import os
 from scipy.interpolate import RegularGridInterpolator
 from .raster import BedrockMap, load_dem, load_outline, ensure_spatial_coords, GridGeometry, load_survey_points
 from .migration import migrate_eikonal_points, EikonalMigrator, MigrationResult
-from .variogram import optimize_bss_variance, calculate_variogram, fit_variogram_model, BSSOptimizer, OptimizationResult
+from .variogram import BSSOptimizer, OptimizationResult
 from .interpolation import blend_margin_topography, kriging_interpolation, random_forest_hole_filling, KrigingEngine, BedrockFinalizer, KrigingResult
 from .smoothing import compute_gradients, fft_gaussian_smooth
 from .logging import logger
@@ -31,11 +31,11 @@ class Solver:
         pre_kriging_method: str = "universal",
         pre_drift_terms: Optional[List[str]] = None,
         pre_variogram_model: str = "spherical",
-        pre_zero_boundary: bool = False,
+        pre_zero_boundary: bool = True,
         post_kriging_method: str = "universal",
         post_drift_terms: Optional[List[str]] = None,
         post_variogram_model: str = "spherical",
-        post_zero_boundary: bool = False,
+        post_zero_boundary: bool = True,
         perform_migration: bool = True,
         survey_data_type: str = "one_way_travel_time",
         plots_dir: Optional[str] = None,
@@ -44,6 +44,8 @@ class Solver:
         nrbins: Optional[int] = None,
         ice_density: float = 900.0,
         g: float = 9.81,
+        base_dir: Optional[str] = None,
+        survey_data_path: Optional[str] = None,
     ):
         """
         Parameters
@@ -83,6 +85,10 @@ class Solver:
             Directory where generated plots are automatically saved.
         n_cores : int
             Number of CPU cores for multi-threading/processing (-1 for all available cores).
+        base_dir : str, optional
+            General workspace directory for all output files. If None, defaults to parent directory of survey_data_path.
+        survey_data_path : str, optional
+            Path to survey data file (used for base_dir resolution fallback if base_dir is None).
         """
         self.dem_grid, self.meta = load_dem(dem, dx=dx, dy=dy, bounds=bounds)
         self.outline_mask = load_outline(outline, self.dem_grid, self.meta)
@@ -112,7 +118,9 @@ class Solver:
 
         self.perform_migration = perform_migration
         self.survey_data_type = survey_data_type
-        self.plots_dir = plots_dir
+        self.base_dir = base_dir
+        self.survey_data_path = survey_data_path
+        self._raw_plots_dir = plots_dir
         self.n_cores = n_cores
         self.built_in_kriging = bool(built_in_kriging)
         self.nrbins = int(nrbins) if nrbins is not None else None
@@ -146,6 +154,37 @@ class Solver:
         self.final_grid: Optional[np.ndarray] = None
         self.config: Dict[str, Any] = {}
         self.config_path: Optional[str] = None
+
+    @property
+    def effective_base_dir(self) -> str:
+        """Returns the effective base directory for output file resolution."""
+        if self.base_dir:
+            return os.path.expanduser(self.base_dir)
+        if self.survey_data_path and isinstance(self.survey_data_path, (str, os.PathLike)):
+            return os.path.dirname(os.path.expanduser(str(self.survey_data_path)))
+        return ""
+
+    def resolve_path(self, path: Optional[str]) -> Optional[str]:
+        """Resolves a target file or directory path relative to effective_base_dir if relative."""
+        if not path:
+            return path
+        expanded = os.path.expanduser(path)
+        if os.path.isabs(expanded):
+            return expanded
+        eff_base = self.effective_base_dir
+        if eff_base:
+            return os.path.join(eff_base, expanded)
+        return expanded
+
+    @property
+    def plots_dir(self) -> str:
+        """Directory where generated plots are automatically saved."""
+        target = self._raw_plots_dir if self._raw_plots_dir is not None else "figures"
+        return self.resolve_path(target)
+
+    @plots_dir.setter
+    def plots_dir(self, value: Optional[str]) -> None:
+        self._raw_plots_dir = value
 
     @property
     def plot_extent(self) -> List[float]:
@@ -185,7 +224,7 @@ class Solver:
         pre_method = pre_krig_cfg.get("method", "universal")
         pre_drifts = pre_krig_cfg.get("drift_terms", ["sia_thickness"])
         pre_var_model = pre_krig_cfg.get("variogram_model", "spherical")
-        pre_zero_boundary = pre_krig_cfg.get("include_zero_boundary_condition", False)
+        pre_zero_boundary = pre_krig_cfg.get("include_zero_boundary_condition", True)
 
         post_method = post_krig_cfg.get("method", "universal")
         post_drifts = post_krig_cfg.get("drift_terms", ["sia_thickness"])
@@ -221,6 +260,8 @@ class Solver:
             nrbins=nrbins,
             ice_density=ice_density,
             g=g_val,
+            base_dir=inputs.get("base_dir"),
+            survey_data_path=inputs.get("survey_data_path"),
         )
         solver.config = cfg
         solver.config_path = str(config_path)
@@ -234,6 +275,9 @@ class Solver:
         plotit: bool = False,
     ) -> np.ndarray:
         """Migrates zero-offset GPR or seismic travel times into 3D space using the Eikonal equation."""
+        if not self.survey_data_path and isinstance(travel_times, (str, os.PathLike)):
+            self.survey_data_path = str(travel_times)
+
         pts = load_survey_points(
             travel_times,
             bounds=self.bounds,
@@ -361,13 +405,15 @@ class Solver:
         kc_max: Optional[float] = None,
         kc_min: Optional[float] = None,
         d_kc: Optional[float] = None,
-        num_steps: Optional[int] = None,
         nrbins: Optional[int] = None,
         prefix: Optional[str] = None,
         interactive: bool = False,
         plotit: bool = False,
     ) -> float:
-        """Iterative optimization process to determine optimum surface slope smoothing degree kc."""
+        """
+        Iterative optimization process to determine optimum surface slope smoothing degree kc.
+        When interactive is True, enables CLI prompts to adjust kc_min, kc_max, d_kc, nrbins, and a_range.
+        """
         pts = self.migrated_points if self.migrated_points is not None else self.survey_points
         if pts is None:
             xx, yy = np.meshgrid(self.x_coords[::5], self.y_coords[::5])
@@ -381,8 +427,6 @@ class Solver:
                 kc_min = opt_cfg["kc_min"]
             if d_kc is None and "d_kc" in opt_cfg:
                 d_kc = opt_cfg["d_kc"]
-            if num_steps is None and "num_steps" in opt_cfg:
-                num_steps = opt_cfg["num_steps"]
             if nrbins is None and "nrbins" in opt_cfg:
                 nrbins = opt_cfg["nrbins"]
 
@@ -399,13 +443,12 @@ class Solver:
             kc_max=kc_max,
             kc_min=kc_min,
             d_kc=d_kc,
-            num_steps=num_steps,
             plots_dir=self.plots_dir,
             prefix=prefix,
             stage_name=stage_name,
             interactive=interactive,
             n_cores=self.n_cores,
-            nrbins=self.nrbins,
+            nrbins=nrbins,
         )
 
         self.opt_kc = opt_res.optimal_kc
@@ -574,7 +617,21 @@ class Solver:
         smoothing_kernel_size: int = 3,
         smoothing_kc_cutoff: Optional[float] = None,
     ) -> BedrockMap:
-        """Executes full final sequence towards continuous bedrock topography result."""
+        """
+        Executes full final sequence towards continuous bedrock topography result.
+
+        Parameters
+        ----------
+        smoothing_sigma : float
+            Smoothing strength (radius in pixels) for Gaussian filtering (default 1.5).
+            Higher values produce smoother bedrock terrain.
+        smoothing_kernel_size : int
+            Window kernel size (k x k) for median filtering (must be an odd integer, default 3).
+            Higher values produce smoother bedrock terrain.
+        smoothing_kc_cutoff : float, optional
+            Corner frequency cutoff wavenumber (k_c,smooth) for FFT low-pass filtering.
+            If None, defaults to optimal k_c. Lower values produce smoother bedrock terrain.
+        """
         should_plot = plotit or interactive or (self.plots_dir is not None)
 
         if self.kriged_thickness is None:
@@ -838,10 +895,12 @@ class Solver:
             smoothing_kc_cutoff=fin_cfg.get("smoothing_kc_cutoff", None),
         )
 
-        output_path = outputs.get("output_path")
+        output_name = outputs.get("output_name")
         output_format = outputs.get("output_format")
-        if output_path:
-            saved_res = bedrock_map.save(output_path, formats=output_format)
+        if output_name:
+            stem, _ = os.path.splitext(output_name)
+            resolved_output_stem = self.resolve_path(stem if stem else output_name)
+            saved_res = bedrock_map.save(resolved_output_stem, formats=output_format)
             if isinstance(saved_res, list):
                 for sf in saved_res:
                     logger.info(f"5. Saved predicted bedrock map to: {sf}")

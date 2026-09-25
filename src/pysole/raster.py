@@ -109,6 +109,10 @@ class BedrockMap:
         saved_files : str or list of str
             Path of saved file, or list of saved file paths if multiple formats exported.
         """
+        filepath = os.path.expanduser(str(filepath))
+        if os.path.isdir(filepath) or filepath.endswith("/") or filepath.endswith("\\"):
+            filepath = os.path.join(filepath, "final_bedrock.tif")
+
         base_path, ext = os.path.splitext(filepath)
         dir_name = os.path.dirname(filepath)
         if dir_name:
