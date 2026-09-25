@@ -266,7 +266,7 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances across a total of <i>N</i> survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole dynamically determines a minimum distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
 
 <p align="center">
-  <i>nrbins</i> = <i>max(3, N<sub>pairs</sub> / 30)</i>
+  <i>nrbins</i> = <i>max( 3, N<sub>pairs</sub> / 30 )</i>
 </p>
 
 Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields, however, fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice. An absolute lower floor of 3 lag distance bins is enforced across all calculations.
