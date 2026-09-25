@@ -25,6 +25,8 @@
         "kc_max": 10.0,
         "kc_min": 0.01,
         "d_kc": 0.1,
+        "nrbins": null,
+        "slope_floor_deg": 5.0,
         "interactive_optimization": false
     },
     "kriging_parameters": {
