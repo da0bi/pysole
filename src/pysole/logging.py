@@ -4,9 +4,8 @@ Provides centralized logging to both console (stdout) and a log file (default: p
 """
 
 import logging
-import os
+from pathlib import Path
 import sys
-from typing import Optional, Union
 from tqdm import tqdm
 
 # Global PySole logger
@@ -14,18 +13,18 @@ logger = logging.getLogger("pysole")
 
 
 def setup_logging(
-    log_file: Optional[str] = "pysole.log",
-    log_level: Union[str, int] = "INFO",
+    log_file: str | Path | None = "pysole.log",
+    log_level: str | int = "INFO",
     console_output: bool = True,
 ) -> logging.Logger:
     """Configures the PySole package logger with file and console handlers.
 
     Parameters
     ----------
-    log_file : Optional[str]
+    log_file : str | Path | None
         Path to the log file. If set (default: 'pysole.log'), logs are appended to this file.
         If None, file logging is disabled.
-    log_level : Union[str, int]
+    log_level : str | int
         Logging level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'). Default is 'INFO'.
     console_output : bool
         If True (default), log messages are also output to stdout.
@@ -62,10 +61,9 @@ def setup_logging(
     # File Handler
     if log_file:
         try:
-            log_dir = os.path.dirname(os.path.abspath(log_file))
-            if log_dir:
-                os.makedirs(log_dir, exist_ok=True)
-            file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+            log_path = Path(log_file).expanduser().resolve()
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
             file_handler.setLevel(numeric_level)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
@@ -77,7 +75,7 @@ def setup_logging(
 
 def get_progress_bar(
     iterable=None,
-    total: Optional[int] = None,
+    total: int | None = None,
     desc: str = "",
     unit: str = "it",
     disable: bool = False,

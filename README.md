@@ -179,8 +179,14 @@ All execution options can be fully defined in a single `pysole.json` configurati
     },
     "outputs": {
         "output_format": "tif",
-        "output_name": "final_bedrock",
-        "plots_dir": "figures"
+        "output_prefix": "final",
+        "plots_dir": "figures",
+        "save_traveltime_grid": false,
+        "save_migrated_points": false,
+        "save_thickness_grid": false,
+        "save_thickness_uncertainty": false,
+        "save_basal_shear_stress": false,
+        "save_basal_shear_stress_uncertainty": false
     }
 }
 ```
@@ -234,8 +240,14 @@ All execution options can be fully defined in a single `pysole.json` configurati
 | | `smoothing_kernel_size` | `int` | `3` | Window kernel size (<i>k</i> × <i>k</i>) for `"median"` filtering (must be an odd integer). Higher values produce smoother bedrock terrain. |
 | | `smoothing_kc_cutoff` | `float` | `null` | Corner frequency cutoff wavenumber (<i>k</i><sub>c,smooth</sub>) for `"fft_lowpass"`. If `null`, defaults to <i>k</i><sub>c,opt</sub>. <i>Lower</i> values produce smoother bedrock terrain. |
 | **`outputs`** | `output_format` | `str` / `list[str]` | `"tif"` | Desired export format(s): `"tif"`, `"asc"`, `"csv"`, `"npy"`, a list of formats (e.g. `["tif", "asc", "csv"]`), or `"all"` to export all four formats. |
-| | `output_name` | `str` | `"final_bedrock"` | Filename or absolute filename path of the final bedrock elevation raster(s). Do not use a file extension—extension(s) are strictly determined by `output_format` and appended automatically. Relative names resolve inside `base_dir`; absolute paths override `base_dir`. |
+| | `output_prefix` | `str` | `"final"` | Filename prefix or absolute filepath prefix used to construct export filenames. Do not include file extensions—format extension(s) are determined by `output_format`. Relative prefix names resolve inside `base_dir`; absolute filepaths override `base_dir`. `<output_prefix>_bedrock.<ext>` is exported by default. |
 | | `plots_dir` | `str` | `"figures"` | Output directory for saving diagnostic figures. All generated figures are saved automatically. If `null`, figures are saved into a `"figures"` folder inside `base_dir`. An absolute path overrides `base_dir/figures`. |
+| | `save_traveltime_grid` | `bool` | `false` | If `true`, exports the pre-migration interpolated traveltime raster grid (<i>T</i>(<i>x</i>,<i>y</i>)) masked by the creeping body outline to `<output_prefix>_traveltime.<ext>`. |
+| | `save_migrated_points` | `bool` | `false` | If `true`, exports the 3D ray-migrated survey points to `<output_prefix>_migrated_points.csv` (`x, y, z_surface, depth_migrated`). Automatically set to `false` with a log notice if ray migration is skipped. |
+| | `save_thickness_grid` | `bool` | `false` | If `true`, exports the final thickness raster grid (<i>D</i>(<i>x</i>,<i>y</i>)) masked by the creeping body outline to `<output_prefix>_thickness.<ext>`. |
+| | `save_thickness_uncertainty` | `bool` | `false` | If `true`, exports the Kriging thickness uncertainty raster grid (<i>σ<sub>D</sub></i>(<i>x</i>,<i>y</i>)) masked by the creeping body outline to `<output_prefix>_thickness_uncertainty.<ext>`. |
+| | `save_basal_shear_stress` | `bool` | `false` | If `true`, exports the final basal shear stress raster grid (<i>τ</i><sub>b</sub>(<i>x</i>,<i>y</i>)) masked by the creeping body outline to `<output_prefix>_basal_shear_stress.<ext>`. |
+| | `save_basal_shear_stress_uncertainty` | `bool` | `false` | If `true`, exports the basal shear stress Kriging uncertainty raster grid (<i>σ</i><sub><i>τ</i><sub>b</sub></sub>(<i>x</i>,<i>y</i>)) masked by the creeping body outline to `<output_prefix>_basal_shear_stress_uncertainty.<ext>`. |
 
 ---
 
@@ -254,7 +266,7 @@ All execution options can be fully defined in a single `pysole.json` configurati
 
 <a id="parsing-rock-outcrops"></a>
 #### 2. Parsing of Rock Outcrop & Nunatak Input Files
-Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>D</i> = 0 m).
+Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>T</i> = 0 s, <i>D</i> = 0 m).
 
 For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 
@@ -384,13 +396,27 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole --init
   ```
-  *(Creates a clean, fully commented `pysole.json` configuration file in your current working directory).*
+  *(Creates a clean template `pysole.json` configuration file in your current working directory).*
 
-* **Run the PySole Solver with a Configuration File:**
+* **Run PySole with Default `pysole.json` Configuration:**
   ```bash
-  pysole pysole.json
+  pysole
   ```
-  *(Executes the full pipeline defined in `pysole.json` and exports predicted bedrock rasters and diagnostic plots).*
+  *(Automatically loads and executes `pysole.json` in the current working directory).*
+
+* **Run PySole with a Custom Configuration File:**
+  ```bash
+  pysole path/to/custom_config.json
+  ```
+  *(Executes the full pipeline defined in `custom_config.json`).*
+
+* **Run with Verbose / Debug Logging:**
+  ```bash
+  pysole pysole.json -v
+  # or
+  pysole pysole.json --verbose
+  ```
+  *(Enables `DEBUG` level logging verbosity for detailed computational diagnostics. Acts as a temporary CLI runtime override taking precedence over the `log_level` defined in `pysole.json`).*
 
 * **Display CLI Help & Usage Options:**
   ```bash
@@ -411,8 +437,15 @@ Run the complete pipeline from a `pysole.json` configuration file in a single li
 ```python
 import pysole
 
-# Execute complete workflow defined in pysole.json
-bedrock_map = pysole.run_from_config("pysole.json")
+# Execute complete workflow using default 'pysole.json'
+final_bedrock = pysole.run_from_config()
+
+# Or execute with a custom configuration file and log level override
+final_bedrock = pysole.run_from_config("custom_config.json", log_level="DEBUG")
+
+# Inspect spatial metadata and export final bedrock raster
+print(final_bedrock.shape, final_bedrock.bounds)
+final_bedrock.save("final_bedrock.tif")
 ```
 
 ---
@@ -441,6 +474,10 @@ print(model.bss_optimizer)   # BSSOptimizer sub-engine instance
 print(model.kriging_engine)  # KrigingEngine sub-engine instance
 print(model.finalizer)       # BedrockFinalizer sub-engine instance
 
+# Option A: Run complete end-to-end pipeline in a single call
+final_bedrock = model.run_pipeline(survey_data_path="sparse_survey.csv")
+
+# Option B: Steer workflow step-by-step through individual milestones:
 # 2. Migrate sparse GPR/Seismic traveltimes (delegates to model.migrator)
 bedrock_pts = model.migrate_eikonal(
     travel_times="sparse_survey.csv",
@@ -453,18 +490,17 @@ model.optimize_bss(kc_max=10.0, kc_min=0.01, d_kc=0.1)
 # 4. Primary Kriging spatial interpolation (delegates to model.kriging_engine)
 kriged_bedrock, kriged_variance = model.interpolate_kriging(
     method="universal",
-    plotit=True,
 )
 
 # 5. Finalize topography (delegates to model.finalizer for gap filling & margin blending)
-bedrock_map = model.finalize_topography(
-    interactive=True,
+final_bedrock = model.finalize_topography(
+    interactive=False,
     smooth_bedrock=True,
     smoothing_method="gaussian",
 )
 
 # 6. Export predicted bedrock elevation raster
-bedrock_map.save("final_bedrock.tif")
+final_bedrock.save("final_bedrock.tif")
 ```
 
 ---

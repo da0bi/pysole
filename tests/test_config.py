@@ -57,7 +57,7 @@ class TestConfigWorkflowWuk(unittest.TestCase):
         self.assertIsNone(cfg_inputs["base_dir"])
 
         cfg_outputs = pysole.config.DEFAULT_CONFIG["outputs"]
-        self.assertEqual(cfg_outputs["output_name"], "final_bedrock")
+        self.assertEqual(cfg_outputs["output_prefix"], "final")
         self.assertEqual(cfg_outputs["output_format"], "tif")
         self.assertEqual(cfg_outputs["plots_dir"], "figures")
 
@@ -82,6 +82,25 @@ class TestConfigWorkflowWuk(unittest.TestCase):
 
         # 3. Absolute path overrides base_dir
         self.assertEqual(solver_explicit.resolve_path("/abs/path/bedrock"), "/abs/path/bedrock")
+
+    def test_outputs_config_utility_methods(self):
+        cfg = pysole.OutputsConfig(
+            output_format="tif",
+            output_prefix="custom_prefix",
+            save_thickness_grid=True,
+            save_basal_shear_stress=True,
+        )
+        active = cfg.active_exports()
+        self.assertTrue(active["save_thickness_grid"])
+        self.assertTrue(active["save_basal_shear_stress"])
+        self.assertFalse(active["save_traveltime_grid"])
+        self.assertFalse(active["save_migrated_points"])
+
+        d = cfg.to_dict()
+        self.assertEqual(d["output_format"], "tif")
+        self.assertEqual(d["output_prefix"], "custom_prefix")
+        self.assertTrue(d["save_thickness_grid"])
+        self.assertFalse(d["save_migrated_points"])
 
 
 if __name__ == "__main__":

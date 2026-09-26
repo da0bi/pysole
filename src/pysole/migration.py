@@ -6,7 +6,7 @@ computing non-orthogonal slowness vector components (sx, sy, sz) and horizontal/
 """
 
 from dataclasses import dataclass
-from typing import Tuple, Optional, Dict
+from pathlib import Path
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from .smoothing import compute_gradients
@@ -34,8 +34,8 @@ class EikonalMigrator:
         self,
         dem: np.ndarray,
         geometry: GridGeometry,
-        outline_mask: Optional[np.ndarray] = None,
-        dem_grads: Optional[Dict[str, np.ndarray]] = None,
+        outline_mask: np.ndarray | None = None,
+        dem_grads: dict[str, np.ndarray] | None = None,
     ):
         self.dem = dem
         self.geometry = geometry
@@ -51,7 +51,7 @@ class EikonalMigrator:
         travel_time_grid: np.ndarray,
         survey_points: np.ndarray,
         velocity: float = 0.16,
-        plots_dir: Optional[str] = None,
+        plots_dir: str | Path | None = None,
         interactive: bool = False,
         show_progress: bool = True,
     ) -> MigrationResult:
@@ -76,10 +76,10 @@ def migrate_eikonal_points(
     survey_points: np.ndarray,
     geometry: GridGeometry,
     velocity: float = 0.16,
-    outline_mask: Optional[np.ndarray] = None,
-    plots_dir: Optional[str] = None,
+    outline_mask: np.ndarray | None = None,
+    plots_dir: str | Path | None = None,
     interactive: bool = False,
-    dem_grads: Optional[Dict[str, np.ndarray]] = None,
+    dem_grads: dict[str, np.ndarray] | None = None,
     show_progress: bool = True,
 ) -> MigrationResult:
     """

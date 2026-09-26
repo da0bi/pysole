@@ -4,15 +4,17 @@ Implements the workflow for physically-informed bedrock interpolation & 3D migra
 caching surface gradients and smoothed slope grids for maximum computational efficiency.
 """
 
-from typing import Union, Optional, Tuple, Dict, Any, List
+from pathlib import Path
+from typing import Any
 import numpy as np
 import os
 from scipy.interpolate import RegularGridInterpolator
-from .raster import BedrockMap, load_dem, load_outline, ensure_spatial_coords, GridGeometry, load_survey_points
+from .raster import BedrockMap, load_dem, load_outline, ensure_spatial_coords, GridGeometry, load_survey_points, save_points_csv
 from .migration import migrate_eikonal_points, EikonalMigrator, MigrationResult
 from .variogram import BSSOptimizer, OptimizationResult
 from .interpolation import blend_margin_topography, kriging_interpolation, random_forest_hole_filling, KrigingEngine, BedrockFinalizer, KrigingResult
 from .smoothing import compute_gradients, fft_gaussian_smooth
+from .config import OutputsConfig, resolve_path as resolve_config_path
 from .logging import logger
 
 
@@ -23,37 +25,37 @@ class Solver:
 
     def __init__(
         self,
-        dem: Union[str, np.ndarray],
-        outline: Union[str, np.ndarray, None] = None,
-        dx: Optional[float] = None,
-        dy: Optional[float] = None,
-        bounds: Optional[Tuple[float, float, float, float]] = None,
+        dem: str | Path | np.ndarray,
+        outline: str | Path | np.ndarray | None = None,
+        dx: float | None = None,
+        dy: float | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
         pre_kriging_method: str = "universal",
-        pre_drift_terms: Optional[List[str]] = None,
+        pre_drift_terms: list[str] | None = None,
         pre_variogram_model: str = "spherical",
         pre_zero_boundary: bool = True,
         post_kriging_method: str = "universal",
-        post_drift_terms: Optional[List[str]] = None,
+        post_drift_terms: list[str] | None = None,
         post_variogram_model: str = "spherical",
         post_zero_boundary: bool = True,
         perform_migration: bool = True,
         survey_data_type: str = "one_way_travel_time",
-        plots_dir: Optional[str] = None,
+        plots_dir: str | Path | None = None,
         n_cores: int = -1,
         built_in_kriging: bool = True,
-        nrbins: Optional[int] = None,
+        nrbins: int | None = None,
         ice_density: float = 900.0,
         g: float = 9.81,
-        base_dir: Optional[str] = None,
-        survey_data_path: Optional[str] = None,
+        base_dir: str | Path | None = None,
+        survey_data_path: str | Path | None = None,
         show_progress: bool = True,
     ):
         """
         Parameters
         ----------
-        dem : str or np.ndarray
+        dem : str, Path, or np.ndarray
             Path to surface DEM GeoTIFF/ASCII file, or 2D numpy array.
-        outline : str or np.ndarray, optional
+        outline : str, Path, or np.ndarray, optional
             Path to creeping body boundary polygon (Shapefile/GeoJSON) or boolean mask.
         dx : float, optional
             Pixel resolution along X. If None, derived directly from actual DEM metadata.
@@ -82,13 +84,13 @@ class Solver:
         survey_data_type : str
             Type of input survey data defined in inputs section: 'one_way_travel_time' (default),
             'two_way_travel_time' (converts TWT/2), or 'thickness' / 'ice_thickness' (direct depth/thickness measurements, skips migration).
-        plots_dir : str, optional
+        plots_dir : str or Path, optional
             Directory where generated plots are automatically saved.
         n_cores : int
             Number of CPU cores for multi-threading/processing (-1 for all available cores).
-        base_dir : str, optional
+        base_dir : str or Path, optional
             General workspace directory for all output files. If None, defaults to parent directory of survey_data_path.
-        survey_data_path : str, optional
+        survey_data_path : str or Path, optional
             Path to survey data file (used for base_dir resolution fallback if base_dir is None).
         show_progress : bool
             If True (default), displays terminal progress bars during heavy processing steps.
@@ -132,8 +134,8 @@ class Solver:
         self.show_progress = bool(show_progress)
 
         # Gradient and Smoothed Slope Caches
-        self._gradient_cache: Optional[Dict[str, np.ndarray]] = None
-        self._smoothed_slopes_cache: Dict[float, np.ndarray] = {}
+        self._gradient_cache: dict[str, np.ndarray] | None = None
+        self._smoothed_slopes_cache: dict[float, np.ndarray] = {}
 
         # Decoupled sub-engines strictly bound to GridGeometry
         self.migrator = EikonalMigrator(self.dem_grid, geometry=self.geometry, outline_mask=self.outline_mask)
@@ -142,43 +144,173 @@ class Solver:
         self.finalizer = BedrockFinalizer(self.dem_grid, geometry=self.geometry, outline_mask=self.outline_mask)
 
         # Internal state
-        self.survey_points: Optional[np.ndarray] = None
-        self.migrated_points: Optional[np.ndarray] = None
-        self.opt_kc: Optional[float] = None
-        self.opt_slope: Optional[np.ndarray] = None
-        self.kriged_thickness: Optional[np.ndarray] = None
-        self.kriged_bedrock: Optional[np.ndarray] = None
-        self.kriged_variance: Optional[np.ndarray] = None
-        self.rf_filled_bedrock: Optional[np.ndarray] = None
-        self.blended_bedrock: Optional[np.ndarray] = None
-        self.final_thickness: Optional[np.ndarray] = None
-        self.kriged_std: Optional[np.ndarray] = None
-        self.final_bss: Optional[np.ndarray] = None
-        self.bss_std: Optional[np.ndarray] = None
-        self.final_grid: Optional[np.ndarray] = None
-        self.config: Dict[str, Any] = {}
-        self.config_path: Optional[str] = None
+        self.survey_points: np.ndarray | None = None
+        self.migrated_points: np.ndarray | None = None
+        self._traveltime_grid: np.ndarray | None = None
+        self.opt_kc: float | None = None
+        self.opt_slope: np.ndarray | None = None
+        self.kriged_thickness: np.ndarray | None = None
+        self.kriged_bedrock: np.ndarray | None = None
+        self.kriged_variance: np.ndarray | None = None
+        self.rf_filled_bedrock: np.ndarray | None = None
+        self.blended_bedrock: np.ndarray | None = None
+        self.final_thickness: np.ndarray | None = None
+        self.kriged_std: np.ndarray | None = None
+        self.final_bss: np.ndarray | None = None
+        self.bss_std: np.ndarray | None = None
+        self.final_grid: np.ndarray | None = None
+        self.config: dict[str, Any] = {}
+        self.config_path: str | None = None
+
+    @property
+    def traveltime_grid(self) -> np.ndarray | None:
+        """Reconstructed pre-migration signal traveltime grid T(x,y)."""
+        return self._traveltime_grid
+
+    @traveltime_grid.setter
+    def traveltime_grid(self, value: np.ndarray | None) -> None:
+        self._traveltime_grid = value
+
+    @property
+    def thickness_grid(self) -> np.ndarray | None:
+        """Final predicted ice thickness grid D(x,y) [m]."""
+        return self.final_thickness if self.final_thickness is not None else self.kriged_thickness
+
+    @property
+    def thickness_std_grid(self) -> np.ndarray | None:
+        """Final ice thickness Kriging standard error uncertainty grid [m]."""
+        return self.kriged_std
+
+    @property
+    def basal_shear_stress_grid(self) -> np.ndarray | None:
+        """Final basal shear stress grid tau_b(x,y) [kPa]."""
+        return self.final_bss
+
+    @property
+    def basal_shear_stress_std_grid(self) -> np.ndarray | None:
+        """Final basal shear stress Kriging standard error uncertainty grid sigma_tau_b(x,y) [kPa]."""
+        return self.bss_std
+
+    @property
+    def outputs_config(self) -> dict[str, Any]:
+        """Returns the outputs configuration dictionary."""
+        return self.config.get("outputs", {})
+
+    @property
+    def outputs_config_obj(self) -> OutputsConfig:
+        """Returns structured OutputsConfig instance."""
+        return OutputsConfig.from_dict(self.outputs_config)
+
+    @property
+    def optimization_config(self) -> dict[str, Any]:
+        """Returns the optimization parameters configuration dictionary."""
+        return self.config.get("optimization_parameters", {})
+
+    @property
+    def slope_floor_deg(self) -> float:
+        """Minimum surface slope angle threshold in degrees [°]."""
+        return float(self.optimization_config.get("slope_floor_deg", 5.0))
+
+    def _get_resolved_output_prefix(self) -> str:
+        raw_prefix = self.outputs_config_obj.output_prefix or "final"
+        prefix_path = Path(raw_prefix)
+
+        # Strip extension if user accidentally provided one (e.g. "final.tif")
+        if prefix_path.suffix.lower() in [".tif", ".tiff", ".asc", ".csv", ".npy", ".geotiff"]:
+            prefix_path = prefix_path.with_suffix("")
+
+        return self.resolve_path(str(prefix_path))
+
+    def _export_optional_raster(self, grid: np.ndarray | None, suffix: str, name: str) -> str | list[str] | None:
+        if grid is None:
+            return None
+        base_prefix = self._get_resolved_output_prefix()
+        filepath = f"{base_prefix}_{suffix}"
+        fmt = self.outputs_config_obj.output_format
+        raster = BedrockMap(grid=grid, bounds=self.bounds, crs=self.meta.get("crs"), transform=self.meta.get("transform"), name=name)
+        saved = raster.save(filepath, formats=fmt)
+        if isinstance(saved, list):
+            for sf in saved:
+                logger.info(f"   Saved optional {name} map to: {sf}")
+        else:
+            logger.info(f"   Saved optional {name} map to: {saved}")
+        return saved
+
+    def _export_optional_points_csv(self, points: np.ndarray | None, suffix: str) -> str | None:
+        if points is None:
+            return None
+        base_prefix = self._get_resolved_output_prefix()
+        filepath = f"{base_prefix}_{suffix}.csv"
+        saved = save_points_csv(points, filepath)
+        logger.info(f"   Saved optional migrated survey points to: {saved}")
+        return saved
+
+    def export_outputs(self, stage: str | None = None) -> list[str]:
+        """
+        Exports optional spatial datasets according to configured boolean output flags.
+
+        Parameters
+        ----------
+        stage : str, optional
+            Workflow stage name ('migration', 'finalization', or None to export all stages).
+
+        Returns
+        -------
+        saved_files : list of str
+            Paths of saved output files.
+        """
+        saved: list[str] = []
+        cfg_out = self.outputs_config_obj
+
+        if stage is None or stage == "migration":
+            if cfg_out.save_traveltime_grid and self._traveltime_grid is not None:
+                res = self._export_optional_raster(self._traveltime_grid, suffix="traveltime", name="traveltime")
+                if res:
+                    saved.extend([res] if isinstance(res, str) else res)
+            if cfg_out.save_migrated_points and self.migrated_points is not None:
+                res = self._export_optional_points_csv(self.migrated_points, suffix="migrated_points")
+                if res:
+                    saved.append(res)
+
+        if stage is None or stage == "finalization":
+            if cfg_out.save_thickness_grid and self.final_thickness is not None:
+                res = self._export_optional_raster(self.final_thickness, suffix="thickness", name="thickness")
+                if res:
+                    saved.extend([res] if isinstance(res, str) else res)
+            if cfg_out.save_thickness_uncertainty and self.kriged_std is not None:
+                res = self._export_optional_raster(self.kriged_std, suffix="thickness_uncertainty", name="thickness uncertainty")
+                if res:
+                    saved.extend([res] if isinstance(res, str) else res)
+            if cfg_out.save_basal_shear_stress and self.final_bss is not None:
+                res = self._export_optional_raster(self.final_bss, suffix="basal_shear_stress", name="basal shear stress")
+                if res:
+                    saved.extend([res] if isinstance(res, str) else res)
+            if cfg_out.save_basal_shear_stress_uncertainty and self.bss_std is not None:
+                res = self._export_optional_raster(self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty")
+
+        return saved
+
+    def clear_intermediate_grids(self) -> None:
+        """Clears intermediate 2D array grids from memory to optimize footprint for large datasets."""
+        self._traveltime_grid = None
+        self.kriged_thickness = None
+        self.kriged_variance = None
+        self.kriged_std = None
+        self.final_bss = None
+        self.bss_std = None
 
     @property
     def effective_base_dir(self) -> str:
         """Returns the effective base directory for output file resolution."""
         if self.base_dir:
-            return os.path.expanduser(self.base_dir)
-        if self.survey_data_path and isinstance(self.survey_data_path, (str, os.PathLike)):
-            return os.path.dirname(os.path.expanduser(str(self.survey_data_path)))
+            return str(Path(self.base_dir).expanduser())
+        if self.survey_data_path:
+            return str(Path(self.survey_data_path).expanduser().parent)
         return ""
 
-    def resolve_path(self, path: Optional[str]) -> Optional[str]:
+    def resolve_path(self, path: str | Path | os.PathLike | None) -> str | None:
         """Resolves a target file or directory path relative to effective_base_dir if relative."""
-        if not path:
-            return path
-        expanded = os.path.expanduser(path)
-        if os.path.isabs(expanded):
-            return expanded
-        eff_base = self.effective_base_dir
-        if eff_base:
-            return os.path.join(eff_base, expanded)
-        return expanded
+        return resolve_config_path(path, base_dir=self.base_dir, survey_data_path=self.survey_data_path)
 
     @property
     def plots_dir(self) -> str:
@@ -187,15 +319,15 @@ class Solver:
         return self.resolve_path(target)
 
     @plots_dir.setter
-    def plots_dir(self, value: Optional[str]) -> None:
+    def plots_dir(self, value: str | Path | None) -> None:
         self._raw_plots_dir = value
 
     @property
-    def plot_extent(self) -> List[float]:
+    def plot_extent(self) -> list[float]:
         """Returns Matplotlib plot extent [minx, maxx, miny, maxy]."""
         return self.geometry.extent
 
-    def _get_dem_gradients(self) -> Dict[str, np.ndarray]:
+    def _get_dem_gradients(self) -> dict[str, np.ndarray]:
         if self._gradient_cache is None:
             self._gradient_cache = compute_gradients(self.dem_grid, dx=self.dx, dy=self.dy)
         return self._gradient_cache
@@ -210,10 +342,14 @@ class Solver:
         return self._smoothed_slopes_cache[kc_key]
 
     @classmethod
-    def from_config(cls, config_path: Union[str, os.PathLike] = "pysole.json") -> "Solver":
+    def from_config(
+        cls,
+        config_path: str | Path | os.PathLike | dict[str, Any] = "pysole.json",
+        log_level: str | None = None,
+    ) -> "Solver":
         """Initializes Solver instance using inputs defined in pysole.json configuration file."""
         from .config import load_config
-        cfg = load_config(config_path)
+        cfg = load_config(config_path, log_level=log_level)
         inputs = cfg.get("inputs", {})
         spatial = cfg.get("spatial_parameters", {})
         migration_cfg = cfg.get("migration_parameters", {})
@@ -276,13 +412,13 @@ class Solver:
 
     def migrate_eikonal(
         self,
-        travel_times: Union[str, np.ndarray],
-        velocity: Optional[float] = None,
+        travel_times: str | Path | os.PathLike | np.ndarray,
+        velocity: float | None = None,
         interactive: bool = False,
         plotit: bool = False,
     ) -> np.ndarray:
         """Migrates zero-offset GPR or seismic travel times into 3D space using the Eikonal equation."""
-        if not self.survey_data_path and isinstance(travel_times, (str, os.PathLike)):
+        if not self.survey_data_path and isinstance(travel_times, (str, Path, os.PathLike)):
             self.survey_data_path = str(travel_times)
 
         pts = load_survey_points(
@@ -306,6 +442,8 @@ class Solver:
         if dtype_str in ["thickness", "ice_thickness", "depth"]:
             logger.info("   [Survey Data Type: Ice Thickness] Input data represents direct ice thickness measurements. Skipping 3D Eikonal ray migration.")
             self.migrated_points = pts.copy()
+            if self.outputs_config.get("save_migrated_points", False):
+                logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
             return self.migrated_points
 
         if not self.perform_migration:
@@ -313,6 +451,8 @@ class Solver:
             vel = velocity if velocity is not None else 0.16
             unmig_depths = pts[:, 3] * vel if pts[:, 3].max() > 15.0 else pts[:, 3]
             self.migrated_points = np.column_stack((pts[:, 0], pts[:, 1], pts[:, 2], unmig_depths))
+            if self.outputs_config.get("save_migrated_points", False):
+                logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
             return self.migrated_points
 
         if velocity is None:
@@ -359,10 +499,15 @@ class Solver:
         )
         prod_grid1 = krig1_res.bedrock_grid
 
-        slope_floor_deg = float(self.config.get("optimization_parameters", {}).get("slope_floor_deg", 5.0))
-        min_slope_sin1 = np.sin(np.radians(slope_floor_deg))
+        min_slope_sin1 = np.sin(np.radians(self.slope_floor_deg))
         safe_slope_grid1 = np.maximum(opt_slope_sin1, min_slope_sin1)
         tt_grid = np.maximum(prod_grid1 / safe_slope_grid1, 0.0)
+        if self.outline_mask is not None:
+            tt_grid[~self.outline_mask] = np.nan
+        self._traveltime_grid = tt_grid
+
+        if self.outputs_config_obj.save_traveltime_grid:
+            self._export_optional_raster(self._traveltime_grid, suffix="traveltime", name="traveltime")
 
         cached_dem_grads = self._get_dem_gradients()
 
@@ -408,15 +553,18 @@ class Solver:
                 except Exception:
                     break
 
+        if self.outputs_config_obj.save_migrated_points and self.migrated_points is not None:
+            self._export_optional_points_csv(self.migrated_points, suffix="migrated_points")
+
         return self.migrated_points
 
     def optimize_bss(
         self,
-        kc_max: Optional[float] = None,
-        kc_min: Optional[float] = None,
-        d_kc: Optional[float] = None,
-        nrbins: Optional[int] = None,
-        prefix: Optional[str] = None,
+        kc_max: float | None = None,
+        kc_min: float | None = None,
+        d_kc: float | None = None,
+        nrbins: int | None = None,
+        prefix: str | None = None,
         interactive: bool = False,
         plotit: bool = False,
     ) -> float:
@@ -469,11 +617,11 @@ class Solver:
 
     def interpolate_kriging(
         self,
-        method: Optional[str] = None,
-        variogram_model: Optional[str] = None,
+        method: str | None = None,
+        variogram_model: str | None = None,
         interactive: bool = False,
         plotit: bool = False,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         pts = self.migrated_points if self.migrated_points is not None else self.survey_points
         if pts is None:
             raise ValueError("No survey or migrated points available. Run migrate_eikonal() first.")
@@ -517,8 +665,7 @@ class Solver:
         prod_grid = krig_res.bedrock_grid
         prod_var = krig_res.variance_grid
 
-        slope_floor_deg = float(self.config.get("optimization_parameters", {}).get("slope_floor_deg", 5.0))
-        min_slope_sin = np.sin(np.radians(slope_floor_deg))
+        min_slope_sin = np.sin(np.radians(self.slope_floor_deg))
         safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
 
         max_thickness = max(float(np.max(thickness_pts)) * 1.5, 500.0)
@@ -560,7 +707,7 @@ class Solver:
         self.rf_filled_bedrock = self.finalizer.fill_holes(self.kriged_bedrock, n_cores=self.n_cores, show_progress=self.show_progress)
         return self.rf_filled_bedrock
 
-    def apply_geomorph_smoothing(self, min_gap_dist: Optional[float] = None) -> np.ndarray:
+    def apply_geomorph_smoothing(self, min_gap_dist: float | None = None) -> np.ndarray:
         """Applies geomorphological margin blending to surrounding surface DEM."""
         base_grid = self.rf_filled_bedrock if self.rf_filled_bedrock is not None else self.kriged_bedrock
         if base_grid is None:
@@ -575,7 +722,7 @@ class Solver:
         method: str = "gaussian",
         sigma: float = 1.5,
         kernel_size: int = 3,
-        kc_cutoff: Optional[float] = None,
+        kc_cutoff: float | None = None,
     ) -> np.ndarray:
         """Applies spatial smoothing to calculated bedrock DEM grid ('gaussian', 'median', 'fft_lowpass')."""
         method = method.lower().strip()
@@ -620,14 +767,14 @@ class Solver:
         self,
         interactive: bool = True,
         plotit: bool = True,
-        random_forest_gap_filling: Optional[bool] = None,
-        apply_margin_blend: Optional[bool] = None,
-        min_gap_dist: Optional[float] = None,
+        random_forest_gap_filling: bool | None = None,
+        apply_margin_blend: bool | None = None,
+        min_gap_dist: float | None = None,
         smooth_bedrock: bool = False,
         smoothing_method: str = "gaussian",
         smoothing_sigma: float = 1.5,
         smoothing_kernel_size: int = 3,
-        smoothing_kc_cutoff: Optional[float] = None,
+        smoothing_kc_cutoff: float | None = None,
     ) -> BedrockMap:
         """
         Executes full final sequence towards continuous bedrock topography result.
@@ -831,6 +978,8 @@ class Solver:
                 interactive=interactive,
             )
 
+        self.export_outputs("finalization")
+
         self.final_grid = self.blended_bedrock
         return BedrockMap(
             grid=self.final_grid,
@@ -856,9 +1005,9 @@ class Solver:
         fin_cfg = cfg.get("finalization_parameters", {})
         outputs = cfg.get("outputs", {})
 
-        survey_data_path = inputs.get("survey_data_path")
+        survey_data_path = self.survey_data_path or inputs.get("survey_data_path")
         if not survey_data_path:
-            raise ValueError("Configuration 'inputs.survey_data_path' must be specified.")
+            raise ValueError("Survey data path must be specified via survey_data_path parameter or configuration 'inputs.survey_data_path'.")
 
         cfg_name = getattr(self, "config_path", "pysole.json")
         logger.info("================================================================================")
@@ -907,16 +1056,14 @@ class Solver:
             smoothing_kc_cutoff=fin_cfg.get("smoothing_kc_cutoff", None),
         )
 
-        output_name = outputs.get("output_name")
-        output_format = outputs.get("output_format")
-        if output_name:
-            stem, _ = os.path.splitext(output_name)
-            resolved_output_stem = self.resolve_path(stem if stem else output_name)
-            saved_res = bedrock_map.save(resolved_output_stem, formats=output_format)
-            if isinstance(saved_res, list):
-                for sf in saved_res:
-                    logger.info(f"5. Saved predicted bedrock map to: {sf}")
-            else:
-                logger.info(f"5. Saved predicted bedrock map to: {saved_res}")
+        output_format = self.outputs_config_obj.output_format
+        resolved_prefix = self._get_resolved_output_prefix()
+        bedrock_filepath = f"{resolved_prefix}_bedrock"
+        saved_res = bedrock_map.save(bedrock_filepath, formats=output_format)
+        if isinstance(saved_res, list):
+            for sf in saved_res:
+                logger.info(f"5. Saved predicted bedrock map to: {sf}")
+        else:
+            logger.info(f"5. Saved predicted bedrock map to: {saved_res}")
 
         return bedrock_map

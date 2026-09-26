@@ -2,11 +2,11 @@
 Interpolation, Margin Blending, Kriging, and Random Forest Hole Filling.
 Ported from MATLAB script INTERPOL.m by Daniel Binder (2011) and PySole modern workflow.
 Supports Ordinary Kriging, Universal Kriging (default SIA physical drift & quadratic drift), and Regression Kriging.
-Uses high-performance built-in vector Dual Kriging by default with optional PyKrige fallback.
+Uses high-performance built-in vector Dual Kriging.
 """
 
 from dataclasses import dataclass
-from typing import Tuple, Dict, Any, Optional, Union, List
+from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 import os
 import numpy as np
@@ -38,7 +38,7 @@ class KrigingEngine:
         self,
         dem: np.ndarray,
         geometry: GridGeometry,
-        outline_mask: Optional[np.ndarray] = None,
+        outline_mask: np.ndarray | None = None,
     ):
         self.dem = dem
         self.geometry = geometry
@@ -49,8 +49,8 @@ class KrigingEngine:
         sample_points: np.ndarray,
         method: str = "universal",
         variogram_model: str = "spherical",
-        opt_slope_grid: Optional[np.ndarray] = None,
-        drift_terms: Optional[List[str]] = None,
+        opt_slope_grid: np.ndarray | None = None,
+        drift_terms: list[str] | None = None,
         include_zero_boundary_condition: bool = True,
         n_cores: int = -1,
         built_in_kriging: bool = True,
@@ -83,7 +83,7 @@ class BedrockFinalizer:
         self,
         dem: np.ndarray,
         geometry: GridGeometry,
-        outline_mask: Optional[np.ndarray] = None,
+        outline_mask: np.ndarray | None = None,
     ):
         self.dem = dem
         self.geometry = geometry
@@ -102,8 +102,8 @@ class BedrockFinalizer:
 
     def blend_margin(
         self,
-        bedrock_input: Union[np.ndarray, Tuple[np.ndarray, ...]],
-        min_gap_dist: Optional[float] = None,
+        bedrock_input: np.ndarray | tuple[np.ndarray, ...],
+        min_gap_dist: float | None = None,
     ) -> np.ndarray:
         """Applies geomorphological margin blending to surrounding terrain DEM."""
         return blend_margin_topography(
@@ -117,10 +117,10 @@ class BedrockFinalizer:
 
 def blend_margin_topography(
     dem: np.ndarray,
-    bedrock_input: Union[np.ndarray, Tuple[np.ndarray, ...]],
+    bedrock_input: np.ndarray | tuple[np.ndarray, ...],
     boundary_mask: np.ndarray,
     geometry: GridGeometry,
-    min_gap_dist: Optional[float] = None,
+    min_gap_dist: float | None = None,
 ) -> np.ndarray:
     """
     Geomorphological margin blending: Assures a smooth transition from calculated bedrock
@@ -211,10 +211,10 @@ def built_in_kriging_interpolation(
     y_coords: np.ndarray,
     method: str = "universal",
     variogram_model: str = "spherical",
-    external_drift_grid: Optional[np.ndarray] = None,
+    external_drift_grid: np.ndarray | None = None,
     n_cores: int = -1,
     show_progress: bool = True,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Robust native NumPy/SciPy Ordinary & Universal Kriging solver with zero-centered
     spatial coordinate normalization and diagonal regularization to prevent ill-conditioned matrix explosion.
@@ -268,7 +268,7 @@ def built_in_kriging_interpolation(
     is_sia_mode = (method_clean in ["sia_thickness", "sia", "sia_drift"]) or (external_drift_grid is not None)
     use_universal = (method_clean in ["universal", "universal_kriging", "sia_thickness", "sia", "sia_drift"]) and (N_pts >= 4)
 
-    u_flat: Optional[np.ndarray] = None
+    u_flat: np.ndarray | None = None
     if use_universal:
         if is_sia_mode and external_drift_grid is not None and external_drift_grid.shape == (M, N):
             u_mean = float(np.mean(external_drift_grid))
@@ -340,7 +340,7 @@ def built_in_kriging_interpolation(
     w_sample = w_z[:N_pts]
     w_drift = w_z[N_pts:]
 
-    def _process_chunk(chunk_tuple: Tuple[int, int]) -> Tuple[int, int, np.ndarray, np.ndarray]:
+    def _process_chunk(chunk_tuple: tuple[int, int]) -> tuple[int, int, np.ndarray, np.ndarray]:
         start_idx, end_idx = chunk_tuple
         sub_size = end_idx - start_idx
         sub_x = xx_flat[start_idx:end_idx]
@@ -418,10 +418,10 @@ def kriging_interpolation(
     geometry: GridGeometry,
     method: str = "universal",
     variogram_model: str = "spherical",
-    dem_grid: Optional[np.ndarray] = None,
-    opt_slope_grid: Optional[np.ndarray] = None,
-    drift_terms: Optional[List[str]] = None,
-    outline_mask: Optional[np.ndarray] = None,
+    dem_grid: np.ndarray | None = None,
+    opt_slope_grid: np.ndarray | None = None,
+    drift_terms: list[str] | None = None,
+    outline_mask: np.ndarray | None = None,
     include_zero_boundary_condition: bool = True,
     n_cores: int = -1,
     built_in_kriging: bool = True,
@@ -455,7 +455,14 @@ def kriging_interpolation(
             b_x = x_coords[sub_indices[:, 1]]
             b_y = y_coords[sub_indices[:, 0]]
             b_val = np.zeros(len(b_x))
-            b_pts = np.column_stack((b_x, b_y, b_val))
+            n_cols = sample_points.shape[1] if sample_points.ndim > 1 else 3
+            if n_cols > 3:
+                b_pts = np.zeros((len(b_x), n_cols), dtype=np.float64)
+                b_pts[:, 0] = b_x
+                b_pts[:, 1] = b_y
+                b_pts[:, 2] = b_val
+            else:
+                b_pts = np.column_stack((b_x, b_y, b_val))
             sample_points = np.vstack([sample_points, b_pts])
 
     valid = ~np.isnan(sample_points[:, 0]) & ~np.isnan(sample_points[:, 1]) & ~np.isnan(sample_points[:, 2])

@@ -29,11 +29,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added centralized logging module (`pysole.logging`) with configurable verbosity levels (`INFO`, `DEBUG`), colored console output, and optional file logging.
 - **`pysole.plotting` Module**:
   - Added dedicated plotting module (`pysole.plotting`) providing 11 high-definition visualization functions for variograms, Eikonal ray displacement vectors, Kriging bedrock elevation & uncertainty maps, ice thickness maps/histograms, and basal shear stress maps/histograms.
+- **`OutputsConfig` Utility Methods & Extended Optional Exports**:
+  - Added `active_exports()` and `to_dict()` helper methods to `OutputsConfig` dataclass for programmatic inspection of output raster flags.
+  - Added automated unit test suite `tests/test_optional_outputs.py`.
+- **CLI Flags & Logging Overrides**:
+  - Expanded CLI entry point with `-V` / `--version` package version display and `-v` / `--verbose` / `--debug` flags acting as temporary runtime overrides taking precedence over `pysole.json` log level settings.
 
 ### Changed
+- **Python 3.10+ Native Type Annotation Standard**:
+  - Replaced legacy `typing` imports (`Union`, `Optional`, `List`, `Dict`, `Tuple`) with native Python 3.10+ type syntax (`Path | str`, `| None`, `dict`, `list`, `tuple`) across all core package modules and unit test files.
+- **Resource Management & Context Managers**:
+  - Enclosed all `rasterio.open()` dataset reads and writes in `with` context manager blocks for immediate resource cleanup and file handle safety.
 - Refactored `Solver` into a high-level orchestrator composing decoupled sub-engine instances (`self.migrator`, `self.bss_optimizer`, `self.kriging_engine`, `self.finalizer`).
 - Standardized figure filenames and export workflows into `figures/` subdirectories for Wurtenkees (WUK) and Goldbergkees (GOK) examples.
-- Updated documentation (`README.md`) with comprehensive mathematical derivations, API sub-engine references, and parameter reference tables.
+- Updated documentation (`README.md`) with comprehensive mathematical derivations, API sub-engine references, CLI options, and parameter reference tables.
+
+### Fixed
+- **DEM Grid Orientation & Path Ingestion**:
+  - Fixed `load_dem()` in `raster.py` to ensure `pathlib.Path` input objects trigger top-to-bottom grid flipping checks (`if not isinstance(dem_input, np.ndarray):`).
+  - Extended path validation across `load_survey_points()`, `migrate_eikonal()`, and `load_dem()` to accept `pathlib.Path` and `os.PathLike` objects.
+- **Boundary Point Dimension Stacking**:
+  - Fixed dimension matching in `kriging_interpolation()` when appending zero-value boundary points (`b_pts`) to 4-column survey point arrays (`[x, y, z_surf, depth]`).
+- **Pipeline Orchestrator Fallback**:
+  - Restored `self.survey_data_path` fallback resolution in `Solver.run_pipeline()`.
 
 ---
 

@@ -56,7 +56,13 @@
     },
     "outputs": {
         "output_format": "tif",
-        "output_name": "wuk_final_bedrock",
-        "plots_dir": "figures"
+        "output_prefix": "wuk_final",
+        "plots_dir": "figures",
+        "save_traveltime_grid": false,
+        "save_migrated_points": false,
+        "save_thickness_grid": false,
+        "save_thickness_uncertainty": false,
+        "save_basal_shear_stress": false,
+        "save_basal_shear_stress_uncertainty": false
     }
 }

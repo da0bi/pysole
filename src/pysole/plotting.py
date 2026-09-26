@@ -5,13 +5,25 @@ variogram optimization, 3D ray migration vectors, Kriging uncertainty, and bedro
 """
 
 import os
+from pathlib import Path
 import warnings
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Any
 import matplotlib
 if not os.environ.get("DISPLAY"):
     matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+def _save_figure(plt_obj, plots_dir: str | Path | os.PathLike | None, filename: str) -> Path | None:
+    """Helper to save Matplotlib figures to target directory using pathlib.Path."""
+    if not plots_dir:
+        return None
+    target_dir = Path(plots_dir).expanduser()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / filename
+    plt_obj.savefig(target_path, dpi=300, bbox_inches="tight")
+    return target_path
 
 
 def _get_transparent_cmap(cmap_name: str):
@@ -28,11 +40,11 @@ def _get_transparent_cmap(cmap_name: str):
 def plot_unfiltered_product_variogram(
     distances: np.ndarray,
     semivars: np.ndarray,
-    model_curve: Dict[str, np.ndarray],
+    model_curve: dict[str, np.ndarray],
     a_range: float,
     sill: float,
     nugget: float,
-    plots_dir: Optional[str] = None,
+    plots_dir: str | Path | None = None,
     prefix: str = "01_",
     stage_name: str = "stage1",
     interactive: bool = False,
@@ -53,9 +65,7 @@ def plot_unfiltered_product_variogram(
         plt.legend()
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(os.path.join(plots_dir, f"{prefix}01_bss_{stage_name}_unfiltered_product_variogram.png"), dpi=300, bbox_inches="tight")
+        _save_figure(plt, plots_dir, f"{prefix}01_bss_{stage_name}_unfiltered_product_variogram.png")
 
         if interactive:
             plt.draw()
@@ -67,10 +77,10 @@ def plot_unfiltered_product_variogram(
 
 
 def plot_bss_kc_optimization_variograms(
-    evaluated_variograms: List[Dict[str, Any]],
+    evaluated_variograms: list[dict[str, Any]],
     best_kc: float,
-    all_kc_variances: List[Tuple[float, float]],
-    plots_dir: Optional[str] = None,
+    all_kc_variances: list[tuple[float, float]],
+    plots_dir: str | Path | None = None,
     prefix: str = "01_",
     stage_name: str = "stage1",
     interactive: bool = False,
@@ -111,9 +121,7 @@ def plot_bss_kc_optimization_variograms(
 
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(os.path.join(plots_dir, f"{prefix}02_bss_{stage_name}_kc_optimization_variograms.png"), dpi=300, bbox_inches="tight")
+        _save_figure(plt, plots_dir, f"{prefix}02_bss_{stage_name}_kc_optimization_variograms.png")
 
         if interactive:
             plt.draw()
@@ -132,8 +140,8 @@ def plot_migration_displacement_vectors(
     dyi: np.ndarray,
     x_coords: np.ndarray,
     y_coords: np.ndarray,
-    outline_mask: Optional[np.ndarray] = None,
-    plots_dir: Optional[str] = None,
+    outline_mask: np.ndarray | None = None,
+    plots_dir: str | Path | None = None,
     interactive: bool = False,
 ):
     """Plots 2-panel figure matching MIG.m: traveltime field with horizontal ray displacement vectors and migrated survey points."""
@@ -233,13 +241,7 @@ def plot_migration_displacement_vectors(
 
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(
-                os.path.join(plots_dir, "02_01_eikonal_migration_displacement_vectors.png"),
-                dpi=300,
-                bbox_inches="tight",
-            )
+        _save_figure(plt, plots_dir, "02_01_eikonal_migration_displacement_vectors.png")
 
         if interactive:
             plt.draw()
@@ -252,11 +254,11 @@ def plot_migration_displacement_vectors(
 
 def plot_kriging_bedrock_and_uncertainty(
     kriged_bedrock: np.ndarray,
-    kriged_std: Optional[np.ndarray] = None,
-    pts: Optional[np.ndarray] = None,
-    plot_extent: Optional[List[float]] = None,
-    kriged_variance: Optional[np.ndarray] = None,
-    plots_dir: Optional[str] = None,
+    kriged_std: np.ndarray | None = None,
+    pts: np.ndarray | None = None,
+    plot_extent: list[float] | None = None,
+    kriged_variance: np.ndarray | None = None,
+    plots_dir: str | Path | None = None,
     interactive: bool = False,
 ):
     """Plots 2-panel figure showing interpolated bedrock elevation and Kriging standard uncertainty (± m)."""
@@ -299,9 +301,7 @@ def plot_kriging_bedrock_and_uncertainty(
 
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(os.path.join(plots_dir, "04_01_kriging_bedrock_elevation_and_uncertainty.png"), dpi=300, bbox_inches="tight")
+        _save_figure(plt, plots_dir, "04_01_kriging_bedrock_elevation_and_uncertainty.png")
 
         if interactive:
             plt.draw()
@@ -314,11 +314,11 @@ def plot_kriging_bedrock_and_uncertainty(
 
 def plot_calculated_bedrock_map(
     bedrock_grid: np.ndarray,
-    outline_mask: Optional[np.ndarray],
-    plot_extent: List[float],
+    outline_mask: np.ndarray | None,
+    plot_extent: list[float],
     smooth_bedrock: bool = False,
     smoothing_sigma: float = 1.5,
-    plots_dir: Optional[str] = None,
+    plots_dir: str | Path | None = None,
     interactive: bool = False,
 ):
     """Plots calculated bedrock elevation with surrounding terrain contours."""
@@ -376,9 +376,7 @@ def plot_calculated_bedrock_map(
         plt.ylabel("Y [m]")
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(os.path.join(plots_dir, "05_01_calculated_bedrock_map.png"), dpi=300, bbox_inches="tight")
+        _save_figure(plt, plots_dir, "05_01_calculated_bedrock_map.png")
 
         if interactive:
             plt.draw()
@@ -391,8 +389,8 @@ def plot_calculated_bedrock_map(
 
 def plot_final_blended_bedrock_map(
     blended_bedrock: np.ndarray,
-    plot_extent: List[float],
-    plots_dir: Optional[str] = None,
+    plot_extent: list[float],
+    plots_dir: str | Path | None = None,
     interactive: bool = False,
 ):
     """Plots final geomorphologically blended bedrock elevation raster."""
@@ -408,9 +406,7 @@ def plot_final_blended_bedrock_map(
         plt.ylabel("Y [m]")
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(os.path.join(plots_dir, "06_01_final_blended_bedrock_map.png"), dpi=300, bbox_inches="tight")
+        _save_figure(plt, plots_dir, "06_01_final_blended_bedrock_map.png")
 
         if interactive:
             plt.draw()
@@ -424,11 +420,11 @@ def plot_final_blended_bedrock_map(
 def plot_final_ice_thickness_and_uncertainty(
     final_thickness: np.ndarray,
     kriged_std: np.ndarray,
-    outline_mask: Optional[np.ndarray],
-    plot_extent: List[float],
+    outline_mask: np.ndarray | None,
+    plot_extent: list[float],
     mean_thick: float,
     mean_unc: float,
-    plots_dir: Optional[str] = None,
+    plots_dir: str | Path | None = None,
     interactive: bool = False,
 ):
     """Plots final ice thickness map and Kriging standard uncertainty field (+- meters)."""
@@ -484,9 +480,7 @@ def plot_final_ice_thickness_and_uncertainty(
 
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(os.path.join(plots_dir, "07_01_final_ice_thickness_map.png"), dpi=300, bbox_inches="tight")
+        _save_figure(plt, plots_dir, "07_01_final_ice_thickness_map.png")
 
         if interactive:
             plt.draw()
@@ -499,9 +493,9 @@ def plot_final_ice_thickness_and_uncertainty(
 
 def plot_final_ice_thickness_histogram(
     final_thickness: np.ndarray,
-    outline_mask: Optional[np.ndarray],
+    outline_mask: np.ndarray | None,
     mean_thick: float,
-    plots_dir: Optional[str] = None,
+    plots_dir: str | Path | None = None,
     interactive: bool = False,
 ):
     """Plots individual histogram of final ice depth distribution indicating mean ice depth."""
@@ -550,9 +544,7 @@ def plot_final_ice_thickness_histogram(
         plt.legend(loc="upper left")
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(os.path.join(plots_dir, "07_02_final_ice_thickness_histogram.png"), dpi=300, bbox_inches="tight")
+        _save_figure(plt, plots_dir, "07_02_final_ice_thickness_histogram.png")
 
         if interactive:
             plt.draw()
@@ -566,11 +558,11 @@ def plot_final_ice_thickness_histogram(
 def plot_final_basal_shear_stress_and_uncertainty(
     final_bss: np.ndarray,
     bss_std: np.ndarray,
-    outline_mask: Optional[np.ndarray],
-    plot_extent: List[float],
+    outline_mask: np.ndarray | None,
+    plot_extent: list[float],
     mean_bss: float,
     mean_bss_unc: float,
-    plots_dir: Optional[str] = None,
+    plots_dir: str | Path | None = None,
     interactive: bool = False,
 ):
     """Plots 2-panel figure showing Basal Shear Stress distribution (\u03c4b [kPa]) and Kriging BSS uncertainty (\u00b1 kPa)."""
@@ -629,9 +621,7 @@ def plot_final_basal_shear_stress_and_uncertainty(
 
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(os.path.join(plots_dir, "08_01_final_basal_shear_stress_map.png"), dpi=300, bbox_inches="tight")
+        _save_figure(plt, plots_dir, "08_01_final_basal_shear_stress_map.png")
 
         if interactive:
             plt.draw()
@@ -644,9 +634,9 @@ def plot_final_basal_shear_stress_and_uncertainty(
 
 def plot_final_basal_shear_stress_histogram(
     final_bss: np.ndarray,
-    outline_mask: Optional[np.ndarray],
+    outline_mask: np.ndarray | None,
     mean_bss: float,
-    plots_dir: Optional[str] = None,
+    plots_dir: str | Path | None = None,
     interactive: bool = False,
 ):
     """Plots individual histogram of Basal Shear Stress distribution (\u03c4b [kPa]) indicating mean BSS value."""
@@ -695,9 +685,7 @@ def plot_final_basal_shear_stress_histogram(
         plt.legend(loc="upper left")
         plt.tight_layout()
 
-        if plots_dir:
-            os.makedirs(plots_dir, exist_ok=True)
-            plt.savefig(os.path.join(plots_dir, "08_02_final_basal_shear_stress_histogram.png"), dpi=300, bbox_inches="tight")
+        _save_figure(plt, plots_dir, "08_02_final_basal_shear_stress_histogram.png")
 
         if interactive:
             plt.draw()

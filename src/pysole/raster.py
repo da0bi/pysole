@@ -7,7 +7,8 @@ Handles Shapefiles/GeoJSON with internal holes (nunataks) and DEM grid resamplin
 import os
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Tuple, Dict, Any, Optional, Union, List
+from pathlib import Path
+from typing import Any
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator, griddata
 from shapely.geometry import Polygon, MultiPolygon
@@ -21,20 +22,20 @@ class GridGeometry:
     Stores shape, resolution (dx, dy), 1D coordinates (x_coords, y_coords),
     bounding box (minx, miny, maxx, maxy), and Matplotlib extent [minx, maxx, miny, maxy].
     """
-    shape: Tuple[int, int]
+    shape: tuple[int, int]
     dx: float
     dy: float
     x_coords: np.ndarray
     y_coords: np.ndarray
-    bounds: Tuple[float, float, float, float]
+    bounds: tuple[float, float, float, float]
 
     @property
-    def extent(self) -> List[float]:
+    def extent(self) -> list[float]:
         """Returns Matplotlib plot extent [minx, maxx, miny, maxy]."""
         return [self.bounds[0], self.bounds[2], self.bounds[1], self.bounds[3]]
 
     @cached_property
-    def meshgrid(self) -> Tuple[np.ndarray, np.ndarray]:
+    def meshgrid(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Lazy-evaluated cached 2D spatial meshgrid (xx, yy).
         Generates 2D spatial coordinate matrices ONCE in memory and caches the result.
@@ -44,12 +45,12 @@ class GridGeometry:
     @classmethod
     def create(
         cls,
-        shape: Tuple[int, int],
+        shape: tuple[int, int],
         dx: float = 1.0,
         dy: float = 1.0,
-        bounds: Optional[Tuple[float, float, float, float]] = None,
-        x_coords: Optional[np.ndarray] = None,
-        y_coords: Optional[np.ndarray] = None,
+        bounds: tuple[float, float, float, float] | None = None,
+        x_coords: np.ndarray | None = None,
+        y_coords: np.ndarray | None = None,
     ) -> "GridGeometry":
         x_c, y_c, b = ensure_spatial_coords(shape, dx=dx, dy=dy, bounds=bounds, x_coords=x_coords, y_coords=y_coords)
         return cls(shape=shape, dx=float(dx), dy=float(dy), x_coords=x_c, y_coords=y_c, bounds=b)
@@ -79,10 +80,10 @@ class BedrockMap:
     def __init__(
         self,
         grid: np.ndarray,
-        bounds: Tuple[float, float, float, float],
+        bounds: tuple[float, float, float, float],
         crs: Any = None,
         transform: Any = None,
-        name: str = "final_bedrock",
+        name: str = "bedrock",
     ):
         self.grid = grid
         self.bounds = bounds
@@ -91,14 +92,14 @@ class BedrockMap:
         self.name = name
         self.shape = grid.shape
 
-    def save(self, filepath: str, formats: Union[str, List[str], None] = None) -> Union[str, List[str]]:
+    def save(self, filepath: str | Path, formats: str | list[str] | None = None) -> str | list[str]:
         """
         Saves the predicted bedrock grid to GeoTIFF (.tif), ESRI ASCII Grid (.asc),
         CSV (.csv), or NumPy (.npy) format(s). Supports exporting multiple or all formats.
 
         Parameters
         ----------
-        filepath : str
+        filepath : str or Path
             Base or target file path (e.g. 'final_bedrock.tif' or 'examples/wuk/wuk_final_bedrock').
         formats : str or list of str, optional
             Output format(s): 'tif', 'asc', 'csv', 'npy', or 'all' (exports all four formats).
@@ -109,14 +110,13 @@ class BedrockMap:
         saved_files : str or list of str
             Path of saved file, or list of saved file paths if multiple formats exported.
         """
-        filepath = os.path.expanduser(str(filepath))
-        if os.path.isdir(filepath) or filepath.endswith("/") or filepath.endswith("\\"):
-            filepath = os.path.join(filepath, "final_bedrock.tif")
+        path_obj = Path(filepath).expanduser()
+        if path_obj.is_dir() or str(filepath).endswith("/") or str(filepath).endswith("\\"):
+            path_obj = path_obj / "final_bedrock.tif"
 
-        base_path, ext = os.path.splitext(filepath)
-        dir_name = os.path.dirname(filepath)
-        if dir_name:
-            os.makedirs(dir_name, exist_ok=True)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+        ext = path_obj.suffix.lower().lstrip(".")
+        stem = str(path_obj.with_suffix(""))
 
         fmt_list = []
         if formats is not None:
@@ -133,16 +133,16 @@ class BedrockMap:
                     fmt_list.append(str(f).lower().strip("."))
         else:
             if ext:
-                fmt_list = [ext.lower().strip(".")]
+                fmt_list = [ext]
             else:
                 fmt_list = ["tif"]
 
         saved_files = []
         for fmt in fmt_list:
             if len(fmt_list) == 1 and ext and not formats:
-                target_path = filepath
+                target_path = str(path_obj)
             else:
-                target_path = f"{base_path}.{fmt}"
+                target_path = f"{stem}.{fmt}"
 
             if fmt in ["tif", "tiff", "geotiff"]:
                 import rasterio
@@ -198,13 +198,13 @@ class BedrockMap:
 
 
 def ensure_spatial_coords(
-    shape: Tuple[int, int],
+    shape: tuple[int, int],
     dx: float = 1.0,
     dy: float = 1.0,
-    bounds: Optional[Tuple[float, float, float, float]] = None,
-    x_coords: Optional[np.ndarray] = None,
-    y_coords: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float, float, float]]:
+    bounds: tuple[float, float, float, float] | None = None,
+    x_coords: np.ndarray | None = None,
+    y_coords: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, tuple[float, float, float, float]]:
     """
     Ensures 1D spatial coordinate vectors (x_coords, y_coords) and bounding box (minx, miny, maxx, maxy)
     are consistently defined and aligned for a given grid shape (M_rows, N_cols).
@@ -213,7 +213,7 @@ def ensure_spatial_coords(
     -------
     x_coords : 1D np.ndarray (size N)
     y_coords : 1D np.ndarray (size M)
-    bounds : Tuple[float, float, float, float] (minx, miny, maxx, maxy)
+    bounds : tuple[float, float, float, float] (minx, miny, maxx, maxy)
     """
     M, N = shape
     if bounds is not None:
@@ -234,8 +234,8 @@ def ensure_spatial_coords(
 
 def check_projected_metric_crs(
     crs: Any = None,
-    coords: Optional[np.ndarray] = None,
-    bounds: Optional[Tuple[float, float, float, float]] = None,
+    coords: np.ndarray | None = None,
+    bounds: tuple[float, float, float, float] | None = None,
 ) -> None:
     """
     Verifies that input spatial coordinates use a projected metric coordinate system (e.g. UTM meters).
@@ -315,8 +315,8 @@ def resample_dem(
     native_dy: float,
     target_dx: float,
     target_dy: float,
-    bounds: Tuple[float, float, float, float],
-) -> Tuple[np.ndarray, Tuple[float, float, float, float]]:
+    bounds: tuple[float, float, float, float],
+) -> tuple[np.ndarray, tuple[float, float, float, float]]:
     """
     Resamples a 2D DEM grid to target dx and dy pixel resolutions using bilinear interpolation.
     """
@@ -365,11 +365,11 @@ def resample_dem(
 
 
 def load_dem(
-    dem_input: Union[str, np.ndarray],
-    dx: Optional[float] = None,
-    dy: Optional[float] = None,
-    bounds: Optional[Tuple[float, float, float, float]] = None,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+    dem_input: str | Path | os.PathLike | np.ndarray,
+    dx: float | None = None,
+    dy: float | None = None,
+    bounds: tuple[float, float, float, float] | None = None,
+) -> tuple[np.ndarray, dict[str, Any]]:
     """
     Load a DEM from a file path (GeoTIFF, ASCII Grid, CSV, NPY) or numpy array,
     extracting spatial metadata directly from the DEM file, and performing DEM resampling
@@ -391,8 +391,8 @@ def load_dem(
                 f"Defaulting origin to (0.0, 0.0) with pixel spacing dx={native_dx:.2f} m, dy={native_dy:.2f} m."
             )
             calc_bounds = (0.0, 0.0, float(width) * native_dx, float(height) * native_dy)
-    elif isinstance(dem_input, str):
-        ext = os.path.splitext(dem_input)[1].lower()
+    elif dem_input is not None:
+        ext = Path(dem_input).suffix.lower()
 
         # 1. GeoTIFF / Raster formats
         if ext in [".tif", ".tiff", ".geotiff"]:
@@ -463,7 +463,7 @@ def load_dem(
     # Standard GIS rasters (GeoTIFF, ASCII Grid, CSV, NPY) store Row 0 at Y_max (top-down).
     # PySole's spatial coordinate vector y_coords[0] represents Y_min (bottom-up).
     # Flip grid vertically on file load so Row 0 aligns with y_coords[0] (Y_min).
-    if isinstance(dem_input, str):
+    if not isinstance(dem_input, np.ndarray):
         grid = grid[::-1, :]
 
     calc_dx = dx if dx is not None else native_dx
@@ -495,7 +495,7 @@ def load_dem(
     return grid_out, meta
 
 
-def validate_and_extract_polygons(gdf: Any) -> List[Any]:
+def validate_and_extract_polygons(gdf: Any) -> list[Any]:
     """
     Validates vector geometries for internal hole compliance.
     If interior holes fail topological criteria (e.g. self-intersecting or invalid),
@@ -539,9 +539,9 @@ def validate_and_extract_polygons(gdf: Any) -> List[Any]:
 
 
 def load_outline(
-    outline_input: Union[str, np.ndarray, None],
+    outline_input: str | Path | os.PathLike | np.ndarray | None,
     dem_grid: np.ndarray,
-    meta: Dict[str, Any],
+    meta: dict[str, Any],
 ) -> np.ndarray:
     """
     Load body outline (Shapefile/GeoJSON/polygon coordinates or raster mask),
@@ -562,8 +562,8 @@ def load_outline(
     height, width = dem_grid.shape
     bounds = meta.get("bounds", (0.0, 0.0, float(width), float(height)))
 
-    if isinstance(outline_input, str):
-        ext = os.path.splitext(outline_input)[1].lower()
+    if outline_input is not None and not isinstance(outline_input, np.ndarray):
+        ext = Path(outline_input).suffix.lower()
 
         # 1. Shapefile / GeoJSON / GeoPackage vector polygons with interior holes (nunataks)
         if ext in [".shp", ".geojson", ".gpkg"]:
@@ -626,8 +626,7 @@ def load_outline(
                 else:
                     rings = [raw_coords[:, :2]]
 
-                if len(rings) > 0:
-                    from matplotlib.path import Path
+                    from matplotlib.path import Path as MplPath
 
                     minx, miny, maxx, maxy = bounds
                     dx = meta.get("dx", (maxx - minx) / width)
@@ -642,11 +641,11 @@ def load_outline(
                     xx, yy = np.meshgrid(x_c, y_c)
                     pts = np.column_stack((xx.ravel(), yy.ravel()))
 
-                    outer_mask = Path(rings[0]).contains_points(pts).reshape((height, width))
+                    outer_mask = MplPath(rings[0]).contains_points(pts).reshape((height, width))
                     hole_mask = np.zeros((height, width), dtype=bool)
                     for hole_ring in rings[1:]:
                         if len(hole_ring) >= 3:
-                            hole_mask |= Path(hole_ring).contains_points(pts).reshape((height, width))
+                            hole_mask |= MplPath(hole_ring).contains_points(pts).reshape((height, width))
 
                     return outer_mask & ~hole_mask
         except Exception:
@@ -656,17 +655,17 @@ def load_outline(
 
 
 def load_survey_points(
-    survey_input: Union[str, np.ndarray, os.PathLike],
-    bounds: Optional[Tuple[float, float, float, float]] = None,
-    dem_grid: Optional[np.ndarray] = None,
-    x_coords: Optional[np.ndarray] = None,
-    y_coords: Optional[np.ndarray] = None,
+    survey_input: str | Path | os.PathLike | np.ndarray,
+    bounds: tuple[float, float, float, float] | None = None,
+    dem_grid: np.ndarray | None = None,
+    x_coords: np.ndarray | None = None,
+    y_coords: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Unified ingestion and validation for scattered survey point datasets.
     Loads CSV, whitespace-delimited files, or NumPy arrays, converts coordinates, and validates bounds.
     """
-    if isinstance(survey_input, (str, os.PathLike)):
+    if isinstance(survey_input, (str, Path, os.PathLike)):
         filepath = str(survey_input)
         try:
             pts = np.loadtxt(filepath, delimiter="," if filepath.endswith(".csv") else None)
@@ -729,3 +728,44 @@ def load_survey_points(
 
     return pts
 
+
+def save_points_csv(
+    points: np.ndarray,
+    filepath: str | Path,
+    headers: list[str] | None = None,
+) -> str:
+    """
+    Exports a 2D point array (e.g. migrated survey points) to a CSV text file.
+
+    Parameters
+    ----------
+    points : np.ndarray
+        2D array of point coordinates and values (e.g. shape (N, 4) for [x, y, z_surf, depth]).
+    filepath : str or Path
+        Target file path (e.g. 'output_migrated_points.csv').
+    headers : list of str, optional
+        Header column names. If None, defaults to ['x', 'y', 'z_surface', 'depth_migrated'].
+
+    Returns
+    -------
+    saved_path : str
+        Path of the saved CSV file.
+    """
+    path_obj = Path(filepath).expanduser()
+    if path_obj.suffix.lower() != ".csv":
+        path_obj = path_obj.with_suffix(".csv")
+
+    path_obj.parent.mkdir(parents=True, exist_ok=True)
+    target_path = str(path_obj)
+
+    if headers is None:
+        if points.ndim > 1 and points.shape[1] == 4:
+            headers = ["x", "y", "z_surface", "depth_migrated"]
+        elif points.ndim > 1 and points.shape[1] == 3:
+            headers = ["x", "y", "value"]
+        else:
+            headers = [f"col_{i+1}" for i in range(points.shape[1] if points.ndim > 1 else 1)]
+
+    header_str = ",".join(headers)
+    np.savetxt(target_path, points, delimiter=",", header=header_str, comments="", fmt="%.6f")
+    return target_path

@@ -7,10 +7,11 @@ Saves normalized product variogram comparison plots across all evaluated kc to p
 """
 
 from dataclasses import dataclass
-from typing import Tuple, Dict, Any, Optional, List
+from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import os
+from pathlib import Path
 from scipy.spatial.distance import pdist
 from scipy.optimize import curve_fit
 from scipy.interpolate import RegularGridInterpolator
@@ -31,7 +32,7 @@ class OptimizationResult:
     optimal_kc: float
     optimal_slope_grid: np.ndarray
     all_kc_variances: np.ndarray
-    all_smoothed_slopes: Dict[float, np.ndarray]
+    all_smoothed_slopes: dict[float, np.ndarray]
 
 
 class BSSOptimizer:
@@ -54,12 +55,12 @@ class BSSOptimizer:
         kc_max: float = 10.0,
         kc_min: float = 0.01,
         d_kc: float = 0.1,
-        plots_dir: Optional[str] = None,
+        plots_dir: str | Path | None = None,
         prefix: str = "01_",
         stage_name: str = "stage1",
         interactive: bool = False,
         n_cores: int = -1,
-        nrbins: Optional[int] = None,
+        nrbins: int | None = None,
         show_progress: bool = True,
     ) -> OptimizationResult:
         """Executes BSS slope filter optimization across corner frequency spectrum."""
@@ -80,15 +81,14 @@ class BSSOptimizer:
         )
 
 
-
 def calculate_variogram(
     coords: np.ndarray,
     values: np.ndarray,
-    maxdist: Optional[float] = None,
-    nrbins: Optional[int] = None,
-    precomputed_dists: Optional[np.ndarray] = None,
+    maxdist: float | None = None,
+    nrbins: int | None = None,
+    precomputed_dists: np.ndarray | None = None,
     warn_low_pairs: bool = True,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """
     Computes experimental isotropic 2D variogram.
     Ported from variogram.m.
@@ -112,7 +112,7 @@ def calculate_variogram(
     Returns
     -------
     result : dict
-        Dict with keys: 'distance' (lag distances h), 'val' (semivariance gamma(h)),
+        dict with keys: 'distance' (lag distances h), 'val' (semivariance gamma(h)),
         'np' (number of point pairs per lag bin).
     """
     n_pts = len(coords)
@@ -181,7 +181,7 @@ def fit_variogram_model(
     semivars: np.ndarray,
     model_type: str = "spherical",
     show_progress: bool = False,
-) -> Tuple[float, float, float, Dict[str, np.ndarray]]:
+) -> tuple[float, float, float, dict[str, np.ndarray]]:
     """
     Fits a theoretical variogram model (Spherical) to experimental variogram data.
     Ported from variogramfit.m.
@@ -195,7 +195,7 @@ def fit_variogram_model(
     nugget : float
         Nugget variance C0.
     model_curve : dict
-        Dict with 'h' and 'gamma' fine curve points for plotting.
+        dict with 'h' and 'gamma' fine curve points for plotting.
     """
     with get_progress_bar(
         total=max(1, len(distances)),
@@ -238,12 +238,12 @@ def optimize_bss_variance(
     kc_max: float = 10.0,
     kc_min: float = 0.01,
     d_kc: float = 0.1,
-    plots_dir: Optional[str] = None,
+    plots_dir: str | Path | None = None,
     prefix: str = "01_",
     stage_name: str = "stage1",
     interactive: bool = False,
     n_cores: int = -1,
-    nrbins: Optional[int] = None,
+    nrbins: int | None = None,
     show_progress: bool = True,
 ) -> OptimizationResult:
     """

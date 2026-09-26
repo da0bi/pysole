@@ -3,14 +3,13 @@ Surface Gradient, Slope, and Frequency Domain FFT Smoothing for PySole.
 Ported from MATLAB scripts GradRad.m and FFTSmooth.m by Daniel Binder (2011).
 """
 
-from typing import Tuple, Dict, Optional
 import numpy as np
 from scipy.fft import fft2, ifft2, fftshift, ifftshift, fftfreq
 
 
 def compute_gradients(
     dem: np.ndarray, dx: float = 1.0, dy: float = 1.0
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """
     Computes spatial slope gradients and surface normal trigonometric grids.
     Ported from GradRad.m.
@@ -76,7 +75,7 @@ def compute_gradients(
 
 def precompute_fft_grid(
     grid: np.ndarray, dx: float = 1.0, dy: float = 1.0
-) -> Tuple[np.ndarray, np.ndarray, float]:
+) -> tuple[np.ndarray, np.ndarray, float]:
     """
     [OPTIMIZATION RANK 1 & 5]: Pre-computes 2D Forward FFT and spatial wavenumber mesh grid.
     Calling this ONCE before an optimization loop (e.g., kc frequency sweeps) eliminates
@@ -149,7 +148,7 @@ def fft_gaussian_smooth_precomputed(
 
 def fft_gaussian_smooth(
     grid: np.ndarray, dx: float = 1.0, dy: float = 1.0, kc: float = 0.05
-) -> Tuple[np.ndarray, np.ndarray, float]:
+) -> tuple[np.ndarray, np.ndarray, float]:
     """
     Performs 2D spatial smoothing in the frequency domain using a Gaussian low-pass filter.
     Ported from FFTSmooth.m.
