@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pysole"
-version = "0.2.0"
+version = "0.3.0"
 description = "Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Datasets"
 readme = "README.md"
 authors = [

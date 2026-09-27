@@ -11,10 +11,10 @@ from pysole.variogram import calculate_variogram, fit_variogram_model, optimize_
 
 class TestVariogramWuk(unittest.TestCase):
     def setUp(self):
-        self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/wuk/input_data"))
-        self.wuk_dem = os.path.join(self.base_dir, "dgm_unt_wuk.tif")
-        self.wuk_outline = os.path.join(self.base_dir, "wuk_outline_clean.csv")
-        self.wuk_survey = os.path.join(self.base_dir, "wuk_survey_clean.csv")
+        self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/wuk/input_data"))
+        self.wuk_dem = os.path.join(self.data_dir, "dgm_unt_wuk.tif")
+        self.wuk_outline = os.path.join(self.data_dir, "wuk_outline_clean.csv")
+        self.wuk_survey = os.path.join(self.data_dir, "wuk_survey_clean.csv")
 
     def test_variogram_calculation_and_fitting(self):
         survey = np.loadtxt(self.wuk_survey, delimiter=",", skiprows=1)

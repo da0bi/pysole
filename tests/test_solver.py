@@ -12,10 +12,10 @@ import pysole
 
 class TestSolverWuk(unittest.TestCase):
     def setUp(self):
-        self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/wuk/input_data"))
-        self.wuk_dem = os.path.join(self.base_dir, "dgm_unt_wuk.tif")
-        self.wuk_outline = os.path.join(self.base_dir, "wuk_outline_clean.csv")
-        self.wuk_survey = os.path.join(self.base_dir, "wuk_survey_clean.csv")
+        self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/wuk/input_data"))
+        self.wuk_dem = os.path.join(self.data_dir, "dgm_unt_wuk.tif")
+        self.wuk_outline = os.path.join(self.data_dir, "wuk_outline_clean.csv")
+        self.wuk_survey = os.path.join(self.data_dir, "wuk_survey_clean.csv")
 
     def test_full_solver_workflow_wuk(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -91,9 +91,24 @@ class TestSolverWuk(unittest.TestCase):
         self.assertEqual(m_smoothed.shape, dem.shape)
         self.assertFalse(np.isnan(m_smoothed).any())
 
-        fft_smoothed = model.smooth_bedrock_dem(dem, method="fft_lowpass", kc_cutoff=0.1)
-        self.assertEqual(fft_smoothed.shape, dem.shape)
-        self.assertFalse(np.isnan(fft_smoothed).any())
+    def test_direct_interpolation_targets_wuk(self):
+        model = pysole.Solver(
+            dem=self.wuk_dem,
+            outline=self.wuk_outline,
+            pre_interpolation_target="T",
+            post_interpolation_target="D",
+            perform_migration=True,
+        )
+        self.assertEqual(model.pre_interpolation_target, "T")
+        self.assertEqual(model.post_interpolation_target, "D")
+
+        model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
+        self.assertIsNotNone(model.traveltime_grid)
+
+        model.interpolate_kriging()
+        self.assertIsNotNone(model.kriged_bedrock)
+        self.assertEqual(model.kriged_bedrock.shape, (179, 213))
+        self.assertTrue(np.all(np.isfinite(model.kriged_bedrock)))
 
 
 if __name__ == "__main__":

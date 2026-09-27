@@ -67,6 +67,7 @@ def setup_logging(
             file_handler.setLevel(numeric_level)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
+            logger.info(f"Initialized PySole log file at: {log_path}")
         except Exception as e:
             logger.warning(f"Could not initialize log file '{log_file}': {e}")
 

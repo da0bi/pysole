@@ -2,6 +2,7 @@
 Goldbergkees Glacier (GOK) Example: Running PySole Workflow from Configuration
 """
 
+from pathlib import Path
 import numpy as np
 import pysole
 
@@ -10,7 +11,7 @@ def main():
     print("--- Running PySole Goldbergkees Glacier Example ---")
 
     # Execute complete workflow defined in pysole_gok.json
-    config_path = "examples/gok/pysole_gok.json"
+    config_path = Path(__file__).parent / "pysole_gok.json"
     bedrock_map = pysole.run_from_config(config_path)
 
     print("\nGoldbergkees example completed successfully!")

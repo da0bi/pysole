@@ -8,11 +8,13 @@ from typing import Any
 import copy
 import json
 import os
+import numpy as np
 
 
 @dataclass
 class OutputsConfig:
     """Structured configuration parameters for PySole output exports."""
+    output_dir: str | None = None
     output_format: str | list[str] = "tif"
     output_prefix: str = "final"
     plots_dir: str = "figures"
@@ -44,6 +46,7 @@ class OutputsConfig:
     def to_dict(self) -> dict[str, Any]:
         """Exports dataclass fields to a dictionary representation."""
         return {
+            "output_dir": self.output_dir,
             "output_format": self.output_format,
             "output_prefix": self.output_prefix,
             "plots_dir": self.plots_dir,
@@ -56,7 +59,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "dem_path": None,
         "outline_path": None,
         "survey_data_path": None,
-        "base_dir": None,
         "survey_data_type": "one_way_travel_time",
         "ice_density": 900.0,
         "g": 9.81,
@@ -85,14 +87,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "kriging_parameters": {
         "built_in_kriging": True,
         "pre_migration": {
-            "method": "universal",
-            "drift_terms": ["sia_thickness"],
+            "interpolation_target": "P",
+            "method": "ordinary",
+            "drift_terms": [],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": True,
         },
         "post_migration": {
-            "method": "universal",
-            "drift_terms": ["sia_thickness"],
+            "interpolation_target": "P",
+            "method": "ordinary",
+            "drift_terms": [],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": True,
         },
@@ -108,6 +112,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "smoothing_kc_cutoff": None,
     },
     "outputs": {
+        "output_dir": None,
         "output_format": "tif",
         "output_prefix": "final",
         "plots_dir": "figures",
@@ -121,43 +126,80 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
-def resolve_path(
-    path: str | Path | os.PathLike | None,
-    base_dir: str | Path | os.PathLike | None = None,
+def _get_config_parent(config_path: str | Path | os.PathLike | None) -> Path:
+    if config_path and not isinstance(config_path, dict):
+        p = Path(config_path).expanduser()
+        if p.exists():
+            return p.parent
+    return Path.cwd()
+
+
+def resolve_output_dir(
+    output_dir: str | Path | os.PathLike | None = None,
     survey_data_path: str | Path | os.PathLike | None = None,
-) -> str | None:
+    config_path: str | Path | os.PathLike | None = None,
+) -> Path:
     """
-    Resolves a target file or directory path relative to base_dir or survey_data_path parent directory.
-
-    Parameters
-    ----------
-    path : str, Path, or None
-        Target path string or Path object.
-    base_dir : str, Path, or None, optional
-        Base directory override.
-    survey_data_path : str, Path, or None, optional
-        Survey data file path used to infer parent directory if base_dir is None.
-
-    Returns
-    -------
-    resolved_path : str or None
+    If output_dir is explicitly specified, returns output_dir as a Path (resolved relative to config_path if relative).
+    If output_dir is None, creates and returns a 'pysole' folder inside the survey_data_path parent directory,
+    and a 'figures' subfolder inside the pysole directory.
     """
-    if not path:
-        return None
+    cfg_parent = _get_config_parent(config_path)
+
+    if output_dir:
+        target = Path(output_dir).expanduser()
+        if not target.is_absolute():
+            target = cfg_parent / target
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    if survey_data_path:
+        surv_p = Path(survey_data_path).expanduser()
+        if not surv_p.is_absolute():
+            surv_p = cfg_parent / surv_p
+        parent_dir = surv_p.parent
+    else:
+        parent_dir = cfg_parent
+
+    pysole_dir = parent_dir / "pysole"
+    pysole_dir.mkdir(parents=True, exist_ok=True)
+    (pysole_dir / "figures").mkdir(parents=True, exist_ok=True)
+    return pysole_dir
+
+
+def resolve_input_path(
+    path: Any,
+    config_path: str | Path | os.PathLike | None = None,
+) -> Any:
+    """Resolves an input file path relative to config_path parent directory or working directory."""
+    if path is None or isinstance(path, np.ndarray):
+        return path
     path_obj = Path(path).expanduser()
     if path_obj.is_absolute():
         return str(path_obj)
 
-    if base_dir:
-        eff_base = Path(base_dir).expanduser()
-    elif survey_data_path:
-        eff_base = Path(survey_data_path).expanduser().parent
-    else:
-        eff_base = None
-
-    if eff_base:
-        return str(eff_base / path_obj)
+    cfg_parent = _get_config_parent(config_path)
+    candidate = cfg_parent / path_obj
+    if candidate.exists():
+        return str(candidate)
     return str(path_obj)
+
+
+def resolve_path(
+    path: Any,
+    output_dir: str | Path | os.PathLike | None = None,
+    survey_data_path: str | Path | os.PathLike | None = None,
+    config_path: str | Path | os.PathLike | None = None,
+) -> Any:
+    """Resolves an output file or directory path relative to the effective output_dir."""
+    if path is None or isinstance(path, np.ndarray):
+        return path
+    path_obj = Path(path).expanduser()
+    if path_obj.is_absolute():
+        return str(path_obj)
+
+    eff_dir = resolve_output_dir(output_dir=output_dir, survey_data_path=survey_data_path, config_path=config_path)
+    return str(eff_dir / path_obj)
 
 
 def load_config(
@@ -198,10 +240,31 @@ def load_config(
             else:
                 config[key] = section
 
+    # Automatically align Kriging defaults based on interpolation_target if method was not explicitly user-defined
+    kp = config.get("kriging_parameters", {})
+    user_kp = (user_config or {}).get("kriging_parameters", {})
+
+    for section_name, target_key, direct_target_char in [("pre_migration", "pre_migration", "T"), ("post_migration", "post_migration", "D")]:
+        sec = kp.get(section_name, {})
+        user_sec = user_kp.get(section_name, {})
+        target = str(sec.get("interpolation_target", "P")).upper()
+
+        if "method" not in user_sec:
+            if target == direct_target_char:
+                sec["method"] = "universal"
+                if "drift_terms" not in user_sec:
+                    sec["drift_terms"] = ["sia_thickness"]
+            else:
+                sec["method"] = "ordinary"
+                if "drift_terms" not in user_sec:
+                    sec["drift_terms"] = []
+
     inputs = config.get("inputs", {})
-    base_dir = inputs.get("base_dir")
+    outputs = config.get("outputs", {})
+    output_dir = outputs.get("output_dir")
     survey_data_path = inputs.get("survey_data_path")
-    log_file = resolve_path("pysole.log", base_dir=base_dir, survey_data_path=survey_data_path)
+    cfg_file = config_path if not isinstance(config_path, dict) else None
+    log_file = resolve_path("pysole.log", output_dir=output_dir, survey_data_path=survey_data_path, config_path=cfg_file)
 
     eff_log_level = log_level or os.environ.get("PYSOLE_LOG_LEVEL") or inputs.get("log_level", "INFO")
     setup_logging(log_file=log_file, log_level=eff_log_level)
@@ -221,10 +284,11 @@ def create_template_config(config_path: str | Path | os.PathLike = "pysole.json"
     -------
     filepath : str
     """
-    target = Path(config_path).expanduser()
+    target = Path(config_path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     with open(target, "w") as f:
         json.dump(DEFAULT_CONFIG, f, indent=4)
+    logger.info(f"Created default template configuration file at: {target}")
     return str(target)
 
 

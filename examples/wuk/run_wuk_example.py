@@ -2,14 +2,16 @@
 Wurtenkees Glacier Example: Running PySole Workflow from Configuration
 """
 
+from pathlib import Path
 import numpy as np
 import pysole
+
 
 def main():
     print("--- Running PySole Wurtenkees Glacier Example ---")
 
     # Execute complete workflow defined in pysole_wuk.json
-    config_path = "examples/wuk/pysole_wuk.json"
+    config_path = Path(__file__).parent / "pysole_wuk.json"
     bedrock_map = pysole.run_from_config(config_path)
 
     print("\nWurtenkees example completed successfully!")

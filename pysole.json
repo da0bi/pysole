@@ -3,7 +3,6 @@
         "dem_path": null,
         "outline_path": null,
         "survey_data_path": null,
-        "base_dir": null,
         "survey_data_type": "one_way_travel_time",
         "ice_density": 900.0,
         "g": 9.81,
@@ -32,14 +31,16 @@
     "kriging_parameters": {
         "built_in_kriging": true,
         "pre_migration": {
-            "method": "universal",
-            "drift_terms": ["sia_thickness"],
+            "interpolation_target": "P",
+            "method": "ordinary",
+            "drift_terms": [],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true
         },
         "post_migration": {
-            "method": "universal",
-            "drift_terms": ["sia_thickness"],
+            "interpolation_target": "P",
+            "method": "ordinary",
+            "drift_terms": [],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true
         }
@@ -55,6 +56,7 @@
         "smoothing_kc_cutoff": null
     },
     "outputs": {
+        "output_dir": null,
         "output_format": "tif",
         "output_prefix": "final",
         "plots_dir": "figures",

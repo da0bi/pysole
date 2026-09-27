@@ -14,7 +14,7 @@ from .migration import migrate_eikonal_points, EikonalMigrator, MigrationResult
 from .variogram import BSSOptimizer, OptimizationResult
 from .interpolation import blend_margin_topography, kriging_interpolation, random_forest_hole_filling, KrigingEngine, BedrockFinalizer, KrigingResult
 from .smoothing import compute_gradients, fft_gaussian_smooth
-from .config import OutputsConfig, resolve_path as resolve_config_path
+from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir
 from .logging import logger
 
 
@@ -34,10 +34,12 @@ class Solver:
         pre_drift_terms: list[str] | None = None,
         pre_variogram_model: str = "spherical",
         pre_zero_boundary: bool = True,
+        pre_interpolation_target: str = "P",
         post_kriging_method: str = "universal",
         post_drift_terms: list[str] | None = None,
         post_variogram_model: str = "spherical",
         post_zero_boundary: bool = True,
+        post_interpolation_target: str = "P",
         perform_migration: bool = True,
         survey_data_type: str = "one_way_travel_time",
         plots_dir: str | Path | None = None,
@@ -46,8 +48,9 @@ class Solver:
         nrbins: int | None = None,
         ice_density: float = 900.0,
         g: float = 9.81,
-        base_dir: str | Path | None = None,
+        output_dir: str | Path | None = None,
         survey_data_path: str | Path | None = None,
+        config_path: str | Path | None = None,
         show_progress: bool = True,
     ):
         """
@@ -88,15 +91,20 @@ class Solver:
             Directory where generated plots are automatically saved.
         n_cores : int
             Number of CPU cores for multi-threading/processing (-1 for all available cores).
-        base_dir : str or Path, optional
+        output_dir : str or Path, optional
             General workspace directory for all output files. If None, defaults to parent directory of survey_data_path.
-        survey_data_path : str or Path, optional
-            Path to survey data file (used for base_dir resolution fallback if base_dir is None).
+        config_path : str or Path, optional
+            Path to configuration file used for resolving relative paths.
         show_progress : bool
             If True (default), displays terminal progress bars during heavy processing steps.
         """
-        self.dem_grid, self.meta = load_dem(dem, dx=dx, dy=dy, bounds=bounds)
-        self.outline_mask = load_outline(outline, self.dem_grid, self.meta)
+        self.output_dir = output_dir
+        self.survey_data_path = survey_data_path
+        self.config_path = str(config_path) if config_path else None
+        self._raw_plots_dir = plots_dir
+
+        self.dem_grid, self.meta = load_dem(self.resolve_input_path(dem), dx=dx, dy=dy, bounds=bounds)
+        self.outline_mask = load_outline(self.resolve_input_path(outline), self.dem_grid, self.meta)
 
         self.geometry = GridGeometry.create(
             self.dem_grid.shape,
@@ -115,17 +123,16 @@ class Solver:
         self.pre_drift_terms = pre_drift_terms if pre_drift_terms is not None else ["sia_thickness"]
         self.pre_variogram_model = pre_variogram_model
         self.pre_zero_boundary = bool(pre_zero_boundary)
+        self.pre_interpolation_target = str(pre_interpolation_target).upper().strip()
 
         self.post_kriging_method = post_kriging_method
         self.post_drift_terms = post_drift_terms if post_drift_terms is not None else ["sia_thickness"]
         self.post_variogram_model = post_variogram_model
         self.post_zero_boundary = bool(post_zero_boundary)
+        self.post_interpolation_target = str(post_interpolation_target).upper().strip()
 
         self.perform_migration = perform_migration
         self.survey_data_type = survey_data_type
-        self.base_dir = base_dir
-        self.survey_data_path = survey_data_path
-        self._raw_plots_dir = plots_dir
         self.n_cores = n_cores
         self.built_in_kriging = bool(built_in_kriging)
         self.nrbins = int(nrbins) if nrbins is not None else None
@@ -300,17 +307,25 @@ class Solver:
         self.bss_std = None
 
     @property
-    def effective_base_dir(self) -> str:
-        """Returns the effective base directory for output file resolution."""
-        if self.base_dir:
-            return str(Path(self.base_dir).expanduser())
-        if self.survey_data_path:
-            return str(Path(self.survey_data_path).expanduser().parent)
-        return ""
+    def effective_output_dir(self) -> str:
+        """Returns the effective output directory for file resolution."""
+        cfg_p = getattr(self, "config_path", None)
+        eff_dir = resolve_output_dir(
+            output_dir=self.output_dir,
+            survey_data_path=self.survey_data_path,
+            config_path=cfg_p,
+        )
+        return str(eff_dir)
+
+    def resolve_input_path(self, path: str | Path | os.PathLike | None) -> str | None:
+        """Resolves an input file path relative to config_path parent or working directory."""
+        cfg_p = getattr(self, "config_path", None)
+        return resolve_input_config_path(path, config_path=cfg_p)
 
     def resolve_path(self, path: str | Path | os.PathLike | None) -> str | None:
-        """Resolves a target file or directory path relative to effective_base_dir if relative."""
-        return resolve_config_path(path, base_dir=self.base_dir, survey_data_path=self.survey_data_path)
+        """Resolves a target file or directory path relative to effective_output_dir if relative."""
+        cfg_p = getattr(self, "config_path", None)
+        return resolve_config_path(path, output_dir=self.output_dir, survey_data_path=self.survey_data_path, config_path=cfg_p)
 
     @property
     def plots_dir(self) -> str:
@@ -361,13 +376,15 @@ class Solver:
         pre_krig_cfg = kriging_cfg.get("pre_migration", {}) if isinstance(kriging_cfg.get("pre_migration"), dict) else {}
         post_krig_cfg = kriging_cfg.get("post_migration", {}) if isinstance(kriging_cfg.get("post_migration"), dict) else {}
 
-        pre_method = pre_krig_cfg.get("method", "universal")
-        pre_drifts = pre_krig_cfg.get("drift_terms", ["sia_thickness"])
+        pre_target = pre_krig_cfg.get("interpolation_target", "P")
+        pre_method = pre_krig_cfg.get("method", "universal" if str(pre_target).upper() == "T" else "ordinary")
+        pre_drifts = pre_krig_cfg.get("drift_terms", ["sia_thickness"] if str(pre_target).upper() == "T" else [])
         pre_var_model = pre_krig_cfg.get("variogram_model", "spherical")
         pre_zero_boundary = pre_krig_cfg.get("include_zero_boundary_condition", True)
 
-        post_method = post_krig_cfg.get("method", "universal")
-        post_drifts = post_krig_cfg.get("drift_terms", ["sia_thickness"])
+        post_target = post_krig_cfg.get("interpolation_target", "P")
+        post_method = post_krig_cfg.get("method", "universal" if str(post_target).upper() == "D" else "ordinary")
+        post_drifts = post_krig_cfg.get("drift_terms", ["sia_thickness"] if str(post_target).upper() == "D" else [])
         post_var_model = post_krig_cfg.get("variogram_model", "spherical")
         post_zero_boundary = post_krig_cfg.get("include_zero_boundary_condition", True)
 
@@ -390,10 +407,12 @@ class Solver:
             pre_drift_terms=pre_drifts,
             pre_variogram_model=pre_var_model,
             pre_zero_boundary=pre_zero_boundary,
+            pre_interpolation_target=pre_target,
             post_kriging_method=post_method,
             post_drift_terms=post_drifts,
             post_variogram_model=post_var_model,
             post_zero_boundary=post_zero_boundary,
+            post_interpolation_target=post_target,
             perform_migration=migration_cfg.get("perform_migration", True),
             survey_data_type=survey_dtype,
             plots_dir=outputs.get("plots_dir", None),
@@ -402,13 +421,81 @@ class Solver:
             nrbins=nrbins,
             ice_density=ice_density,
             g=g_val,
-            base_dir=inputs.get("base_dir"),
+            output_dir=outputs.get("output_dir"),
             survey_data_path=inputs.get("survey_data_path"),
+            config_path=config_path if not isinstance(config_path, dict) else None,
             show_progress=show_progress_val,
         )
         solver.config = cfg
         solver.config_path = str(config_path)
         return solver
+
+    def _execute_kriging_pass(
+        self,
+        target_type: str,
+        points: np.ndarray,
+        krig_method: str,
+        drift_terms: list[str] | None,
+        var_model: str,
+        zero_boundary: bool,
+        pass_name: str = "Pass 1: Pre-Migration",
+    ) -> KrigingResult:
+        """
+        Unified Pass Dispatcher executing Kriging interpolation for direct targets ('T' / 'D')
+        or BSS product targets ('P').
+        """
+        target_upper = str(target_type).upper().strip()
+
+        if self.opt_slope is None:
+            logger.info(f"   [{pass_name}] Evaluating BSS Surface Slope Optimization...")
+            self.optimize_bss(prefix="01_" if "Pass 1" in pass_name else "03_")
+
+        opt_slope_sin = np.sin(self.opt_slope)
+
+        if target_upper == "P":
+            interp_slope = self.geometry.create_interpolator(opt_slope_sin, fill_value=np.nan)
+            pts_xy = np.column_stack((points[:, 1], points[:, 0]))  # (Y, X)
+            slopes_pts = interp_slope(pts_xy)
+            slopes_pts = np.maximum(np.nan_to_num(slopes_pts, nan=0.1), 1e-4)
+
+            product_values = points[:, 3] * slopes_pts
+            sample_pts = np.column_stack((points[:, 0], points[:, 1], product_values))
+
+            logger.info(f"   [{pass_name}] Performing {krig_method.capitalize()} Kriging Interpolation for BSS Product P(x,y)...")
+            if drift_terms and "sia_thickness" in drift_terms:
+                logger.warning(
+                    f"   [{pass_name} Warning] 'sia_thickness' drift is active during BSS product P(x,y) interpolation. "
+                    "This can cause 1/sin^2(alpha) double-scaling artifacts at low-slope margins. "
+                    "Recommendation: Use 'ordinary' Kriging or non-slope spatial drifts (e.g. ['z_surface']) for product targets."
+                )
+        else:
+            sample_pts = np.column_stack((points[:, 0], points[:, 1], points[:, 3]))
+            logger.info(f"   [{pass_name}] Performing Direct {krig_method.capitalize()} Kriging Interpolation for Target '{target_upper}'...")
+
+        krig_res = kriging_interpolation(
+            sample_points=sample_pts,
+            geometry=self.geometry,
+            method=krig_method,
+            variogram_model=var_model,
+            dem_grid=self.dem_grid,
+            opt_slope_grid=self.opt_slope,
+            drift_terms=drift_terms,
+            outline_mask=self.outline_mask,
+            include_zero_boundary_condition=zero_boundary,
+            n_cores=self.n_cores,
+            built_in_kriging=self.built_in_kriging,
+            slope_floor_deg=self.slope_floor_deg,
+            show_progress=self.show_progress,
+        )
+
+        if target_upper == "P":
+            min_slope_sin = np.sin(np.radians(self.slope_floor_deg))
+            safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
+            grid = krig_res.bedrock_grid / safe_slope_grid
+            var = krig_res.variance_grid / (safe_slope_grid**2)
+            return KrigingResult(bedrock_grid=grid, variance_grid=var)
+
+        return krig_res
 
     def migrate_eikonal(
         self,
@@ -422,7 +509,7 @@ class Solver:
             self.survey_data_path = str(travel_times)
 
         pts = load_survey_points(
-            travel_times,
+            self.resolve_input_path(travel_times),
             bounds=self.bounds,
             dem_grid=self.dem_grid,
             x_coords=self.x_coords,
@@ -446,62 +533,33 @@ class Solver:
                 logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
             return self.migrated_points
 
+        v_eff = float(velocity) if velocity is not None else 0.16
+        if velocity is None and interactive:
+            try:
+                val = input("Signal Propagation Velocity [m/ns]? (e.g. 0.16): ").strip()
+                if val:
+                    v_eff = float(val)
+            except Exception:
+                pass
+
         if not self.perform_migration:
             logger.info("   [Migration Skipped] 'perform_migration' is set to False in configuration. Using unmigrated survey points directly.")
-            vel = velocity if velocity is not None else 0.16
-            unmig_depths = pts[:, 3] * vel if pts[:, 3].max() > 15.0 else pts[:, 3]
+            unmig_depths = pts[:, 3] * v_eff if pts[:, 3].max() > 15.0 else pts[:, 3]
             self.migrated_points = np.column_stack((pts[:, 0], pts[:, 1], pts[:, 2], unmig_depths))
             if self.outputs_config.get("save_migrated_points", False):
                 logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
             return self.migrated_points
 
-        if velocity is None:
-            if interactive:
-                try:
-                    val = input("Signal Propagation Velocity [m/ns]? (e.g. 0.16): ").strip()
-                    velocity = float(val) if val else 0.16
-                except Exception:
-                    velocity = 0.16
-            else:
-                velocity = 0.16
-
-        # 1st Pass BSS surface slope optimization (Pre-migration traveltimes)
-        logger.info("   [Pass 1: Pre-Migration] Evaluating BSS Surface Slope Optimization for Traveltime Field T(x,y)...")
-        self.optimize_bss(prefix="01_", interactive=interactive)
-        logger.info(f"   [Pass 1: Pre-Migration] Optimal Traveltime Corner Frequency k_c = {self.opt_kc:.4f} rad/m")
-
-        opt_slope_sin1 = np.sin(self.opt_slope)
-        interp_slope1 = self.geometry.create_interpolator(opt_slope_sin1, fill_value=np.nan)
-
-        pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
-        slopes_pts1 = interp_slope1(pts_xy)
-        slopes_pts1 = np.maximum(np.nan_to_num(slopes_pts1, nan=0.1), 1e-4)
-
-        tt_pts = pts[:, 3]
-        product_pts1 = tt_pts * slopes_pts1
-
-        sample_prod_pts1 = np.column_stack((pts[:, 0], pts[:, 1], product_pts1))
-
-        logger.info(f"   [Pass 1: Pre-Migration] Performing {self.pre_kriging_method.capitalize()} Kriging Interpolation for Traveltimes...")
-        krig1_res = kriging_interpolation(
-            sample_points=sample_prod_pts1,
-            geometry=self.geometry,
-            method=self.pre_kriging_method,
-            variogram_model=self.pre_variogram_model,
-            dem_grid=self.dem_grid,
-            opt_slope_grid=self.opt_slope,
+        krig1_res = self._execute_kriging_pass(
+            target_type=self.pre_interpolation_target,
+            points=pts,
+            krig_method=self.pre_kriging_method,
             drift_terms=self.pre_drift_terms,
-            outline_mask=self.outline_mask,
-            include_zero_boundary_condition=self.pre_zero_boundary,
-            n_cores=self.n_cores,
-            built_in_kriging=self.built_in_kriging,
-            show_progress=self.show_progress,
+            var_model=self.pre_variogram_model,
+            zero_boundary=self.pre_zero_boundary,
+            pass_name="Pass 1: Pre-Migration",
         )
-        prod_grid1 = krig1_res.bedrock_grid
-
-        min_slope_sin1 = np.sin(np.radians(self.slope_floor_deg))
-        safe_slope_grid1 = np.maximum(opt_slope_sin1, min_slope_sin1)
-        tt_grid = np.maximum(prod_grid1 / safe_slope_grid1, 0.0)
+        tt_grid = np.maximum(krig1_res.bedrock_grid, 0.0)
         if self.outline_mask is not None:
             tt_grid[~self.outline_mask] = np.nan
         self._traveltime_grid = tt_grid
@@ -511,13 +569,13 @@ class Solver:
 
         cached_dem_grads = self._get_dem_gradients()
 
-        logger.info(f"   [Ray Migration] Executing 3D Eikonal Ray Displacement (velocity v = {velocity:.4f} m/ns)...")
+        logger.info(f"   [Ray Migration] Executing 3D Eikonal Ray Displacement (velocity v = {v_eff:.4f} m/ns)...")
         mig_res = migrate_eikonal_points(
             dem=self.dem_grid,
             travel_time_grid=tt_grid,
             survey_points=pts,
             geometry=self.geometry,
-            velocity=velocity,
+            velocity=v_eff,
             outline_mask=self.outline_mask,
             plots_dir=self.plots_dir,
             interactive=interactive,
@@ -529,18 +587,18 @@ class Solver:
         if interactive:
             while True:
                 try:
-                    ans = input(f"\nCurrent migration velocity v = {velocity:.4f} m/ns. Test another migration velocity? [y/N]: ").strip().lower()
+                    ans = input(f"\nCurrent migration velocity v = {v_eff:.4f} m/ns. Test another migration velocity? [y/N]: ").strip().lower()
                     if ans in ["y", "yes"]:
                         val = input("Enter new signal propagation velocity [m/ns] (e.g. 0.15): ").strip()
                         if val:
-                            velocity = float(val)
-                            logger.info(f"Re-running 3D Eikonal ray migration with v = {velocity:.4f} m/ns...")
+                            v_eff = float(val)
+                            logger.info(f"Re-running 3D Eikonal ray migration with v = {v_eff:.4f} m/ns...")
                             mig_res2 = migrate_eikonal_points(
                                 dem=self.dem_grid,
                                 travel_time_grid=tt_grid,
                                 survey_points=pts,
                                 geometry=self.geometry,
-                                velocity=velocity,
+                                velocity=v_eff,
                                 outline_mask=self.outline_mask,
                                 plots_dir=self.plots_dir,
                                 interactive=interactive,
@@ -628,55 +686,30 @@ class Solver:
 
         should_plot = plotit or interactive or (self.plots_dir is not None)
 
-        if self.opt_slope is None:
-            logger.info("   [Pass 2: Post-Migration] Evaluating BSS Surface Slope Optimization for Depth Field D(x,y)...")
-            self.optimize_bss(interactive=interactive)
-
-        opt_slope_sin = np.sin(self.opt_slope)
-        interp_slope = self.geometry.create_interpolator(opt_slope_sin, fill_value=np.nan)
-
-        pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
-        slopes_pts = interp_slope(pts_xy)
-        slopes_pts = np.maximum(np.nan_to_num(slopes_pts, nan=0.1), 1e-4)
-
-        thickness_pts = pts[:, 3]
-        product_pts = thickness_pts * slopes_pts
-
-        sample_prod_pts = np.column_stack((pts[:, 0], pts[:, 1], product_pts))
-
         krig_method = method if method is not None else self.post_kriging_method
         var_model = variogram_model if variogram_model is not None else self.post_variogram_model
 
-        logger.info(f"   [Pass 2: Post-Migration] Performing {krig_method.capitalize()} Kriging Interpolation for Depth Field D(x,y)...")
-        krig_res = kriging_interpolation(
-            sample_points=sample_prod_pts,
-            geometry=self.geometry,
-            method=krig_method,
-            variogram_model=var_model,
-            dem_grid=self.dem_grid,
-            opt_slope_grid=self.opt_slope,
+        krig_res = self._execute_kriging_pass(
+            target_type=self.post_interpolation_target,
+            points=pts,
+            krig_method=krig_method,
             drift_terms=self.post_drift_terms,
-            outline_mask=self.outline_mask,
-            include_zero_boundary_condition=self.post_zero_boundary,
-            n_cores=self.n_cores,
-            built_in_kriging=self.built_in_kriging,
-            show_progress=self.show_progress,
+            var_model=var_model,
+            zero_boundary=self.post_zero_boundary,
+            pass_name="Pass 2: Post-Migration",
         )
-        prod_grid = krig_res.bedrock_grid
+        grid_raw = krig_res.bedrock_grid
         prod_var = krig_res.variance_grid
 
-        min_slope_sin = np.sin(np.radians(self.slope_floor_deg))
-        safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
-
-        max_thickness = max(float(np.max(thickness_pts)) * 1.5, 500.0)
-        thickness_grid = np.clip(prod_grid / safe_slope_grid, 0.0, max_thickness)
+        max_thickness = max(float(np.max(pts[:, 3])) * 1.5, 500.0)
+        thickness_grid = np.clip(grid_raw, 0.0, max_thickness)
 
         if self.outline_mask is not None:
             thickness_grid[~self.outline_mask] = 0.0
 
         self.kriged_thickness = thickness_grid.copy()
         self.kriged_bedrock = self.dem_grid - thickness_grid
-        self.kriged_variance = prod_var / (safe_slope_grid**2)
+        self.kriged_variance = prod_var
         if self.outline_mask is not None:
             self.kriged_variance[~self.outline_mask] = np.nan
 

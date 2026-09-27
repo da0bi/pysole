@@ -277,7 +277,14 @@ def built_in_kriging_interpolation(
             u_grid_norm = (external_drift_grid - u_mean) / u_std
             u_flat = u_grid_norm.ravel()
 
-            interp_u = RegularGridInterpolator((y_coords, x_coords), u_grid_norm, bounds_error=False, fill_value=0.0)
+            if len(y_coords) > 1 and y_coords[1] < y_coords[0]:
+                y_asc = y_coords[::-1]
+                u_asc = u_grid_norm[::-1, :]
+            else:
+                y_asc = y_coords
+                u_asc = u_grid_norm
+
+            interp_u = RegularGridInterpolator((y_asc, x_coords), u_asc, bounds_error=False, fill_value=0.0)
             pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
             pts_u_norm = interp_u(pts_xy)
             pts_u_norm = np.nan_to_num(pts_u_norm, nan=0.0)
@@ -314,7 +321,8 @@ def built_in_kriging_interpolation(
         K[:N_pts, N_pts] = 1.0
         K[N_pts, :N_pts] = 1.0
 
-    K[:N_pts, :N_pts] += np.eye(N_pts) * 1e-8
+    K += np.eye(K.shape[0]) * 1e-6
+    logger.info(f"   [Dual Kriging Engine] Applied 1e-06 * I Tikhonov matrix regularization (N={N_pts} points)")
 
     z_aug = np.zeros(N_pts + n_drift, dtype=np.float64)
     z_aug[:N_pts] = pts[:, 2]
@@ -473,8 +481,9 @@ def kriging_interpolation(
 
     method_clean = str(method).lower().replace("_kriging", "").strip()
     is_sia_mode = (method_clean in ["sia_thickness", "sia", "sia_drift"]) or (drift_terms is not None and "sia_thickness" in drift_terms)
+    is_z_surface_mode = (drift_terms is not None) and any(term in drift_terms for term in ["z_surface", "dem", "elevation"])
 
-    # Compute external SIA drift grid U_sia = 1 / sin(alpha_safe) if requested
+    # Compute external drift grid (SIA 1/sin(alpha) or DEM surface elevation z_surface)
     external_sia_grid = None
     if is_sia_mode:
         if opt_slope_grid is not None and opt_slope_grid.shape == (M, N):
@@ -491,6 +500,8 @@ def kriging_interpolation(
             min_slope_sin = np.sin(np.radians(slope_floor_deg))
             safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
             external_sia_grid = 1.0 / safe_slope_grid
+    elif is_z_surface_mode and dem_grid is not None and dem_grid.shape == (M, N):
+        external_sia_grid = dem_grid
 
     if not built_in_kriging:
         logger.info("Built-in native Kriging engine active (built_in_kriging=True recommended).")
@@ -500,7 +511,7 @@ def kriging_interpolation(
         pts,
         x_coords,
         y_coords,
-        method="sia_thickness" if is_sia_mode else method_clean,
+        method="sia_thickness" if (is_sia_mode or is_z_surface_mode) else method_clean,
         variogram_model=variogram_model,
         external_drift_grid=external_sia_grid,
         n_cores=n_cores,

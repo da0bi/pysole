@@ -54,34 +54,35 @@ class TestConfigWorkflowWuk(unittest.TestCase):
         self.assertIsNone(cfg_inputs["dem_path"])
         self.assertIsNone(cfg_inputs["outline_path"])
         self.assertIsNone(cfg_inputs["survey_data_path"])
-        self.assertIsNone(cfg_inputs["base_dir"])
 
         cfg_outputs = pysole.config.DEFAULT_CONFIG["outputs"]
+        self.assertIsNone(cfg_outputs["output_dir"])
         self.assertEqual(cfg_outputs["output_prefix"], "final")
         self.assertEqual(cfg_outputs["output_format"], "tif")
         self.assertEqual(cfg_outputs["plots_dir"], "figures")
 
-    def test_base_dir_resolution(self):
+    def test_output_dir_resolution(self):
         dem = np.ones((10, 10))
-        # 1. Fallback to survey_data_path directory when base_dir is None (plots_dir defaults to figures)
+        # 1. Fallback to survey_data_path directory when output_dir is None (plots_dir defaults to figures)
         solver_fallback = pysole.Solver(dem=dem, survey_data_path="/tmp/test_workspace/survey.csv")
-        self.assertEqual(solver_fallback.effective_base_dir, "/tmp/test_workspace")
-        self.assertEqual(solver_fallback.plots_dir, "/tmp/test_workspace/figures")
-        self.assertEqual(solver_fallback.resolve_path("final_bedrock"), "/tmp/test_workspace/final_bedrock")
+        self.assertEqual(solver_fallback.effective_output_dir, "/tmp/test_workspace/pysole")
+        self.assertEqual(solver_fallback.plots_dir, "/tmp/test_workspace/pysole/figures")
+        self.assertEqual(solver_fallback.resolve_path("final_bedrock"), "/tmp/test_workspace/pysole/final_bedrock")
 
-        # 2. Explicit base_dir overrides survey_data_path directory
-        solver_explicit = pysole.Solver(
-            dem=dem,
-            base_dir="/custom/output_dir",
-            survey_data_path="/tmp/test_workspace/survey.csv",
-            plots_dir="figures",
-        )
-        self.assertEqual(solver_explicit.effective_base_dir, "/custom/output_dir")
-        self.assertEqual(solver_explicit.plots_dir, "/custom/output_dir/figures")
-        self.assertEqual(solver_explicit.resolve_path("final_bedrock"), "/custom/output_dir/final_bedrock")
+        # 2. Explicit output_dir overrides survey_data_path directory
+        with tempfile.TemporaryDirectory() as custom_tmp:
+            solver_explicit = pysole.Solver(
+                dem=dem,
+                output_dir=custom_tmp,
+                survey_data_path="/tmp/test_workspace/survey.csv",
+                plots_dir="figures",
+            )
+            self.assertEqual(solver_explicit.effective_output_dir, custom_tmp)
+            self.assertEqual(solver_explicit.plots_dir, os.path.join(custom_tmp, "figures"))
+            self.assertEqual(solver_explicit.resolve_path("final_bedrock"), os.path.join(custom_tmp, "final_bedrock"))
 
-        # 3. Absolute path overrides base_dir
-        self.assertEqual(solver_explicit.resolve_path("/abs/path/bedrock"), "/abs/path/bedrock")
+        # 3. Absolute path overrides output_dir
+        self.assertEqual(solver_fallback.resolve_path("/abs/path/bedrock"), "/abs/path/bedrock")
 
     def test_outputs_config_utility_methods(self):
         cfg = pysole.OutputsConfig(

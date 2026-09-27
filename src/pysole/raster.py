@@ -144,6 +144,9 @@ class BedrockMap:
             else:
                 target_path = f"{stem}.{fmt}"
 
+            abs_target_path = str(Path(target_path).expanduser().resolve())
+            Path(abs_target_path).parent.mkdir(parents=True, exist_ok=True)
+
             if fmt in ["tif", "tiff", "geotiff"]:
                 import rasterio
                 from rasterio.transform import from_bounds
@@ -153,11 +156,11 @@ class BedrockMap:
                 if transform is None:
                     transform = from_bounds(*self.bounds, width, height)
                 if self.crs is None:
-                    logger.warning(f"Exporting GeoTIFF '{target_path}' without Coordinate Reference System (CRS) metadata.")
+                    logger.warning(f"Exporting GeoTIFF '{abs_target_path}' without Coordinate Reference System (CRS) metadata.")
 
                 grid_export = self.grid[::-1, :]
                 with rasterio.open(
-                    target_path,
+                    abs_target_path,
                     "w",
                     driver="GTiff",
                     height=height,
@@ -184,15 +187,15 @@ class BedrockMap:
                     f"cellsize      {cellsize:.6f}\n"
                     f"NODATA_value  -9999"
                 )
-                np.savetxt(target_path, grid_asc, header=header, comments="", fmt="%.4f")
+                np.savetxt(abs_target_path, grid_asc, header=header, comments="", fmt="%.4f")
 
             elif fmt == "csv":
-                np.savetxt(target_path, self.grid, delimiter=",")
+                np.savetxt(abs_target_path, self.grid, delimiter=",")
 
             elif fmt == "npy":
-                np.save(target_path, self.grid)
+                np.save(abs_target_path, self.grid)
 
-            saved_files.append(target_path)
+            saved_files.append(abs_target_path)
 
         return saved_files[0] if len(saved_files) == 1 else saved_files
 
@@ -755,8 +758,9 @@ def save_points_csv(
     if path_obj.suffix.lower() != ".csv":
         path_obj = path_obj.with_suffix(".csv")
 
-    path_obj.parent.mkdir(parents=True, exist_ok=True)
-    target_path = str(path_obj)
+    abs_target_path = str(path_obj.resolve())
+    abs_parent = Path(abs_target_path).parent
+    abs_parent.mkdir(parents=True, exist_ok=True)
 
     if headers is None:
         if points.ndim > 1 and points.shape[1] == 4:
@@ -767,5 +771,5 @@ def save_points_csv(
             headers = [f"col_{i+1}" for i in range(points.shape[1] if points.ndim > 1 else 1)]
 
     header_str = ",".join(headers)
-    np.savetxt(target_path, points, delimiter=",", header=header_str, comments="", fmt="%.6f")
-    return target_path
+    np.savetxt(abs_target_path, points, delimiter=",", header=header_str, comments="", fmt="%.6f")
+    return abs_target_path

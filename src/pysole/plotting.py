@@ -13,16 +13,18 @@ if not os.environ.get("DISPLAY"):
     matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from .logging import logger
 
 
 def _save_figure(plt_obj, plots_dir: str | Path | os.PathLike | None, filename: str) -> Path | None:
     """Helper to save Matplotlib figures to target directory using pathlib.Path."""
     if not plots_dir:
         return None
-    target_dir = Path(plots_dir).expanduser()
+    target_dir = Path(plots_dir).expanduser().resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / filename
     plt_obj.savefig(target_path, dpi=300, bbox_inches="tight")
+    logger.info(f"   Saved diagnostic figure to: {target_path}")
     return target_path
 
 

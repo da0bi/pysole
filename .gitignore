@@ -13,3 +13,4 @@ scripts/
 pypi_request.txt
 git_token.txt
 *.log
+scratch/
