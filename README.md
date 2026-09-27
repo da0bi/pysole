@@ -75,7 +75,7 @@
 Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
 
 #### 2. Pre-Migration Traveltime Interpolation
-Evaluates the point products of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. Once the optimization criterion is satisfied, the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), is determined. Depending on `pre_migration.interpolation_target`:
+Evaluates the point products of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. Once the optimization criterion is satisfied, the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), is determined and applied in the subsequent Kriging interpolation depending on `pre_migration.interpolation_target`:
 - **Product Target `"P"` (Default, Ordinary Kriging)**: `PySole` interpolates <i>P</i><sub>T,i</sub> using Ordinary Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 ns) to produce the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous signal traveltime field <i>T</i>(<i>x</i>,<i>y</i>) is then reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)):
 
   <p align="center">
