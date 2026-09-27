@@ -321,15 +321,15 @@ To guarantee numerical stability during matrix decomposition, diagonal Tikhonov 
 
 <a id="shallow-ice-approximation-custom-drift"></a>
 #### 5. Interpolation Strategy & Spatial Drift Models
-`PySole` supports two primary interpolation strategies based on the target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
+Two primary interpolation strategies are recommended based on the target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
 
-- **Product Target Strategy (`"P"`)**: Interpolates the basal shear stress (BSS) product field <i>P</i> = <i>T</i> · sin <i>α</i> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i> (post-migration). **Ordinary Kriging** (`method: "ordinary"`) with a constant mean is recommended for product targets. Combining a product target <i>P</i> with a slope-dependent drift model (e.g. `"sia_thickness"`) would induce a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact at low-slope margins, and is therefore discouraged.
-- **Direct Target Strategy (`"T"` or `"D"`)**: Directly interpolates signal traveltimes <i>T</i> (pre-migration) or migrated ice thickness/depth <i>D</i> (post-migration). **Universal Kriging** (`method: "universal"`) with the Shallow Ice Approximation physical slope drift (`"sia_thickness"`) is recommended as the default strategy for direct targets.
+- **Product Target Strategy (`"P"`)**: Interpolates the basal shear stress (BSS) product field <i>P</i> = <i>T</i> · sin <i>α</i> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i> (post-migration). **Ordinary Kriging** (`method: "ordinary"`) with a constant mean is recommended for product targets. Universal Kriging interpolation of a product target <i>P</i> with the `"sia_thickness"` drift model induces a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact at low-slope margins, making it unphysical and strongly discouraged.
+- **Direct Target Strategy (`"T"` or `"D"`)**: Directly interpolates signal traveltimes <i>T</i> (pre-migration) or migrated ice thickness/depth <i>D</i> (post-migration). **Universal Kriging** (`method: "universal"`) with the `"sia_thickness"` drift model is recommended as the default strategy for direct targets.
 
 Available spatial drift models for Universal Kriging include:
 
-1. **Shallow Ice Approximation Physical Slope Drift (`"sia_thickness"`)**:
-   `PySole` offers a physically-informed custom drift model based on the Shallow Ice Approximation (SIA). Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
+1. **Shallow Ice Approximation Physical Drift Model (`"sia_thickness"`)**:
+   `PySole` offers the physically-informed custom `"sia_thickness"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
 
    <p align="center">
      <i>D</i> &prop; sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup>
