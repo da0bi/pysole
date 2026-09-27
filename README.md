@@ -12,11 +12,11 @@
 [Key Features](#key-features)<br><br>
 [Workflow & Methodology](#workflow-and-methodology)<br><br>
 [Installation](#installation)<br><br>
-[Configuration Guide (`pysole.json`)](#configuration-guide)<br><br>
-[Configuration Parameter Reference](#configuration-parameter-reference)<br><br>
+[JSON Configuration File](#json-configuration)<br><br>
+[JSON Configuration Parameter Reference](#json-configuration-parameter-reference)<br><br>
 [Technical & Methodological Notes](#technical-and-methodological-notes)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Input Formats](#supported-dem-input-formats)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop & Nunatak Input Files](#parsing-rock-outcrops)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop Input Files](#parsing-rock-outcrops)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Variogram Binning with Minimum Pair Threshold](#variogram-binning)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[5. Shallow Ice Approximation Drift Model](#shallow-ice-approximation-custom-drift)<br>
@@ -39,7 +39,6 @@
 * **Automated High-Resolution Diagnostic Plots:** Automatically generates and exports diagnostic figures for each key processing milestone.
 * **5 Supported Digital Elevation Model (DEM) Input and Output Formats:** Seamless loading and exporting of GeoTIFFs (`.tif`), ESRI ASCII Grids (`.asc`, `.txt`), CSV matrices (`.csv`), NumPy binary arrays (`.npy`), and in-memory NumPy 2D arrays (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
-* **Rock Outcrop & Nunatak Hole Support:** Native parsing of interior vector polygon holes. When boundary conditions are enabled, zero-traveltime/-thickness constraints are automatically applied along internal hole perimeters.
 * **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey data type. In case of direct thickness/depth data the 3D ray-based migration is automatically skipped.
 * 💡**DEM Surface Slope Smoothing💡:** The degree of DEM surface slope smoothing is crucial when estimating ice thickness with the Shallow Ice Approximation (SIA), which assumes a constant basal shear stress. By relaxing this rigid baseline constraint, Binder et al. (2009) derived an objective optimization criterion for the surface slope smoothing process, which is implemented in `PySole`. The optimal degree of surface slope smoothing is derived by enforcing minimum spatial variance in basal shear stress as the optimization criterion:
   <p align="center">
@@ -54,7 +53,8 @@
 
   where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. Surface slope smoothing is performed in the frequency domain using <i>Fast Fourier Transform</i> (FFT) filtering, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine variogram parameters. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths. To accelerate the optimization process, both the spatial wavenumber filtering (<i>k</i><sub>c</sub>) and the corresponding product variogram evaluations are executed via multi-threaded CPU parallelization.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration—introduced by Binder et al. (2009) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage.
-* **Kriging Interpolation & Boundary Conditions:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging. A custom Universal Kriging drift model based on the SIA is used as default. Corresponding Kriging estimation uncertainty fields are calculated alongside predicted grids. Perimeter and rock outcrop/nunatak margin boundary conditions (zero traveltime <i>T</i> = 0 ns and zero thickness <i>D</i> = 0 m) are enforced by default (and can optionally be toggled off).
+* **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging. A custom Universal Kriging drift model based on the SIA is used as default. Corresponding Kriging estimation uncertainty fields are calculated alongside predicted grids.
+* **Boundary Conditions:** Perimeter and rock outcrop margin boundary conditions (zero traveltime <i>T</i> = 0 ns and zero thickness <i>D</i> = 0 m) are enforced by default (and can optionally be toggled off). Interior rock outcrops, or vector polygon holes, are natively parsed.
 * **ML Hole Filling & Geomorphological Margin Blending:** Employs the parallelized [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
 * **Final DEMs Spatial Smoothing:** As a post-processing step, spatial smoothing options are available for the calculated DEMs.
 
@@ -115,10 +115,10 @@ pip install -e .
 
 ---
 
-<a id="configuration-guide"></a>
-## Configuration Guide (`pysole.json`)
+<a id="json-configuration"></a>
+## JSON Configuration File
 
-All execution options can be fully defined in a single `pysole.json` configuration file:
+All execution options can be fully defined in a single JSON configuration file, which by default is named `pysole.json`:
 
 ```json
 {
@@ -193,8 +193,8 @@ All execution options can be fully defined in a single `pysole.json` configurati
 
 ---
 
-<a id="configuration-parameter-reference"></a>
-## Configuration Parameter Reference
+<a id="json-configuration-parameter-reference"></a>
+## JSON Configuration Parameter Reference
 
 | Section | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -225,12 +225,12 @@ All execution options can be fully defined in a single `pysole.json` configurati
 | | `pre_migration.method` | `str` | `"universal"` | Kriging approach: `"universal"` (default), `"ordinary"`, or `"regression"`. Note that `"regression"` mode requires the optional [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package. |
 | | `pre_migration.drift_terms` | `list[str]` | `["sia_thickness"]` | Drift terms for Universal Kriging: `["sia_thickness"]` (SIA-based physical drift model), `["quadratic"]`, or `["regional_linear"]`. |
 | | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
-| | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 ns) along the perimeter and rock outcrop/nunatak margin outline(s). |
+| | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 ns) along the perimeter and rock outcrop margin outline(s). |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth interpolation (<i>D</i>(<i>x</i>,<i>y</i>) [m]). |
 | | `post_migration.method` | `str` | `"universal"` | Kriging approach: `"universal"` (default), `"ordinary"`, or `"regression"`. Note that `"regression"` mode requires the optional [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package. |
 | | `post_migration.drift_terms` | `list[str]` | `["sia_thickness"]` | Drift terms for Universal Kriging: `["sia_thickness"]` (SIA-based physical drift model), `["quadratic"]`, or `["regional_linear"]`. |
 | | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
-| | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop/nunatak margin outline(s). |
+| | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
 | **`finalization_parameters`** | `random_forest_gap_filling` | `bool` | `false` | If `true`, applies Random Forest machine learning gap filling across unmeasured interior regions before margin blending. |
 | | `apply_margin_blend` | `bool` | `false` | If `true`, applies geomorphological margin blending to seamlessly transition calculated bedrock elevation to surrounding surface DEM terrain. |
 | | `min_gap_dist` | `float` | `50.0` | Minimum gap distance in meters [m] inside which bedrock is smoothly tapered and blended into surface DEM terrain. |
@@ -265,8 +265,8 @@ All execution options can be fully defined in a single `pysole.json` configurati
 - **NumPy 2D Array (`np.ndarray`)**: Direct in-memory array passed into the `Solver` constructor (`dem=dem_grid`).
 
 <a id="parsing-rock-outcrops"></a>
-#### 2. Parsing of Rock Outcrop & Nunatak Input Files
-Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>T</i> = 0 s, <i>D</i> = 0 m).
+#### 2. Parsing of Rock Outcrop Input Files
+Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>Z</i> = <i>Z</i><sub>Surface</sub>). When boundary conditions are enabled, the perimeters of interior rings are included, applying <i>T</i> = 0 s or <i>D</i> = 0 m.
 
 For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 
@@ -362,7 +362,7 @@ Under `outputs` in `pysole.json`, users can specify via `output_format` which fi
     <img src="images/pysole_package_structure.png" width="100%" alt="PySole Package Structure & Submodules">
   </a>
   <br>
-  <em>Figure 2: Overview of PySole package submodules, class structure, and core processing functions. Solver functions and related submodules are color-coded. Click diagram to view in high resolution.</em>
+  <em>Figure 2: Overview of PySole package architecture, class structure, sub-engine modules, and API methods. High-level Solver methods are color-coded by their underlying sub-engine domain. Click diagram to view in high resolution.</em>
 </p>
 
 ---
@@ -568,13 +568,7 @@ The GPR dataset and DEM inputs are sourced from the Master's thesis by Binder (2
 <a id="citation-and-references"></a>
 ## Citation & References
 
-If you use `PySole` for your publications, please cite the underlying methodology introduced by Binder et al. (2009).
-
-### APA
-* **Binder, D., Brückl, E., Roch, K.H., Behm, M., Schöner, W., & Hynek, B. (2009).** Determination of total ice volume and ice-thickness distribution of two glaciers in the Hohe Tauern region, Eastern Alps, from GPR data. *Annals of Glaciology*, 50(51), 71–79. [doi:10.3189/172756409789097522](https://doi.org/10.3189/172756409789097522)
-* **Binder, D. (2011).** *Bestimmung der Eismächtigkeitsverteilung dreier Gletscher der Hohen Tauern auf Basis von Ground Penetrating Radar (GPR) Daten* (Master's thesis, Vienna University of Technology, Vienna, Austria). Available from [ResearchGate](https://www.researchgate.net/publication/369660356_Bestimmung_der_Eismachtigkeitsverteilung_dreier_Gletscher_der_Hohen_Tauern_auf_Basis_von_Ground_Penetrating_Radar_GPR_Daten).
-* **Matheron, G. (1981).** Splines and kriging: Their formal equivalence. In D. F. Merriam (Ed.), Down-to-Earth statistics: Solutions looking for geological problems (Vol. 8, pp. 77–95). Syracuse University. (Syracuse University Geology Contribution No. 8).
-* **Webster, R., & Oliver, M. A. (2007).** Geostatistics for Environmental Scientists (2nd ed.). John Wiley & Sons. [doi:10.1002/9780470517277](https://onlinelibrary.wiley.com/doi/book/10.1002/9780470517277)
+If you use `PySole` in your research, please cite the underlying methodology introduced by Binder et al. (2009):
 
 ### BibTeX
 ```bibtex
@@ -589,37 +583,10 @@ If you use `PySole` for your publications, please cite the underlying methodolog
   publisher    = {Cambridge University Press},
   doi          = {10.3189/172756409789097522}
 }
-
-@mastersthesis{binder2011bestimmung,
-  author       = {Binder, Daniel},
-  title        = {Bestimmung der Eism{\"a}chtigkeitsverteilung dreier Gletscher der Hohen Tauern auf Basis von Ground Penetrating Radar (GPR) Daten},
-  school       = {Vienna University of Technology (TU Wien)},
-  year         = {2011},
-  address      = {Vienna, Austria},
-  url          = {https://www.researchgate.net/publication/369660356_Bestimmung_der_Eismachtigkeitsverteilung_dreier_Gletscher_der_Hohen_Tauern_auf_Basis_von_Ground_Penetrating_Radar_GPR_Daten}
-}
-
-@incollection{matheron1981splines,
-  author    = {Matheron, Georges},
-  title     = {Splines and Kriging: Their Formal Equivalence},
-  editor    = {Merriam, D. F.},
-  booktitle = {Down-to-Earth Statistics: Solutions Looking for Geological Problems},
-  series    = {Syracuse University Geology Contribution},
-  volume    = {8},
-  pages     = {77--95},
-  publisher = {Syracuse University},
-  address   = {Syracuse, New York},
-  year      = {1981}
-}
-
-@book{webster2007geostatistics,
-  title     = {Geostatistics for Environmental Scientists},
-  author    = {Webster, Richard and Oliver, Margaret A.},
-  edition   = {2nd},
-  year      = {2007},
-  publisher = {John Wiley \& Sons},
-  address   = {Chichester, UK},
-  isbn      = {978-0-470-84418-2},
-  doi       = {10.1002/9780470517277}
-}
 ```
+
+### Full Reference List (APA)
+* **Binder, D., Brückl, E., Roch, K.H., Behm, M., Schöner, W., & Hynek, B. (2009).** Determination of total ice volume and ice-thickness distribution of two glaciers in the Hohe Tauern region, Eastern Alps, from GPR data. *Annals of Glaciology*, 50(51), 71–79. [doi:10.3189/172756409789097522](https://doi.org/10.3189/172756409789097522)
+* **Binder, D. (2011).** *Bestimmung der Eismächtigkeitsverteilung dreier Gletscher der Hohen Tauern auf Basis von Ground Penetrating Radar (GPR) Daten* (Master's thesis, Vienna University of Technology, Vienna, Austria). Available from [ResearchGate](https://www.researchgate.net/publication/369660356_Bestimmung_der_Eismachtigkeitsverteilung_dreier_Gletscher_der_Hohen_Tauern_auf_Basis_von_Ground_Penetrating_Radar_GPR_Daten).
+* **Matheron, G. (1981).** Splines and kriging: Their formal equivalence. In D. F. Merriam (Ed.), Down-to-Earth statistics: Solutions looking for geological problems (Vol. 8, pp. 77–95). Syracuse University. (Syracuse University Geology Contribution No. 8).
+* **Webster, R., & Oliver, M. A. (2007).** Geostatistics for Environmental Scientists (2nd ed.). John Wiley & Sons. [doi:10.1002/9780470517277](https://onlinelibrary.wiley.com/doi/book/10.1002/9780470517277)
