@@ -22,7 +22,8 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[5. Interpolation Strategy & Spatial Drift Models](#shallow-ice-approximation-custom-drift)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[7. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[8. Multi-Format DEM Export](#multi-format-dem-export)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[8. Multi-Format DEM Export](#multi-format-dem-export)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[9. Conversion of Wavenumber Cutoff to Physical Spatial Wavelength](#wavenumber-to-wavelength-conversion)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Command-Line Interface (CLI) Execution](#cli-execution)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
@@ -52,7 +53,6 @@
   </p>
 
   where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. Surface slope smoothing is performed in the frequency domain using <i>Fast Fourier Transform</i> (FFT) filtering, while spatial variance is quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across spatial wavenumber cutoffs (<i>k</i><sub>c</sub>) and refine variogram parameters. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths. To accelerate the optimization process, both the spatial wavenumber filtering (<i>k</i><sub>c</sub>) and the corresponding product variogram evaluations are executed via multi-threaded CPU parallelization.
-* **Smoothed Surface Slope Safeguard:** `PySole` employs a user-defined minimum threshold of the smoothed surface slopes (`slope_floor_deg`) to prevent numerical division singularities in low-gradient regions (default is <i>5°</i>).
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration—introduced by Binder et al. (2009) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage.
 * **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging. Two distinct interpolation strategies are recommended. Ordinary Kriging is recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift). Universal Kriging is recommended when directly interpolating signal traveltimes or (migrated) depths applying the custom drift model based on the SIA implemented in `PySole`. Corresponding Kriging estimation uncertainty fields are calculated alongside all predicted grids.
 * **Boundary Conditions:** Perimeter and rock outcrop margin boundary conditions (zero traveltime <i>T</i> = 0 ns and zero thickness <i>D</i> = 0 m) are enforced by default (and can optionally be toggled off). Interior rock outcrops, or vector polygon holes, are natively parsed.
@@ -96,7 +96,7 @@ Analogous to the pre-migration optimization pass, `PySole` applies the optimizat
 #### 5. Final Depth Interpolation & Uncertainty Display
 Reconstructs continuous thickness (depth) <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) fields depending on the `post_migration.interpolation_target`:
 - **Product Target `"P"` (Default, Ordinary Kriging)**: Interpolates point products <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) using Ordinary Kriging (with optional zero-thickness boundary conditions <i>D</i> = 0 m) to produce the continuous product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>), and computes depth <i>D</i>(<i>x</i>,<i>y</i>) = <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)).
-- **Direct Target `"D"` (Universal Kriging + SIA Drift)**: Directly interpolates migrated survey point depths <i>D</i><sub>i</sub> using Universal Kriging with the SIA physical slope drift model sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>−1</sup> (default) or user-specified spatial trends.
+- **Direct Target `"D"` (Universal Kriging + SIA Drift)**: Directly interpolates (migrated) survey point depths <i>D</i><sub>i</sub> using Universal Kriging with the SIA physical slope drift model sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>−1</sup> (default) or user-specified spatial trends.
 
 The Kriging standard error for the interpolated depths is converted to meters to quantify depth uncertainty.
 
@@ -395,6 +395,47 @@ Under `outputs` in `pysole.json`, users can specify via `output_format` which fi
 &nbsp;&nbsp;&nbsp;&nbsp;`output_format: ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`output_format: "all"`: Exports all four formats simultaneously.
 
+<a id="wavenumber-to-wavelength-conversion"></a>
+#### 9. Conversion of Wavenumber Cutoff to Physical Spatial Wavelength
+In `PySole` 2D lowpass spatial smoothing operates in the discrete frequency domain. Spatial wavenumber components along the orthogonal grid axes <i>X</i> and <i>Y</i> are constructed as:
+
+<p align="center">
+  <i>k</i><sub>x</sub> = <i>f</i><sub>x,pixel</sub> · (2&pi; · |<i>dx</i>|) &nbsp;&nbsp;&nbsp;&nbsp; [rad]<br>
+  <i>k</i><sub>y</sub> = <i>f</i><sub>y,pixel</sub> · (2&pi; · |<i>dy</i>|) &nbsp;&nbsp;&nbsp;&nbsp; [rad]
+</p>
+
+where <i>f</i><sub>x,pixel</sub>, <i>f</i><sub>y,pixel</sub> &in; [−0.5, +0.5] are discrete frequencies in **[cycles / pixel]**, and <i>dx</i>, <i>dy</i> are grid pixel spacings in **[meters / pixel]**.
+
+Because physical spatial frequencies are <i>f</i><sub>x,phys</sub> = <i>f</i><sub>x,pixel</sub> / <i>dx</i> and <i>f</i><sub>y,phys</sub> = <i>f</i><sub>y,pixel</sub> / <i>dy</i> [cycles / m], the physical spatial wavenumbers <i>k</i><sub>x,phys</sub>, <i>k</i><sub>y,phys</sub> [rad / m] relate to the code wavenumbers by:
+
+<p align="center">
+  <i>k</i><sub>x,phys</sub> = 2&pi; <i>f</i><sub>x,phys</sub> = <i>k</i><sub>x</sub> / <i>dx</i><sup>2</sup> &nbsp;&nbsp; [rad / m]<br>
+  <i>k</i><sub>y,phys</sub> = 2&pi; <i>f</i><sub>y,phys</sub> = <i>k</i><sub>y</sub> / <i>dy</i><sup>2</sup> &nbsp;&nbsp; [rad / m]
+</p>
+
+Thus, the directional physical spatial cutoff wavelengths &lambda;<sub>c,x</sub> and &lambda;<sub>c,y</sub> [meters] corresponding to a corner frequency cutoff <i>k</i><sub>c</sub> are:
+
+<p align="center">
+  &lambda;<sub>c,x</sub> = 2&pi; / <i>k</i><sub>x,phys</sub> = (2&pi; · <i>dx</i><sup>2</sup>) / <i>k</i><sub>c</sub> &nbsp;&nbsp; [m]<br>
+  &lambda;<sub>c,y</sub> = 2&pi; / <i>k</i><sub>y,phys</sub> = (2&pi; · <i>dy</i><sup>2</sup>) / <i>k</i><sub>c</sub> &nbsp;&nbsp; [m]
+</p>
+
+The overall 2D effective spatial cutoff wavelength &lambda;<sub>c,eff</sub> (geometric mean across both coordinate axes) is:
+
+<p align="center">
+  &lambda;<sub>c,eff</sub> = &radic;(&lambda;<sub>c,x</sub> · &lambda;<sub>c,y</sub>) = (2&pi; · |<i>dx</i> · <i>dy</i>|) / <i>k</i><sub>c</sub> = (2&pi; · <i>ds</i><sup>2</sup>) / <i>k</i><sub>c</sub> &nbsp;&nbsp; [meters]
+</p>
+
+where <i>ds</i> = &radic;(|<i>dx</i> · <i>dy</i>|) represents the effective spatial grid cell resolution (or grid cell area scale <i>ds</i><sup>2</sup> = |<i>dx</i> · <i>dy</i>|).
+
+For example, on an isotropic grid with <i>dx</i> = <i>dy</i> = 5.0 m (<i>ds</i> = 5.0 m, <i>ds</i><sup>2</sup> = 25.0 m<sup>2</sup>), an optimal corner frequency <i>k</i><sub>c,opt</sub> = 0.4000 corresponds to a physical spatial cutoff wavelength:
+
+<p align="center">
+  &lambda;<sub>c,opt</sub> = (2&pi; · 25.0) / 0.4000 &approx; 392.70 meters
+</p>
+
+This physical cutoff wavelength is reported alongside <i>k</i><sub>c,opt</sub> in the `PySole` logging outputs (`pysole.log`).
+
 ---
 
 <a id="package-architecture"></a>
@@ -427,7 +468,7 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```
 
 * **User Installation without Virtual Environment (`pip install --user .`):**
-  If installed without a virtual environment using `--user`, Python places entry point scripts in `~/.local/bin` (Linux/macOS) or `%APPDATA%\Python\Scripts` (Windows). If `pysole` is not recognized by your terminal, add `~/.local/bin` to your `$PATH` variable by placing the following line in your `~/.bashrc` or `~/.zshrc`:
+  If installed without a virtual environment using `--user`, Python places entry point scripts in `~/.local/bin` (Linux/macOS) or `%APPDATA%\Python\Scripts` (Windows). If `pysole` is not recognized by your terminal, add `~/.local/bin` to your `$PATH` variable by placing the following line in your `~/.bashrc`:
 
   ```bash
   export PATH="$HOME/.local/bin:$PATH"

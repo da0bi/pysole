@@ -7,14 +7,12 @@ Saves normalized product variogram comparison plots across all evaluated kc to p
 """
 
 from dataclasses import dataclass
-from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import os
 from pathlib import Path
 from scipy.spatial.distance import pdist
 from scipy.optimize import curve_fit
-from scipy.interpolate import RegularGridInterpolator
 from .smoothing import (
     compute_gradients,
     precompute_fft_grid,
@@ -22,6 +20,16 @@ from .smoothing import (
 )
 from .raster import GridGeometry
 from .logging import logger, get_progress_bar
+
+
+def compute_cutoff_wavelength(kc: float, dx: float, dy: float) -> float:
+    """
+    Converts 2D corner frequency wavenumber cutoff kc [rad/m] to physical spatial wavelength [m].
+    Accounts for isotropic or anisotropic DEM grid cell resolution (ds = sqrt(|dx * dy|)).
+    """
+    if kc <= 0:
+        return float("inf")
+    return (2.0 * np.pi * abs(dx * dy)) / kc
 
 
 @dataclass
@@ -33,6 +41,16 @@ class OptimizationResult:
     optimal_slope_grid: np.ndarray
     all_kc_variances: np.ndarray
     all_smoothed_slopes: dict[float, np.ndarray]
+    dx: float = 1.0
+    dy: float = 1.0
+
+    @property
+    def optimal_wavelength(self) -> float:
+        """
+        Returns the physical spatial cutoff wavelength lambda_c [m] corresponding to optimal_kc.
+        """
+        return compute_cutoff_wavelength(self.optimal_kc, self.dx, self.dy)
+
 
 
 class BSSOptimizer:
@@ -526,10 +544,15 @@ def optimize_bss_variance(
     if best_kc is None:
         best_kc = float(kc_max)
 
+    opt_wl = compute_cutoff_wavelength(best_kc, dx, dy)
+    logger.info(f"   Optimal Corner Frequency k_c = {best_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
+
     kc_var_array = np.array(all_kc_variances)
     return OptimizationResult(
         optimal_kc=float(best_kc),
         optimal_slope_grid=best_slope_grid,
         all_kc_variances=kc_var_array,
         all_smoothed_slopes=all_smoothed_slopes,
+        dx=float(dx),
+        dy=float(dy),
     )

@@ -8,12 +8,11 @@ from pathlib import Path
 from typing import Any
 import numpy as np
 import os
-from scipy.interpolate import RegularGridInterpolator
 from .raster import BedrockMap, load_dem, load_outline, ensure_spatial_coords, GridGeometry, load_survey_points, save_points_csv
 from .migration import migrate_eikonal_points, EikonalMigrator, MigrationResult
-from .variogram import BSSOptimizer, OptimizationResult
+from .variogram import BSSOptimizer, OptimizationResult, compute_cutoff_wavelength
 from .interpolation import blend_margin_topography, kriging_interpolation, random_forest_hole_filling, KrigingEngine, BedrockFinalizer, KrigingResult
-from .smoothing import compute_gradients, fft_gaussian_smooth
+from .smoothing import compute_gradients, fft_gaussian_smooth, precompute_fft_grid, fft_gaussian_smooth_precomputed
 from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir
 from .logging import logger
 
@@ -142,6 +141,7 @@ class Solver:
 
         # Gradient and Smoothed Slope Caches
         self._gradient_cache: dict[str, np.ndarray] | None = None
+        self._fft_slope_cache: tuple[np.ndarray, np.ndarray] | None = None
         self._smoothed_slopes_cache: dict[float, np.ndarray] = {}
 
         # Decoupled sub-engines strictly bound to GridGeometry
@@ -177,6 +177,13 @@ class Solver:
     @traveltime_grid.setter
     def traveltime_grid(self, value: np.ndarray | None) -> None:
         self._traveltime_grid = value
+
+    @property
+    def opt_wavelength(self) -> float | None:
+        """Optimal physical spatial cutoff wavelength lambda_c [m]."""
+        if self.opt_kc is None:
+            return None
+        return compute_cutoff_wavelength(self.opt_kc, self.dx, self.dy)
 
     @property
     def thickness_grid(self) -> np.ndarray | None:
@@ -347,12 +354,19 @@ class Solver:
             self._gradient_cache = compute_gradients(self.dem_grid, dx=self.dx, dy=self.dy)
         return self._gradient_cache
 
+    def _get_fft_slope_grids(self) -> tuple[np.ndarray, np.ndarray]:
+        if self._fft_slope_cache is None:
+            grads = self._get_dem_gradients()
+            base_slope = grads["slope_rad"]
+            A_shift_slope, k_grid_slope, _ = precompute_fft_grid(base_slope, dx=self.dx, dy=self.dy)
+            self._fft_slope_cache = (A_shift_slope, k_grid_slope)
+        return self._fft_slope_cache
+
     def get_smoothed_slope(self, kc: float) -> np.ndarray:
         kc_key = round(float(kc), 6)
         if kc_key not in self._smoothed_slopes_cache:
-            grads = self._get_dem_gradients()
-            base_slope = grads["slope_rad"]
-            smoothed_slope, _, _ = fft_gaussian_smooth(base_slope, dx=self.dx, dy=self.dy, kc=kc)
+            A_shift_slope, k_grid_slope = self._get_fft_slope_grids()
+            smoothed_slope = fft_gaussian_smooth_precomputed(A_shift_slope, k_grid_slope, kc=kc)
             self._smoothed_slopes_cache[kc_key] = smoothed_slope
         return self._smoothed_slopes_cache[kc_key]
 
@@ -1072,7 +1086,8 @@ class Solver:
             interactive=opt.get("interactive_optimization", False),
             plotit=True,
         )
-        logger.info(f"   Optimal Post-Migration Corner Frequency k_c = {opt_kc:.4f} rad/m")
+        opt_wl = compute_cutoff_wavelength(opt_kc, self.dx, self.dy)
+        logger.info(f"   Optimal Post-Migration Corner Frequency k_c = {opt_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
         self.interpolate_kriging(interactive=opt.get("interactive_optimization", False), plotit=True)
 
         logger.info("4. Finalizing Bedrock Topography...")
