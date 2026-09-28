@@ -325,9 +325,7 @@ To guarantee numerical stability during matrix decomposition, diagonal Tikhonov 
 The user has the freedon to choose any of the available interpolation options. However, two primary interpolation strategies are recommended based on the interpolation target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
 
 - **Product `"P"` Target Strategy**: Interpolates the basal shear stress (BSS)-derived product field <i>P</i> = <i>T</i> · sin <i>α</i><sub>opt</sub> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i><sub>opt</sub> (post-migration). **Ordinary Kriging** (`method: "ordinary"`) with a constant mean is recommended for BSS-derived product targets.<br>
-> [!WARNING]
-> Universal Kriging interpolation of a product target *P* with the `"sia_thickness"` drift model induces a 1/sin²(α) double-scaling artifact at low-slope margins, making it unphysical and strongly discouraged.
-  ⚠️ Universal Kriging interpolation of a product target <i>P</i> with the `"sia_thickness"` drift model induces a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact at low-slope margins, making it unphysical and strongly discouraged.
+>  ⚠️ Universal Kriging interpolation of a product target <i>P</i> with the `"sia_thickness"` drift model induces a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artefact induces unrealistic great depths at low-slope margins, thus strongly discouraged.
 - **Direct `"T"` or `"D"` Target Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration), or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** (`method: "universal"`) with the `"sia_thickness"` drift model is recommended and implemented as the default strategy for direct targets.
 
 Available spatial drift models for Universal Kriging include:
