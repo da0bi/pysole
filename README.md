@@ -331,7 +331,9 @@ While users can combine any available interpolation options, two primary strateg
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Drift Models
-1. **Shallow Ice Approximation Physical Drift Model (`["sia_thickness"]`)**:
+The following drift models are implemented in `PySole` for Universal Kriging:
+
+- **Shallow Ice Approximation Physical Drift Model (`["sia_thickness"]`)**:
    `PySole` offers the physically-informed custom `"sia_thickness"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting the drift term parameter to `["sia_thickness"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
 
    <p align="center">
@@ -340,26 +342,26 @@ While users can combine any available interpolation options, two primary strateg
 
    Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps ultra-low slope angles prior to computing the inverse-sine drift, preventing matrix singularities.
 
-2. **Surface Elevation Drift Model (`["z_surface"`], [`"dem"`], or [`"elevation"`])**:
+- **Surface Elevation Drift Model (`["z_surface"`], [`"dem"`], or [`"elevation"`])**:
    Uses the DEM surface elevation <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>) as a spatial drift variable:
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>)
    </p>
    This models the glaciological elevation-dependent ice thickness pattern (thicker ice in lower valley basins/confluences, thinner ice on high-altitude ridges) without relying on surface slope angles.
 
-3. **Linear Surface Drift Model (`["regional_linear"`] or `["x", "y"]`)**:
+- **Linear Surface Drift Model (`["regional_linear"`] or `["x", "y"]`)**:
    Fits a 1st-order bivariate spatial coordinate trend surface across the <i>X</i> and <i>Y</i> grid axes:
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>X</i> + <i>a</i><sub>2</sub> <i>Y</i>
    </p>
 
-4. **Quadratic Surface Drift Model (`["quadratic"`] or `["x", "y", "x2", "y2", "xy"]`)**:
+- **Quadratic Surface Drift Model (`["quadratic"`] or `["x", "y", "x2", "y2", "xy"]`)**:
    Fits a 2nd-order bivariate polynomial trend surface across <i>X</i> and <i>Y</i> coordinates:
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>X</i> + <i>a</i><sub>2</sub> <i>Y</i> + <i>a</i><sub>3</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>4</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>X Y</i>
    </p>
 
-5. **Empty Drift Model (`[]`)**:
+- **Empty Drift Model (`[]`)**:
    An empty drift model parameter assumes a constant local spatial mean (no external drift) which corresponds to the Ordinary Kriging approach.
 
 <a id="depth-uncertainty-derivation"></a>
