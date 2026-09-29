@@ -40,7 +40,7 @@
 * **Automated High-Resolution Diagnostic Plots:** Automatically generates and exports diagnostic figures for each key processing milestone.
 * **5 Supported Digital Elevation Model (DEM) Input and Output Formats:** Seamless loading and exporting of GeoTIFFs (`.tif`), ESRI ASCII Grids (`.asc`, `.txt`), CSV matrices (`.csv`), NumPy binary arrays (`.npy`), and in-memory NumPy 2D arrays (`np.ndarray`).
 * **Strict CRS & Spatial Alignment Verification:** Performs strict verification across all input layers (DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System or falls outside the DEM spatial extent, processing halts with an explicit error.
-* **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey data type. In case of direct thickness/depth data the 3D ray-based migration is automatically skipped.
+* **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey data type. In case of direct thickness/depth data the 3D migration is automatically skipped.
 * 💡**DEM Surface Slope Smoothing💡:** The degree of DEM surface slope smoothing is crucial when estimating ice thickness with the <i>Shallow Ice Approximation</i> (SIA), which assumes a constant basal shear stress. By relaxing this rigid baseline constraint, Binder et al. (2009) derived an objective optimization criterion for the surface slope smoothing process, which is implemented in `PySole`. The optimal degree of surface slope smoothing is derived by enforcing minimum spatial variance in basal shear stress as the optimization criterion:
   <p align="center">
     <font size="+1"><b>min<sub><i>k</i><sub>c</sub></sub> Var<sub><i>xy</i></sub>(<i>τ</i><sub>b</sub>)</b></font>
@@ -76,14 +76,14 @@
 Grid spacing (`dx`, `dy`) and bounding extent are automatically extracted from DEM metadata. If target `dx` and `dy` pixel sizes are specified, 2D bilinear grid resampling is performed automatically.
 
 #### 2. Pre-Migration Traveltime Interpolation
-Evaluates the point products of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. Once the optimization criterion is satisfied, the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), is determined and applied in the subsequent Kriging interpolation depending on `pre_migration.interpolation_target`:
-- **Product `"P"` Target (Default, Ordinary Kriging)**: `PySole` interpolates <i>P</i><sub>T,i</sub> using Ordinary Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 ns) by default to produce the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous signal traveltime field <i>T</i>(<i>x</i>,<i>y</i>) is then reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)):
+Evaluates the point products of traveltime observations and corresponding smoothed surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. Once the optimization criterion is satisfied, the optimal surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), is deployed in the subsequent Kriging interpolation. By default, the interpolation strategy depends on `pre_migration.interpolation_target`:
+- **BSS-derived Product `"P"` (Default)**: `PySole` interpolates <i>P</i><sub>T,i</sub> using Ordinary Kriging (with optional zero-traveltime boundary conditions <i>T</i> = 0 ns) by default to produce the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous signal traveltime field <i>T</i>(<i>x</i>,<i>y</i>) is then reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimal smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)):
 
   <p align="center">
     <font><i>T</i>(<i>x</i>,<i>y</i>) = <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))</font>
   </p>
 
-- **Direct `"T"` Target (Universal Kriging + SIA Drift)**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> using Universal Kriging with the SIA physical drift model sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>−1</sup> by default.
+- **Direct `"T"`**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> using Universal Kriging with the SIA physical drift model sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>−1</sup> by default.
 
 - **Smoothed Surface Slope Safeguard**: `PySole` employs a user-defined minimum threshold of the smoothed surface slopes (`slope_floor_deg`) to prevent numerical division singularities in low-gradient regions (default is <i>5°</i>).
 
@@ -94,9 +94,9 @@ The migration algorithm solves the Eikonal equation to relocate subsurface refle
 Analogous to the pre-migration optimization pass, `PySole` applies the optimization criterion to determine the optimal post-migration surface slope smoothing degree, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. The post-migration surface slope optimization evaluates, however, the products of migrated depths and corresponding smoothed surface slopes, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>).
 
 #### 5. Final Depth Interpolation & Uncertainty Display
-Reconstructs continuous thickness (depth) <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) fields depending by default on `post_migration.interpolation_target`:
-- **Product `"P"` Target (Default, Ordinary Kriging)**: Interpolates point products <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) using Ordinary Kriging (with optional zero-thickness boundary conditions <i>D</i> = 0 m) by default to produce the continuous product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>), and the final depth field with <i>D</i>(<i>x</i>,<i>y</i>) = <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)).
-- **Direct `"D"` Target (Universal Kriging + SIA Drift)**: Directly interpolates (migrated) survey point depths <i>D</i><sub>i</sub> using Universal Kriging with the SIA physical slope drift model sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>−1</sup> by default.
+Reconstructs continuous thickness <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) fields. By default, the interpolation strategy depends on `pre_migration.interpolation_target`:
+- **BSS-derived Product `"P"` (Default)**: Interpolates point products <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) using Ordinary Kriging (with optional zero-thickness boundary conditions <i>D</i> = 0 m) by default to produce the continuous product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>), and the final depth field with <i>D</i>(<i>x</i>,<i>y</i>) = <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) / sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)).
+- **Direct `"D"`**: Directly interpolates (migrated) survey point depths <i>D</i><sub>i</sub> using Universal Kriging with the SIA physical slope drift model sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>−1</sup> by default.
 
 The Kriging standard error for the interpolated depths is converted to meters to quantify depth uncertainty.
 
@@ -322,16 +322,16 @@ To guarantee numerical stability during matrix decomposition, diagonal Tikhonov 
 
 <a id="shallow-ice-approximation-custom-drift"></a>
 #### 5. Interpolation Strategy & Spatial Drift Models
-The user has the freedom to choose any of the available interpolation options. However, two primary interpolation strategies are recommended based on the interpolation target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
+While users can combine any available interpolation options, two primary strategies are recommended. These are implemented in `PySole` as the default approaches based on the target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
 
-- **Product `"P"` Target Strategy**: Interpolates the basal shear stress (BSS)-derived product field <i>P</i> = <i>T</i> · sin <i>α</i><sub>opt</sub> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i><sub>opt</sub> (post-migration). **Ordinary Kriging** (`method: "ordinary"`) with a constant mean is recommended for BSS-derived product targets.<br>
->  ⚠️ Interpolating a product `"P"` target with Universal Kriging and the `"sia_thickness"` drift model creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artifact leads to implausibly large depths at low slopes and is therefore strongly discouraged.
-- **Direct `"T"` or `"D"` Target Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration), or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** (`method: "universal"`) with the `"sia_thickness"` drift model is recommended and implemented as the default strategy for direct targets.
+- **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field <i>P</i> = <i>T</i> · sin <i>α</i><sub>opt</sub> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i><sub>opt</sub> (post-migration). **Ordinary Kriging** with a constant mean is recommended for BSS-derived product targets.<br>
+>  ⚠️ Interpolating a BSS-derived product `"P"` with Universal Kriging and the `"sia_thickness"` drift model creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artifact leads to implausibly large depths at low slopes and is therefore strongly discouraged.
+- **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration), or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** with the `"sia_thickness"` drift model is recommended.
 
 Available spatial drift models for Universal Kriging include:
 
-1. **Shallow Ice Approximation Physical Drift Model (`"sia_thickness"`)**:
-   `PySole` offers the physically-informed custom `"sia_thickness"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting `"drift_terms": ["sia_thickness"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
+1. **Shallow Ice Approximation Physical Drift Model (`["sia_thickness"]`)**:
+   `PySole` offers the physically-informed custom `"sia_thickness"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting the drift term parameter to `["sia_thickness"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
 
    <p align="center">
      <i>D</i> &prop; sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup>
@@ -339,27 +339,27 @@ Available spatial drift models for Universal Kriging include:
 
    Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps ultra-low slope angles prior to computing the inverse-sine drift, preventing matrix singularities.
 
-2. **Surface Elevation Non-Slope Spatial Drift (`"z_surface"`, `"dem"`, or `"elevation"`)**:
-   Uses the DEM surface elevation <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>) as a non-slope spatial drift variable:
+2. **Surface Elevation Drift Model (`["z_surface"`], [`"dem"`], or [`"elevation"`])**:
+   Uses the DEM surface elevation <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>) as a spatial drift variable:
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>)
    </p>
    This models the glaciological elevation-dependent ice thickness pattern (thicker ice in lower valley basins/confluences, thinner ice on high-altitude ridges) without relying on surface slope angles.
 
-3. **Regional Linear Coordinate Drift (`"regional_linear"` or `["x", "y"]`)**:
+3. **Regional Linear Drift Model (`["regional_linear"`] or `["x", "y"]`)**:
    Fits a 1st-order bivariate spatial coordinate trend surface across the <i>X</i> and <i>Y</i> grid axes:
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>X</i> + <i>a</i><sub>2</sub> <i>Y</i>
    </p>
 
-4. **Quadratic Coordinate Trend Surface (`"quadratic"` or `["x", "y", "x2", "y2", "xy"]`)**:
+4. **Quadratic Surface Trend Model (`["quadratic"`] or `["x", "y", "x2", "y2", "xy"]`)**:
    Fits a 2nd-order bivariate polynomial trend surface across <i>X</i> and <i>Y</i> coordinates:
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>X</i> + <i>a</i><sub>2</sub> <i>Y</i> + <i>a</i><sub>3</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>4</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>X Y</i>
    </p>
 
-5. **Ordinary Kriging Constant Mean (`[]` or `"ordinary"`)**:
-   Assumes a constant local spatial mean (no external drift). Default for BSS product interpolation (`interpolation_target`: `"P"`).
+5. **Empty Drift Model (`[]`)**:
+   An empty drift model parameter assumes a constant local spatial mean (no external drift) which corresponds to the Ordinary Kriging approach.
 
 <a id="depth-uncertainty-derivation"></a>
 #### 6. Depth Uncertainty Derivation in Meters
