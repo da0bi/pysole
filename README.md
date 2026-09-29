@@ -362,7 +362,7 @@ The following drift models are implemented in `PySole` for Universal Kriging:
    </p>
 
 - **Empty Drift Model (`[]`)**:
-   An empty drift model parameter assumes a constant local spatial mean (no external drift) which corresponds to the Ordinary Kriging approach.
+   An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.
 
 <a id="depth-uncertainty-derivation"></a>
 #### 7. Depth Uncertainty Derivation in Meters
