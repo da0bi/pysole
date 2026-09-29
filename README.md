@@ -19,11 +19,12 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop Input Files](#parsing-rock-outcrops)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Variogram Binning with Minimum Pair Threshold](#variogram-binning)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. Interpolation Strategy & Spatial Drift Models](#shallow-ice-approximation-custom-drift)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[6. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[7. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[8. Multi-Format DEM Export](#multi-format-dem-export)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[9. Conversion of Wavenumber to Wavelength](#wavenumber-to-wavelength-conversion)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Interpolation Strategies](#interpolation-strategies)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[6. Universal Kriging Drift Models](#universal-kriging-drift-models)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[7. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[8. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[9. Multi-Format DEM Export](#multi-format-dem-export)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[10. Conversion of Wavenumber to Wavelength](#wavenumber-to-wavelength-conversion)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Command-Line Interface (CLI) Execution](#cli-execution)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
@@ -320,8 +321,8 @@ where:
 
 To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a small offset (10<sup>−6</sup>) to the main diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
 
-<a id="shallow-ice-approximation-custom-drift"></a>
-#### 5. Interpolation Strategy & Spatial Drift Models
+<a id="interpolation-strategies"></a>
+#### 5. Interpolation Strategies
 While users can combine any available interpolation options, two primary strategies are recommended. These are implemented in `PySole` as the default approaches based on the target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
 
 - **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field <i>P</i> = <i>T</i> · sin <i>α</i><sub>opt</sub> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i><sub>opt</sub> (post-migration). **Ordinary Kriging** is recommended for BSS-derived product targets.<br>
@@ -330,6 +331,8 @@ While users can combine any available interpolation options, two primary strateg
 
 Available spatial drift models for Universal Kriging include:
 
+<a id="universal-kriging-drift-models"></a>
+#### Universal Kriging Drift Models
 1. **Shallow Ice Approximation Physical Drift Model (`["sia_thickness"]`)**:
    `PySole` offers the physically-informed custom `"sia_thickness"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting the drift term parameter to `["sia_thickness"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
 
