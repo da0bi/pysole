@@ -329,10 +329,8 @@ While users can combine any available interpolation options, two primary strateg
 >  ⚠️ Interpolating a BSS-derived product `"P"` with Universal Kriging and the `"sia_thickness"` drift model creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artifact leads to implausibly large depths at low slopes and is therefore strongly discouraged.
 - **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration), or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** with the `"sia_thickness"` drift model is recommended.
 
-Available spatial drift models for Universal Kriging include:
-
 <a id="universal-kriging-drift-models"></a>
-#### Universal Kriging Drift Models
+#### 6. Universal Kriging Drift Models
 1. **Shallow Ice Approximation Physical Drift Model (`["sia_thickness"]`)**:
    `PySole` offers the physically-informed custom `"sia_thickness"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting the drift term parameter to `["sia_thickness"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
 
@@ -365,7 +363,7 @@ Available spatial drift models for Universal Kriging include:
    An empty drift model parameter assumes a constant local spatial mean (no external drift) which corresponds to the Ordinary Kriging approach.
 
 <a id="depth-uncertainty-derivation"></a>
-#### 6. Depth Uncertainty Derivation in Meters
+#### 7. Depth Uncertainty Derivation in Meters
 Kriging interpolation provides uncertainty estimates by variance of the product field <i>σ</i><sub>P</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>]. The 2D depth estimation variance field <i>σ</i><sub>D</sub><sup>2</sup>(<i>x</i>,<i>y</i>) [m<sup>2</sup>] is obtained via linear error propagation:
 
 <p align="center">
@@ -381,7 +379,7 @@ Taking the square root converts the variance field into the **Kriging Standard E
 Under Gaussian linear estimation theory, ± 1.00 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 68.3% confidence margin of error, while ± 1.96 <i>σ</i><sub>D</sub>(<i>x</i>,<i>y</i>) represents the 95% confidence margin of error.
 
 <a id="dem-spatial-smoothing"></a>
-#### 7. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
+#### 8. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
 The depth field <i>D</i>(<i>x</i>,<i>y</i>) is obtained by dividing the Kriged product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) with the optimal smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). When post-processing DEM spatial smoothing is enabled (`smooth_bedrock: true`), `PySole` applies the spatial smoothing operator <i>S</i> **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)**:
 
 <p align="center" style="line-height: 1.8;">
@@ -392,14 +390,14 @@ The depth field <i>D</i>(<i>x</i>,<i>y</i>) is obtained by dividing the Kriged p
 Applying smoothing directly to <i>D</i>(<i>x</i>,<i>y</i>) prevents the high-frequency surface DEM roughness residual (<i>Z</i><sub>surface</sub> − <i>S</i>(<i>Z</i><sub>surface</sub>)) from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both <i>D</i>(<i>x</i>,<i>y</i>) and <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
 <a id="multi-format-dem-export"></a>
-#### 8. Multi-Format DEM Export
+#### 9. Multi-Format DEM Export
 Under `outputs` in `pysole.json`, users can specify via `output_format` which file format(s) to export calculated depth and bedrock DEMs:<br><br>
 &nbsp;&nbsp;&nbsp;&nbsp;`output_format: "tif"` (or `"asc"`, `"csv"`, `"npy"`): Exports a single specified format.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`output_format: ["tif", "asc", "csv", "npy"]`: Exports a list of specified formats.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;`output_format: "all"`: Exports all four formats simultaneously.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
-#### 9. Conversion of Wavenumber to Wavelength
+#### 10. Conversion of Wavenumber to Wavelength
 In `PySole` 2D lowpass spatial smoothing operates in the discrete frequency domain. Spatial wavenumber components along the orthogonal grid axes <i>X</i> and <i>Y</i> are constructed as:
 
 <p align="center">
