@@ -54,4 +54,12 @@ pysole = "pysole.config:main_cli"
 [project.urls]
 Homepage = "https://github.com/da0bi/pysole"
 Repository = "https://github.com/da0bi/pysole"
+Documentation = "https://github.com/da0bi/pysole/tree/main/docs"
 Issues = "https://github.com/da0bi/pysole/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pysole = ["py.typed"]
+

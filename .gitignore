@@ -14,3 +14,6 @@ pypi_request.txt
 git_token.txt
 *.log
 scratch/
+figures/
+examples/**/figures/
+

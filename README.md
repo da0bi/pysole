@@ -23,7 +23,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[7. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[8. Multi-Format DEM Export](#multi-format-dem-export)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[9. Conversion of Wavenumber Cutoff to Physical Spatial Wavelength](#wavenumber-to-wavelength-conversion)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[9. Conversion of Wavenumber to Wavelength](#wavenumber-to-wavelength-conversion)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Command-Line Interface (CLI) Execution](#cli-execution)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
@@ -396,7 +396,7 @@ Under `outputs` in `pysole.json`, users can specify via `output_format` which fi
 &nbsp;&nbsp;&nbsp;&nbsp;`output_format: "all"`: Exports all four formats simultaneously.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
-#### 9. Conversion of Wavenumber Cutoff to Physical Spatial Wavelength
+#### 9. Conversion of Wavenumber to Wavelength
 In `PySole` 2D lowpass spatial smoothing operates in the discrete frequency domain. Spatial wavenumber components along the orthogonal grid axes <i>X</i> and <i>Y</i> are constructed as:
 
 <p align="center">

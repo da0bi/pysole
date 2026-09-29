@@ -346,11 +346,13 @@ def main_cli() -> None:
         action="store_true",
         help="Enables DEBUG level logging verbosity.",
     )
+    from . import __version__
+
     parser.add_argument(
         "-V",
         "--version",
         action="version",
-        version="PySole 0.2.0",
+        version=f"PySole {__version__}",
         help="Show PySole package version and exit.",
     )
     args = parser.parse_args()
