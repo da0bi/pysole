@@ -100,6 +100,8 @@ Reconstructs continuous thickness <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevat
 
 The Kriging standard error for the interpolated depths is converted to meters to quantify depth uncertainty.
 
+🚨 The final bedrock grid is exported by default. 🚨
+
 ---
 
 <a id="installation"></a>
