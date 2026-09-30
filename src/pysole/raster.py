@@ -662,7 +662,7 @@ def load_outline(
                     fill=0,
                     dtype=np.uint8,
                 )
-                return mask.astype(bool)[::-1, :]
+                return mask.astype(bool)
             except ValueError:
                 raise
             except Exception:
