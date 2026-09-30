@@ -77,7 +77,7 @@ Grid spacing (`dx`, `dy`) and spatial bounds are automatically extracted from Ge
 
 For headerless DEM formats (2D `.csv` matrices, `.npy`, or `np.ndarray`), spatial parameters (`origin`, `crs`, `dx`, `dy`) should be provided under `spatial_parameters` to build the spatial metadata object.
 
-> [!IMPORTANT]
+> [!CAUTION]
 > All input datasets (DEM, survey picks, and outline geometries) **must share the same projected, metric coordinate system** (e.g., UTM in meters). Geographic coordinates (latitude/longitude in degrees) will cause invalid distance, surface slope, and basal shear stress calculations.
 
 #### 2. Pre-Migration Traveltime Interpolation
