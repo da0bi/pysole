@@ -70,6 +70,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "dx": None,
         "dy": None,
         "bounds": None,
+        "origin": None,
+        "crs": None,
     },
     "migration_parameters": {
         "perform_migration": True,
@@ -85,7 +87,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "interactive_optimization": False,
     },
     "kriging_parameters": {
-        "built_in_kriging": True,
+        "engine": "native",
         "pre_migration": {
             "interpolation_target": "P",
             "method": "ordinary",

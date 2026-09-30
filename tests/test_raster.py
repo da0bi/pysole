@@ -104,6 +104,48 @@ class TestRasterWuk(unittest.TestCase):
         with self.assertRaises(ValueError):
             check_projected_metric_crs(coords=lat_lon_pts)
 
+        # Geographic bounds in lat/lon degrees must raise ValueError
+        with self.assertRaises(ValueError):
+            check_projected_metric_crs(bounds=(13.0, 47.0, 14.0, 48.0))
+
+    def test_load_dem_csv_matrix_and_origin(self):
+        import tempfile
+        matrix = np.array([[10.0, 20.0], [30.0, 40.0]], dtype=np.float64)
+        with tempfile.NamedTemporaryFile(suffix=".csv", mode="w", delete=False) as f:
+            np.savetxt(f.name, matrix, delimiter=",")
+            tmp_path = f.name
+        try:
+            grid, meta = load_dem(tmp_path, dx=10.0, dy=10.0, origin=(500000.0, 5200000.0), crs="EPSG:32632")
+            self.assertEqual(grid.shape, (2, 2))
+            self.assertEqual(meta["dx"], 10.0)
+            self.assertEqual(meta["dy"], 10.0)
+            self.assertEqual(meta["bounds"], (500000.0, 5200000.0, 500020.0, 5200020.0))
+            self.assertEqual(meta["crs"], "EPSG:32632")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_load_dem_csv_3column_xyz(self):
+        import tempfile
+        import pandas as pd
+        df = pd.DataFrame({
+            "X": [100.0, 110.0, 100.0, 110.0],
+            "Y": [500.0, 500.0, 510.0, 510.0],
+            "Z": [10.0, 20.0, 30.0, 40.0],
+        })
+        with tempfile.NamedTemporaryFile(suffix=".csv", mode="w", delete=False) as f:
+            df.to_csv(f.name, index=False)
+            tmp_path = f.name
+        try:
+            grid, meta = load_dem(tmp_path)
+            self.assertEqual(grid.shape, (2, 2))
+            self.assertEqual(meta["dx"], 10.0)
+            self.assertEqual(meta["dy"], 10.0)
+            self.assertEqual(meta["bounds"], (95.0, 495.0, 115.0, 515.0))
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
 
 if __name__ == "__main__":
     unittest.main()

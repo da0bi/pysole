@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 import numpy as np
 import os
-from .raster import BedrockMap, load_dem, load_outline, ensure_spatial_coords, GridGeometry, load_survey_points, save_points_csv
+from .raster import BedrockMap, load_dem, load_outline, GridGeometry, load_survey_points, save_points_csv
 from .migration import migrate_eikonal_points, EikonalMigrator, MigrationResult
 from .variogram import BSSOptimizer, OptimizationResult, compute_cutoff_wavelength
-from .interpolation import blend_margin_topography, kriging_interpolation, random_forest_hole_filling, KrigingEngine, BedrockFinalizer, KrigingResult
+from .interpolation import blend_margin_topography, kriging_interpolation, KrigingEngine, BedrockFinalizer, KrigingResult
 from .smoothing import compute_gradients, fft_gaussian_smooth, precompute_fft_grid, fft_gaussian_smooth_precomputed
 from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir
 from .logging import logger
@@ -29,6 +29,8 @@ class Solver:
         dx: float | None = None,
         dy: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
+        origin: tuple[float, float] | None = None,
+        crs: Any = None,
         pre_kriging_method: str = "universal",
         pre_drift_terms: list[str] | None = None,
         pre_variogram_model: str = "spherical",
@@ -43,7 +45,7 @@ class Solver:
         survey_data_type: str = "one_way_travel_time",
         plots_dir: str | Path | None = None,
         n_cores: int = -1,
-        built_in_kriging: bool = True,
+        kriging_engine: str = "native",
         nrbins: int | None = None,
         ice_density: float = 900.0,
         g: float = 9.81,
@@ -65,6 +67,10 @@ class Solver:
             Pixel resolution along Y. If None, derived directly from actual DEM metadata.
         bounds : tuple of float, optional
             Spatial bounding box (minx, miny, maxx, maxy).
+        origin : tuple of float, optional
+            Lower-left coordinate origin (xll, yll) for headerless DEM formats (CSV, NPY, ndarray).
+        crs : str or int, optional
+            Coordinate Reference System (e.g. 'EPSG:32633'). Enforces projected metric system checks.
         pre_kriging_method : str
             1st-pass pre-migration Kriging approach ('universal', 'ordinary', 'regression'). Default 'universal'.
         pre_drift_terms : list of str, optional
@@ -90,6 +96,8 @@ class Solver:
             Directory where generated plots are automatically saved.
         n_cores : int
             Number of CPU cores for multi-threading/processing (-1 for all available cores).
+        kriging_engine : str
+            Kriging solver engine: 'native' (default, high-performance solver) or 'pykrige'.
         output_dir : str or Path, optional
             General workspace directory for all output files. If None, defaults to parent directory of survey_data_path.
         config_path : str or Path, optional
@@ -102,7 +110,14 @@ class Solver:
         self.config_path = str(config_path) if config_path else None
         self._raw_plots_dir = plots_dir
 
-        self.dem_grid, self.meta = load_dem(self.resolve_input_path(dem), dx=dx, dy=dy, bounds=bounds)
+        self.dem_grid, self.meta = load_dem(
+            self.resolve_input_path(dem),
+            dx=dx,
+            dy=dy,
+            bounds=bounds,
+            origin=origin,
+            crs=crs,
+        )
         self.outline_mask = load_outline(self.resolve_input_path(outline), self.dem_grid, self.meta)
 
         self.geometry = GridGeometry.create(
@@ -133,7 +148,7 @@ class Solver:
         self.perform_migration = perform_migration
         self.survey_data_type = survey_data_type
         self.n_cores = n_cores
-        self.built_in_kriging = bool(built_in_kriging)
+        self.kriging_engine = str(kriging_engine).lower().strip()
         self.nrbins = int(nrbins) if nrbins is not None else None
         self.ice_density = float(ice_density)
         self.g = float(g)
@@ -404,8 +419,8 @@ class Solver:
 
         opt_cfg = cfg.get("optimization_parameters", {})
         n_cores = inputs.get("n_cores", -1)
+        kriging_engine = kriging_cfg.get("engine", "native")
         nrbins = opt_cfg.get("nrbins", None)
-        built_in_kriging = kriging_cfg.get("built_in_kriging", True)
         ice_density = inputs.get("ice_density", 900.0)
         g_val = inputs.get("g", 9.81)
 
@@ -417,6 +432,8 @@ class Solver:
             dx=spatial.get("dx"),
             dy=spatial.get("dy"),
             bounds=spatial.get("bounds"),
+            origin=spatial.get("origin"),
+            crs=spatial.get("crs"),
             pre_kriging_method=pre_method,
             pre_drift_terms=pre_drifts,
             pre_variogram_model=pre_var_model,
@@ -431,7 +448,7 @@ class Solver:
             survey_data_type=survey_dtype,
             plots_dir=outputs.get("plots_dir", None),
             n_cores=n_cores,
-            built_in_kriging=built_in_kriging,
+            kriging_engine=kriging_engine,
             nrbins=nrbins,
             ice_density=ice_density,
             g=g_val,
@@ -497,7 +514,7 @@ class Solver:
             outline_mask=self.outline_mask,
             include_zero_boundary_condition=zero_boundary,
             n_cores=self.n_cores,
-            built_in_kriging=self.built_in_kriging,
+            engine=self.kriging_engine,
             slope_floor_deg=self.slope_floor_deg,
             show_progress=self.show_progress,
         )
@@ -529,6 +546,19 @@ class Solver:
             x_coords=self.x_coords,
             y_coords=self.y_coords,
         )
+
+        pts_minx, pts_miny = float(pts[:, 0].min()), float(pts[:, 1].min())
+        pts_maxx, pts_maxy = float(pts[:, 0].max()), float(pts[:, 1].max())
+        if (self.bounds[0] == 0.0 and self.bounds[1] == 0.0) and (pts_minx > 10000.0 or pts_miny > 10000.0):
+            err_msg = (
+                f"\n[Spatial Coordinate Origin Mismatch Error] Survey points use projected metric coordinates "
+                f"(X in [{pts_minx:.1f}, {pts_maxx:.1f}], Y in [{pts_miny:.1f}, {pts_maxy:.1f}]), "
+                f"but DEM bounding box defaults to origin (0.0, 0.0)!\n"
+                f"For headerless CSV/NPY DEMs, you must define 'spatial_parameters.origin': [xll, yll] or "
+                f"'spatial_parameters.bounds': [minx, miny, maxx, maxy] in pysole.json so the DEM aligns with survey points."
+            )
+            logger.error(err_msg)
+            raise ValueError(err_msg)
 
         dtype_str = str(self.survey_data_type).lower().strip()
 

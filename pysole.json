@@ -13,7 +13,9 @@
     "spatial_parameters": {
         "dx": null,
         "dy": null,
-        "bounds": null
+        "bounds": null,
+        "origin": null,
+        "crs": null
     },
     "migration_parameters": {
         "perform_migration": true,
@@ -29,7 +31,7 @@
         "interactive_optimization": false
     },
     "kriging_parameters": {
-        "built_in_kriging": true,
+        "engine": "native",
         "pre_migration": {
             "interpolation_target": "P",
             "method": "ordinary",

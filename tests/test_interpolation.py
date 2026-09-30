@@ -89,18 +89,15 @@ class TestInterpolationWuk(unittest.TestCase):
         self.assertEqual(filled.shape, self.dem.shape)
         self.assertFalse(np.isnan(filled).any())
 
-    def test_built_in_kriging_flag(self):
-        with self.assertLogs("pysole", level="INFO") as cm:
-            krig_res = kriging_interpolation(
-                sample_points=self.sample_pts,
-                geometry=self.geometry,
-                method="universal",
-                variogram_model="spherical",
-                dem_grid=self.dem,
-                outline_mask=self.outline_mask,
-                built_in_kriging=False,
-            )
-        self.assertTrue(any("Built-in native Kriging engine active" in log_msg for log_msg in cm.output))
+    def test_kriging_interpolation_basic(self):
+        krig_res = kriging_interpolation(
+            sample_points=self.sample_pts,
+            geometry=self.geometry,
+            method="universal",
+            variogram_model="spherical",
+            dem_grid=self.dem,
+            outline_mask=self.outline_mask,
+        )
         self.assertIsInstance(krig_res, KrigingResult)
         self.assertEqual(krig_res.bedrock_grid.shape, self.dem.shape)
 

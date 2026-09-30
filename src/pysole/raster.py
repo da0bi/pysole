@@ -272,8 +272,19 @@ def check_projected_metric_crs(
         is_origin_grid = (minx == 0.0 and miny == 0.0)
         if not is_origin_grid and (-180.0 <= minx and maxx <= 180.0) and (-90.0 <= miny and maxy <= 90.0):
             err_msg = (
-                f"\n[Geographic Coordinates Detected] Survey profile coordinates appear to be unprojected geographic degrees (X in [-180, 180], Y in [-90, 90]).\n"
+                f"\n[Geographic Coordinates Detected] Survey profile coordinates appear to be unprojected geographic degrees (X in [{minx:.4f}, {maxx:.4f}], Y in [{miny:.4f}, {maxy:.4f}]).\n"
                 f"PySole requires a projected metric coordinate system in meters (e.g. UTM) for variogram Euclidean distance calculations."
+            )
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+    if bounds is not None:
+        b_minx, b_miny, b_maxx, b_maxy = float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])
+        is_origin_grid = (b_minx == 0.0 and b_miny == 0.0)
+        if not is_origin_grid and (-180.0 <= b_minx and b_maxx <= 180.0) and (-90.0 <= b_miny and b_maxy <= 90.0):
+            err_msg = (
+                f"\n[Geographic Coordinates Detected] DEM bounding box coordinates appear to be unprojected geographic degrees (X in [{b_minx:.4f}, {b_maxx:.4f}], Y in [{b_miny:.4f}, {b_maxy:.4f}]).\n"
+                f"PySole requires a projected metric coordinate system in meters (e.g. UTM) for variogram Euclidean distance and surface slope calculations."
             )
             logger.error(err_msg)
             raise ValueError(err_msg)
@@ -372,28 +383,26 @@ def load_dem(
     dx: float | None = None,
     dy: float | None = None,
     bounds: tuple[float, float, float, float] | None = None,
+    origin: tuple[float, float] | None = None,
+    crs: Any = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """
     Load a DEM from a file path (GeoTIFF, ASCII Grid, CSV, NPY) or numpy array,
-    extracting spatial metadata directly from the DEM file, and performing DEM resampling
-    if target dx and dy parameters are defined.
+    extracting spatial metadata directly from the DEM file or user parameters,
+    and performing DEM resampling if target dx and dy parameters are defined.
     """
     grid = None
     transform = None
-    crs = None
+    dem_crs = crs
     calc_bounds = bounds
     native_dx = dx if dx is not None else 1.0
     native_dy = dy if dy is not None else 1.0
 
+    is_headerless = False
+
     if isinstance(dem_input, np.ndarray):
         grid = dem_input.astype(np.float64)
-        height, width = grid.shape
-        if calc_bounds is None:
-            logger.warning(
-                f"DEM input passed as raw in-memory np.ndarray without spatial bounds. "
-                f"Defaulting origin to (0.0, 0.0) with pixel spacing dx={native_dx:.2f} m, dy={native_dy:.2f} m."
-            )
-            calc_bounds = (0.0, 0.0, float(width) * native_dx, float(height) * native_dy)
+        is_headerless = True
     elif dem_input is not None:
         ext = Path(dem_input).suffix.lower()
 
@@ -406,9 +415,11 @@ def load_dem(
                 if src.nodata is not None:
                     grid[grid == src.nodata] = np.nan
                 transform = src.transform
-                crs = src.crs
+                if dem_crs is None:
+                    dem_crs = src.crs
                 b = src.bounds
-                calc_bounds = (b.left, b.bottom, b.right, b.top)
+                if calc_bounds is None:
+                    calc_bounds = (b.left, b.bottom, b.right, b.top)
                 native_dx = abs(transform.a) if transform.a != 0 else (b.right - b.left) / src.width
                 native_dy = abs(transform.e) if transform.e != 0 else (b.top - b.bottom) / src.height
 
@@ -439,29 +450,82 @@ def load_dem(
 
             native_dx = cellsize
             native_dy = cellsize
-            calc_bounds = (xll, yll, xll + ncols * cellsize, yll + nrows * cellsize)
+            if calc_bounds is None:
+                calc_bounds = (xll, yll, xll + ncols * cellsize, yll + nrows * cellsize)
 
         # 3. CSV or NPY formats
         elif ext == ".csv":
-            try:
-                grid = np.loadtxt(dem_input, delimiter=",").astype(np.float64)
-            except ValueError:
-                import pandas as pd
-                df_tmp = pd.read_csv(dem_input)
-                grid = df_tmp.select_dtypes(include=[np.number]).to_numpy().astype(np.float64)
-            height, width = grid.shape
-            if calc_bounds is None:
-                calc_bounds = (0.0, 0.0, float(width) * native_dx, float(height) * native_dy)
+            import pandas as pd
+            df_csv = pd.read_csv(dem_input)
+            numeric_cols = df_csv.select_dtypes(include=[np.number])
+
+            # Detect 3-column XYZ grid table format (X, Y, Z) vs 2D Matrix
+            if numeric_cols.shape[1] == 3:
+                col_names = [c.lower() for c in numeric_cols.columns]
+                x_col, y_col, z_col = numeric_cols.columns[0], numeric_cols.columns[1], numeric_cols.columns[2]
+                for idx, c in enumerate(col_names):
+                    if c in ["x", "easting", "e"]:
+                        x_col = numeric_cols.columns[idx]
+                    elif c in ["y", "northing", "n"]:
+                        y_col = numeric_cols.columns[idx]
+                    elif c in ["z", "ele", "elevation", "height"]:
+                        z_col = numeric_cols.columns[idx]
+
+                x_vals = np.sort(df_csv[x_col].unique())
+                y_vals = np.sort(df_csv[y_col].unique())
+                if len(x_vals) * len(y_vals) == len(df_csv):
+                    piv = df_csv.pivot(index=y_col, columns=x_col, values=z_col)
+                    piv = piv.sort_index(ascending=False)  # top-down Y (will be flipped at end)
+                    grid = piv.to_numpy().astype(np.float64)
+
+                    inferred_dx = float(np.min(np.diff(x_vals))) if len(x_vals) > 1 else 1.0
+                    inferred_dy = float(np.min(np.diff(y_vals))) if len(y_vals) > 1 else 1.0
+                    if dx is None:
+                        native_dx = inferred_dx
+                    if dy is None:
+                        native_dy = inferred_dy
+                    minx = float(x_vals.min()) - 0.5 * native_dx
+                    maxx = float(x_vals.max()) + 0.5 * native_dx
+                    miny = float(y_vals.min()) - 0.5 * native_dy
+                    maxy = float(y_vals.max()) + 0.5 * native_dy
+                    if calc_bounds is None:
+                        calc_bounds = (minx, miny, maxx, maxy)
+
+            if grid is None:
+                try:
+                    grid = np.loadtxt(dem_input, delimiter=",").astype(np.float64)
+                except ValueError:
+                    grid = numeric_cols.to_numpy().astype(np.float64)
+                is_headerless = True
+
         elif ext == ".npy":
             grid = np.load(dem_input).astype(np.float64)
-            height, width = grid.shape
-            if calc_bounds is None:
-                calc_bounds = (0.0, 0.0, float(width) * native_dx, float(height) * native_dy)
+            is_headerless = True
         else:
             raise ValueError(f"Unsupported DEM file extension: {ext}")
 
     if grid is None:
         raise ValueError(f"Could not load DEM dataset from {dem_input}")
+
+    if is_headerless:
+        height, width = grid.shape
+        if dx is None or dy is None:
+            lbl = "np.ndarray" if isinstance(dem_input, np.ndarray) else f"Headerless DEM '{dem_input}'"
+            logger.warning(
+                f"{lbl} loaded without explicit pixel spacing (dx, dy). "
+                f"Defaulting cell spacing to dx={native_dx:.2f} m, dy={native_dy:.2f} m."
+            )
+        if calc_bounds is None:
+            if origin is not None:
+                xll, yll = float(origin[0]), float(origin[1])
+                calc_bounds = (xll, yll, xll + float(width) * native_dx, yll + float(height) * native_dy)
+            else:
+                lbl = "np.ndarray" if isinstance(dem_input, np.ndarray) else f"Headerless DEM '{dem_input}'"
+                logger.warning(
+                    f"{lbl} loaded without spatial bounds or origin. "
+                    f"Defaulting coordinate origin to (0.0, 0.0) in local meters."
+                )
+                calc_bounds = (0.0, 0.0, float(width) * native_dx, float(height) * native_dy)
 
     # Standard GIS rasters (GeoTIFF, ASCII Grid, CSV, NPY) store Row 0 at Y_max (top-down).
     # PySole's spatial coordinate vector y_coords[0] represents Y_min (bottom-up).
@@ -471,6 +535,9 @@ def load_dem(
 
     calc_dx = dx if dx is not None else native_dx
     calc_dy = dy if dy is not None else native_dy
+
+    # Validate projected metric coordinate system
+    check_projected_metric_crs(crs=dem_crs, bounds=calc_bounds)
 
     # Perform DEM resampling if dx and dy target resolutions are specified
     if (dx is not None and abs(dx - native_dx) > 1e-4) or (dy is not None and abs(dy - native_dy) > 1e-4):
@@ -488,7 +555,7 @@ def load_dem(
 
     meta = {
         "transform": transform,
-        "crs": crs,
+        "crs": dem_crs,
         "bounds": calc_bounds,
         "dx": calc_dx,
         "dy": calc_dy,

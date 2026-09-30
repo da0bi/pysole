@@ -53,7 +53,7 @@ class KrigingEngine:
         drift_terms: list[str] | None = None,
         include_zero_boundary_condition: bool = True,
         n_cores: int = -1,
-        built_in_kriging: bool = True,
+        engine: str = "native",
         show_progress: bool = True,
     ) -> KrigingResult:
         """Executes Kriging interpolation using engine spatial geometry settings."""
@@ -68,7 +68,7 @@ class KrigingEngine:
             outline_mask=self.outline_mask,
             include_zero_boundary_condition=include_zero_boundary_condition,
             n_cores=n_cores,
-            built_in_kriging=built_in_kriging,
+            engine=engine,
             show_progress=show_progress,
         )
 
@@ -421,6 +421,113 @@ def built_in_kriging_interpolation(
     return z_interp, var_interp
 
 
+def pykrige_kriging_interpolation(
+    sample_points: np.ndarray,
+    x_coords: np.ndarray,
+    y_coords: np.ndarray,
+    method: str = "universal",
+    variogram_model: str = "spherical",
+    external_drift_grid: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Executes 3rd-party PyKrige Ordinary, Universal, or Regression Kriging.
+    Requires optional 'pykrige' dependency.
+    """
+    try:
+        import pykrige
+    except ImportError:
+        raise ImportError(
+            "PyKrige package is required for engine='pykrige' or method='regression'. "
+            "Please install it via: pip install pysole[pykrige] or pip install pykrige"
+        )
+
+    valid = ~np.isnan(sample_points[:, 0]) & ~np.isnan(sample_points[:, 1]) & ~np.isnan(sample_points[:, 2])
+    pts = sample_points[valid]
+
+    M, N = len(y_coords), len(x_coords)
+    if len(pts) == 0:
+        return np.zeros((M, N)), np.zeros((M, N))
+
+    method_clean = str(method).lower().strip()
+
+    if method_clean in ["regression", "regression_kriging"]:
+        from pykrige.rk import RegressionKriging
+        from sklearn.ensemble import RandomForestRegressor
+
+        rk = RegressionKriging(
+            regression_model=RandomForestRegressor(n_estimators=50, random_state=42),
+            method="ordinary",
+            variogram_model=variogram_model,
+        )
+        P_train = pts[:, :2]
+        z_train = pts[:, 2]
+        rk.fit(P_train, P_train, z_train)
+
+        xx, yy = np.meshgrid(x_coords, y_coords)
+        P_pred = np.column_stack((xx.ravel(), yy.ravel()))
+        z_flat = rk.predict(P_pred, P_pred)
+        z_b = z_flat.reshape((M, N))
+        v_b = np.zeros((M, N))
+        return z_b, v_b
+
+    elif method_clean in ["ordinary", "ordinary_kriging"]:
+        from pykrige.ok import OrdinaryKriging
+
+        ok = OrdinaryKriging(
+            pts[:, 0],
+            pts[:, 1],
+            pts[:, 2],
+            variogram_model=variogram_model,
+            verbose=False,
+            enable_plotting=False,
+        )
+        z_b, v_b = ok.execute("grid", x_coords, y_coords)
+        return np.asarray(z_b, dtype=np.float64), np.asarray(v_b, dtype=np.float64)
+
+    else:
+        from pykrige.uk import UniversalKriging
+
+        if external_drift_grid is not None and external_drift_grid.shape == (M, N):
+            from scipy.interpolate import RegularGridInterpolator
+
+            if len(y_coords) > 1 and y_coords[1] < y_coords[0]:
+                y_asc = y_coords[::-1]
+                u_asc = external_drift_grid[::-1, :]
+            else:
+                y_asc = y_coords
+                u_asc = external_drift_grid
+
+            interp_u = RegularGridInterpolator((y_asc, x_coords), u_asc, bounds_error=False, fill_value=0.0)
+            pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))
+            pts_u = interp_u(pts_xy)
+            pts_u = np.nan_to_num(pts_u, nan=0.0)
+
+            uk = UniversalKriging(
+                pts[:, 0],
+                pts[:, 1],
+                pts[:, 2],
+                variogram_model=variogram_model,
+                drift_terms=["specified"],
+                specified_drift=[pts_u],
+                verbose=False,
+                enable_plotting=False,
+            )
+            z_b, v_b = uk.execute("grid", x_coords, y_coords, specified_drift_data=[external_drift_grid])
+        else:
+            uk = UniversalKriging(
+                pts[:, 0],
+                pts[:, 1],
+                pts[:, 2],
+                variogram_model=variogram_model,
+                drift_terms=["regional_linear"],
+                verbose=False,
+                enable_plotting=False,
+            )
+            z_b, v_b = uk.execute("grid", x_coords, y_coords)
+
+        return np.asarray(z_b, dtype=np.float64), np.asarray(v_b, dtype=np.float64)
+
+
 def kriging_interpolation(
     sample_points: np.ndarray,
     geometry: GridGeometry,
@@ -432,7 +539,7 @@ def kriging_interpolation(
     outline_mask: np.ndarray | None = None,
     include_zero_boundary_condition: bool = True,
     n_cores: int = -1,
-    built_in_kriging: bool = True,
+    engine: str = "native",
     slope_floor_deg: float = 5.0,
     show_progress: bool = True,
 ) -> KrigingResult:
@@ -441,7 +548,7 @@ def kriging_interpolation(
     1. 'universal' / 'universal_kriging' (Universal Kriging with default quadratic spatial drift)
     2. 'sia_thickness' / 'sia' (Shallow Ice Approximation custom physical drift U_sia = 1 / sin(alpha_safe))
     3. 'ordinary' / 'ordinary_kriging' (Ordinary Kriging assuming constant mean)
-    4. 'regression' / 'regression_kriging' (Regression Kriging combining ML regressor with residual Kriging)
+    4. 'regression' / 'regression_kriging' (Regression Kriging combining ML regressor with residual Kriging via PyKrige)
 
     When include_zero_boundary_condition is True, enforces zero-value boundary points (T=0 ns or D=0 m)
     along both the outer perimeter and any interior rock outcrop/nunatak margin boundaries.
@@ -480,6 +587,7 @@ def kriging_interpolation(
         return KrigingResult(bedrock_grid=np.zeros((M, N)), variance_grid=np.zeros((M, N)))
 
     method_clean = str(method).lower().replace("_kriging", "").strip()
+    engine_clean = str(engine).lower().strip()
     is_sia_mode = (method_clean in ["sia_thickness", "sia", "sia_drift"]) or (drift_terms is not None and "sia_thickness" in drift_terms)
     is_z_surface_mode = (drift_terms is not None) and any(term in drift_terms for term in ["z_surface", "dem", "elevation"])
 
@@ -503,20 +611,27 @@ def kriging_interpolation(
     elif is_z_surface_mode and dem_grid is not None and dem_grid.shape == (M, N):
         external_sia_grid = dem_grid
 
-    if not built_in_kriging:
-        logger.info("Built-in native Kriging engine active (built_in_kriging=True recommended).")
-
-    # Fast, robust native vector Kriging engine
-    z_b, v_b = built_in_kriging_interpolation(
-        pts,
-        x_coords,
-        y_coords,
-        method="sia_thickness" if (is_sia_mode or is_z_surface_mode) else method_clean,
-        variogram_model=variogram_model,
-        external_drift_grid=external_sia_grid,
-        n_cores=n_cores,
-        show_progress=show_progress,
-    )
+    if engine_clean in ["pykrige"] or method_clean in ["regression", "regression_kriging"]:
+        z_b, v_b = pykrige_kriging_interpolation(
+            pts,
+            x_coords,
+            y_coords,
+            method="sia_thickness" if (is_sia_mode or is_z_surface_mode) else method_clean,
+            variogram_model=variogram_model,
+            external_drift_grid=external_sia_grid,
+        )
+    else:
+        # Fast, robust native vector Kriging engine
+        z_b, v_b = built_in_kriging_interpolation(
+            pts,
+            x_coords,
+            y_coords,
+            method="sia_thickness" if (is_sia_mode or is_z_surface_mode) else method_clean,
+            variogram_model=variogram_model,
+            external_drift_grid=external_sia_grid,
+            n_cores=n_cores,
+            show_progress=show_progress,
+        )
     return KrigingResult(bedrock_grid=z_b, variance_grid=v_b)
 
 

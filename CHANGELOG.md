@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.1] - 2026-09-30
+
+### Added
+- **Headerless DEM Loading & Metadata Ingestion**:
+  - Extended `load_dem()` in `src/pysole/raster.py` to support headerless DEM inputs (`.csv`, `.npy`, `np.ndarray`).
+  - Added automatic detection for 3-column CSV grid tables `(X, Y, Z)`, automatically inferring grid cell resolution (`dx`, `dy`) and bounding extent.
+  - Added `origin` (`[xll, yll]`) parameter to `spatial_parameters` for precise positioning of headerless DEMs in projected coordinate space.
+- **Projected Metric Coordinate System Validation**:
+  - Added `check_projected_metric_crs()` in `src/pysole/raster.py` to enforce that input CRS designations (e.g. `"EPSG:32633"`) use projected metric units (UTM meters) rather than geographic lat/lon degrees (`EPSG:4326`).
+  - Added automatic coordinate origin mismatch detection in `Solver` between survey point coordinates and headerless DEM bounding boxes.
+- **Dual Kriging Engine Architecture & PyKrige Integration**:
+  - Added `kriging_parameters.engine` configuration parameter (`"native"` default vs `"pykrige"`).
+  - Implemented `pykrige_kriging_interpolation()` supporting `pykrige.ok.OrdinaryKriging`, `pykrige.uk.UniversalKriging`, and `pykrige.rk.RegressionKriging` (`method: "regression"`, combining `scikit-learn`'s `RandomForestRegressor` with residual Kriging).
+  - Added clear `ImportError` feedback when `pykrige` engine is requested but not installed.
+- **New Unit Test Suite (`tests/test_pykrige.py`)**:
+  - Added unit test module covering `engine="native"`, `engine="pykrige"`, `method="regression"`, and `ImportError` handling.
+
+### Changed
+- **Codebase Streamlining & Audit**:
+  - Consolidated post-extraction metadata initialization for headerless DEMs into a single post-extraction block while preserving C-contiguous array indexing.
+  - Removed obsolete legacy fallback flags (`built_in_kriging`).
+  - Streamlined memory allocations in `pykrige_kriging_interpolation()` during Regression Kriging predictions.
+- **Documentation & Configuration Schema Alignment**:
+  - Updated `README.md` parameter reference tables, JSON configuration snippet, and workflow sections with GitHub-style alert callouts.
+  - Updated `pysole.json`, `examples/gok/pysole_gok.json`, and `examples/wuk/pysole_wuk.json` with `origin`, `crs`, and `engine` settings.
+
+---
+
 ## [0.3.0] - 2026-09-27
 
 ### Added
