@@ -78,7 +78,7 @@ Grid spacing (`dx`, `dy`) and spatial bounds are automatically extracted from Ge
 For headerless DEM formats (2D `.csv` matrices, `.npy`, or `np.ndarray`), spatial parameters (`origin`, `crs`, `dx`, `dy`) should be provided under `spatial_parameters` to build the spatial metadata object.
 
 > [!CAUTION]
-> All input datasets (DEM, survey picks, and outline geometries) **must share the same projected, metric coordinate reference system** `crs` (e.g., UTM in meters). Geographic coordinates (latitude/longitude in degrees) will cause invalid distance, surface slope, and basal shear stress calculations.
+> All input datasets (DEM, survey picks, and outline geometries) **must share the same projected, metric coordinate reference system** `"crs"` (e.g., UTM in meters). Geographic coordinates (latitude/longitude in degrees) will cause invalid distance, surface slope, and basal shear stress calculations.
 
 #### 2. Pre-Migration Traveltime Interpolation
 Across spatial wavenumber cutoffs <i>k</i><sub>c</sub>, the point products of traveltime observations and corresponding low-pass filtered surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), are evaluated. Once the optimization criterion is satisfied, the optimally smoothed surface slope, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), is deployed in the subsequent Kriging interpolation. By default, the recommended interpolation strategy depends on `pre_migration.interpolation_target`:
