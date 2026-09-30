@@ -1066,15 +1066,26 @@ class Solver:
             name="final_bedrock",
         )
 
-    def run_pipeline(self) -> BedrockMap:
+    def run_pipeline(
+        self,
+        survey_data_path: str | Path | os.PathLike | None = None,
+    ) -> BedrockMap:
         """
         Executes the complete 5-step PySole workflow using loaded configuration settings.
+
+        Parameters
+        ----------
+        survey_data_path : str, Path, or os.PathLike, optional
+            Path to survey points dataset. Overrides solver's survey_data_path attribute.
 
         Returns
         -------
         bedrock_map : BedrockMap
             Final predicted bedrock elevation grid.
         """
+        if survey_data_path is not None:
+            self.survey_data_path = str(survey_data_path)
+
         cfg = getattr(self, "config", {})
         inputs = cfg.get("inputs", {})
         migration = cfg.get("migration_parameters", {})
