@@ -242,13 +242,13 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `pre_migration` | `dict` | *Sub-section* | Configuration for pre-migration traveltime field, <i>T</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `pre_migration.interpolation_target` | `str` | `"P"` | Pre-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>T</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct signal traveltimes (<i>T</i><sub>i</sub>). |
 | | `pre_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (the default for `pre_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
-| | `pre_migration.drift_terms` | `list[str]` | `[]` | Available drift models for Universal Kriging: `["sia_thickness"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`), `["z_surface"]` (or `["dem"]` / `["elevation"]` - surface elevation drift model), `["regional_linear"]` (or `["x", "y"]` - 1st-order linear coordinate trend), or `["quadratic"]` (2nd-order quadratic coordinate trend). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. |
+| | `pre_migration.drift_terms` | `list[str]` | `[]` | Available drift models for Universal Kriging: `["sia_thickness"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`), `["z_surface"]` (or `["dem"]` / `["elevation"]` - surface elevation drift model), `["regional_linear"]` (or `["x", "y"]` - 1st-order linear coordinate trend), `["quadratic"]` (2nd-order quadratic coordinate trend), or <i>combined multi-drift models</i> (e.g. `["z_surface", "quadratic"]` - all available multi-drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes"). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. |
 | | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 s) along the perimeter and rock outcrop margin outline(s). |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth, <i>D</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
 | | `post_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (the default for `post_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
-| | `post_migration.drift_terms` | `list[str]` | `[]` | Available drift models for Universal Kriging: `["sia_thickness"]` (SIA physical drift model, the default for `post_migration.interpolation_target`: `"D"`), `["z_surface"]` (or `["dem"]` / `["elevation"]` - surface elevation drift model), `["regional_linear"]` (or `["x", "y"]` - 1st-order linear coordinate trend), or `["quadratic"]` (2nd-order quadratic coordinate trend). If left empty `[]` (the default for `post_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. |
+| | `post_migration.drift_terms` | `list[str]` | `[]` | Available drift models for Universal Kriging: `["sia_thickness"]` (SIA physical drift model, the default for `post_migration.interpolation_target`: `"D"`), `["z_surface"]` (or `["dem"]` / `["elevation"]` - surface elevation drift model), `["regional_linear"]` (or `["x", "y"]` - 1st-order linear coordinate trend), `["quadratic"]` (2nd-order quadratic coordinate trend), or <i>combined multi-drift models</i> (e.g. `["z_surface", "quadratic"]` - all available multi-drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes"). If left empty `[]` (the default for `post_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. |
 | | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
 | **`finalization_parameters`** | `random_forest_gap_filling` | `bool` | `false` | If `true`, applies Random Forest machine learning gap filling across unmeasured interior regions. |
@@ -369,6 +369,37 @@ The following drift models are implemented in `PySole` for Universal Kriging:
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>X</i> + <i>a</i><sub>2</sub> <i>Y</i> + <i>a</i><sub>3</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>4</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>X Y</i>
    </p>
+
+- **Combined Multi-Drift Models**:
+   `PySole` natively supports combining external raster drift models (`["z_surface"]` or `["sia_thickness"]`) with polynomial spatial coordinate trends (`["quadratic"]` or `["regional_linear"]`) into an augmented multi-drift Universal Kriging system. The following 4 combined drift configurations are available:
+
+   1. **`["z_surface", "quadratic"]` ($n_{\text{drift}} = 7$)**:
+      Combines DEM surface elevation with a 2nd-order spatial polynomial:
+      <p align="center">
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
+      </p>
+      <i>Recommended for radial ice cap complexes with outlet valleys (e.g. APO), where elevation guides the macro-scale dome-to-outlet trend while quadratic space terms capture 2D radial planform geometry.</i>
+
+   2. **`["sia_thickness", "quadratic"]` ($n_{\text{drift}} = 7$)**:
+      Combines the SIA slope factor with a 2nd-order spatial polynomial:
+      <p align="center">
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup> + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
+      </p>
+      <i>Recommended for complex glaciated terrains with strong slope physics and regional spatial curvature (target `"T"` or `"D"`).</i>
+
+   3. **`["z_surface", "regional_linear"]` ($n_{\text{drift}} = 4$)**:
+      Combines DEM surface elevation with a 1st-order linear spatial trend:
+      <p align="center">
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
+      </p>
+      <i>Recommended for tilted valley glaciers with elevation-dependent trends.</i>
+
+   4. **`["sia_thickness", "regional_linear"]` ($n_{\text{drift}} = 4$)**:
+      Combines the SIA slope factor with a 1st-order linear spatial trend:
+      <p align="center">
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup> + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
+      </p>
+      <i>Recommended for tilted valley glaciers governed by SIA physics and linear spatial trends (target `"T"` or `"D"`).</i>
 
 - **Empty Drift Model (`[]`)**:
    An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.

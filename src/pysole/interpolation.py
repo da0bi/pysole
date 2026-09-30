@@ -212,6 +212,7 @@ def built_in_kriging_interpolation(
     method: str = "universal",
     variogram_model: str = "spherical",
     external_drift_grid: np.ndarray | None = None,
+    drift_terms: list[str] | None = None,
     n_cores: int = -1,
     show_progress: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -289,14 +290,50 @@ def built_in_kriging_interpolation(
             pts_u_norm = interp_u(pts_xy)
             pts_u_norm = np.nan_to_num(pts_u_norm, nan=0.0)
 
-            n_drift = 2
-            K = np.zeros((N_pts + n_drift, N_pts + n_drift))
-            K[:N_pts, :N_pts] = K_sample
-            K[:N_pts, N_pts] = 1.0
-            K[:N_pts, N_pts + 1] = pts_u_norm
+            has_poly_quad = (drift_terms is not None) and ("quadratic" in drift_terms)
+            has_poly_lin = (drift_terms is not None) and any(t in drift_terms for t in ["regional_linear", "linear"])
 
-            K[N_pts, :N_pts] = 1.0
-            K[N_pts + 1, :N_pts] = pts_u_norm
+            if has_poly_quad:
+                n_drift = 7
+                K = np.zeros((N_pts + n_drift, N_pts + n_drift))
+                K[:N_pts, :N_pts] = K_sample
+                K[:N_pts, N_pts] = 1.0
+                K[:N_pts, N_pts + 1] = pts_u_norm
+                K[:N_pts, N_pts + 2] = pts_x_norm
+                K[:N_pts, N_pts + 3] = pts_y_norm
+                K[:N_pts, N_pts + 4] = pts_x_norm**2
+                K[:N_pts, N_pts + 5] = pts_y_norm**2
+                K[:N_pts, N_pts + 6] = pts_x_norm * pts_y_norm
+
+                K[N_pts, :N_pts] = 1.0
+                K[N_pts + 1, :N_pts] = pts_u_norm
+                K[N_pts + 2, :N_pts] = pts_x_norm
+                K[N_pts + 3, :N_pts] = pts_y_norm
+                K[N_pts + 4, :N_pts] = pts_x_norm**2
+                K[N_pts + 5, :N_pts] = pts_y_norm**2
+                K[N_pts + 6, :N_pts] = pts_x_norm * pts_y_norm
+            elif has_poly_lin:
+                n_drift = 4
+                K = np.zeros((N_pts + n_drift, N_pts + n_drift))
+                K[:N_pts, :N_pts] = K_sample
+                K[:N_pts, N_pts] = 1.0
+                K[:N_pts, N_pts + 1] = pts_u_norm
+                K[:N_pts, N_pts + 2] = pts_x_norm
+                K[:N_pts, N_pts + 3] = pts_y_norm
+
+                K[N_pts, :N_pts] = 1.0
+                K[N_pts + 1, :N_pts] = pts_u_norm
+                K[N_pts + 2, :N_pts] = pts_x_norm
+                K[N_pts + 3, :N_pts] = pts_y_norm
+            else:
+                n_drift = 2
+                K = np.zeros((N_pts + n_drift, N_pts + n_drift))
+                K[:N_pts, :N_pts] = K_sample
+                K[:N_pts, N_pts] = 1.0
+                K[:N_pts, N_pts + 1] = pts_u_norm
+
+                K[N_pts, :N_pts] = 1.0
+                K[N_pts + 1, :N_pts] = pts_u_norm
         else:
             n_drift = 6
             K = np.zeros((N_pts + n_drift, N_pts + n_drift))
@@ -364,6 +401,15 @@ def built_in_kriging_interpolation(
         if use_universal:
             if is_sia_mode and u_flat is not None:
                 K_rhs_drift_sub[1, :] = u_flat[start_idx:end_idx]
+                if n_drift >= 4:
+                    sub_x_norm = (sub_x - x_mean) / x_scale
+                    sub_y_norm = (sub_y - y_mean) / y_scale
+                    K_rhs_drift_sub[2, :] = sub_x_norm
+                    K_rhs_drift_sub[3, :] = sub_y_norm
+                if n_drift == 7:
+                    K_rhs_drift_sub[4, :] = sub_x_norm**2
+                    K_rhs_drift_sub[5, :] = sub_y_norm**2
+                    K_rhs_drift_sub[6, :] = sub_x_norm * sub_y_norm
             else:
                 sub_x_norm = (sub_x - x_mean) / x_scale
                 sub_y_norm = (sub_y - y_mean) / y_scale
@@ -629,6 +675,7 @@ def kriging_interpolation(
             method="sia_thickness" if (is_sia_mode or is_z_surface_mode) else method_clean,
             variogram_model=variogram_model,
             external_drift_grid=external_sia_grid,
+            drift_terms=drift_terms,
             n_cores=n_cores,
             show_progress=show_progress,
         )

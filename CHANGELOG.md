@@ -21,8 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `kriging_parameters.engine` configuration parameter (`"native"` default vs `"pykrige"`).
   - Implemented `pykrige_kriging_interpolation()` supporting `pykrige.ok.OrdinaryKriging`, `pykrige.uk.UniversalKriging`, and `pykrige.rk.RegressionKriging` (`method: "regression"`, combining `scikit-learn`'s `RandomForestRegressor` with residual Kriging).
   - Added clear `ImportError` feedback when `pykrige` engine is requested but not installed.
+- **Native Multi-Drift Universal Kriging Engine**:
+  - Added support in `built_in_kriging_interpolation()` for combining external raster drift models (`"z_surface"`, `"sia_thickness"`) with polynomial spatial coordinate trends (`"quadratic"`, `"regional_linear"`) into augmented $n_{\text{drift}} = 7$ or $n_{\text{drift}} = 4$ Dual Kriging matrices.
 - **New Unit Test Suite (`tests/test_pykrige.py`)**:
-  - Added unit test module covering `engine="native"`, `engine="pykrige"`, `method="regression"`, and `ImportError` handling.
+  - Added unit test module covering `engine="native"`, `engine="pykrige"`, `method="regression"`, multi-drift combination (`["z_surface", "quadratic"]`), and `ImportError` handling.
 
 ### Changed
 - **Codebase Streamlining & Audit**:

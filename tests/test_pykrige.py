@@ -65,5 +65,20 @@ class TestPyKrigeIntegration(unittest.TestCase):
                 )
 
 
+    def test_native_multi_drift_combined(self):
+        # Test combining raster elevation drift (z_surface) + quadratic spatial coordinate drift in native engine
+        res_multi = kriging_interpolation(
+            sample_points=self.sample_pts,
+            geometry=self.geometry,
+            method="universal",
+            engine="native",
+            dem_grid=self.dem,
+            drift_terms=["z_surface", "quadratic"],
+        )
+        self.assertIsInstance(res_multi, KrigingResult)
+        self.assertEqual(res_multi.bedrock_grid.shape, (20, 20))
+        self.assertFalse(np.isnan(res_multi.bedrock_grid).all())
+
+
 if __name__ == "__main__":
     unittest.main()
