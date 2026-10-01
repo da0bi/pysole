@@ -361,7 +361,7 @@ The following single drift models are implemented in `PySole` for Universal Krig
    This models the glaciological elevation-dependent ice thickness pattern (thicker ice in lower valley basins/confluences, thinner ice on high-altitude ridges) without relying on surface slope angles.
 
 - **Surface Curvature Drift Model (`["curvature_dem"]`)**:
-   Uses the 2D Laplacian surface curvature $$C_{k_c}(x,y)$$ <i>C</i><sub><i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) derived from the optimal smoothed DEM surface:
+   Uses the 2D Laplacian surface curvature $$C_{k_c}(x,y)$$ derived from the optimal smoothed DEM surface:
    <p align="center">
      $$C_{k_c}(x,y) = \nabla^2 Z_{\text{smooth, } k_c}(x,y) = \frac{\partial^2 Z}{\partial x^2} + \frac{\partial^2 Z}{\partial y^2}$$
    </p>
