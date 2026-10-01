@@ -19,7 +19,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop Input Files](#parsing-rock-outcrops)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[3. Variogram Binning with Minimum Pair Threshold](#variogram-binning)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. Recommended Interpolation Strategies](#interpolation-strategies)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Robust Baseline Interpolation Strategies](#interpolation-strategies)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Universal Kriging Drift Models](#universal-kriging-drift-models)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[7. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[8. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
@@ -54,7 +54,7 @@
 
   where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. Surface DEM smoothing is performed in the frequency domain using a <i>Fast Fourier Transform</i> (FFT) Gaussian low-pass filter defined by the spatial cutoff wavenumber (<i>k</i><sub>c</sub>), from which the smoothed surface slope field is then derived. The spatial variance of <i>τ</i><sub>b</sub> is then quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across wavenumber cutoffs and refine the variogram parameters. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths. To accelerate the optimization process, both the FFT low-pass filtering and the corresponding product variogram evaluations are executed via multi-threaded CPU parallelization.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration—introduced by Binder et al. (2009) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage. The optimally smoothed surface slope field is also applied during the 3D migration to ensure numerically stable ray displacement vectors.
-* **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging. Two distinct interpolation strategies are recommended: <i>Ordinary Kriging</i> is recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift). For direct interpolation of signal traveltimes or (migrated) depths, <i>Universal Kriging</i> is recommended using the custom `PySole` SIA-based drift model. Corresponding Kriging estimation uncertainty fields are calculated alongside all predicted grids.
+* **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging. Two initial interpolation strategies are recommended as a **robust starting baseline**: <i>Ordinary Kriging</i> is recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift), while <i>Universal Kriging</i> using the Shallow Ice Approximation (`"sia"`) physical drift model is recommended for direct interpolation of signal traveltimes or (migrated) depths. Building from this baseline, users can explore alternative single- or multi-drift models to tailor the interpolation to their specific glacier domain. Corresponding Kriging estimation uncertainty fields are calculated alongside all predicted grids.
 * **Boundary Conditions:** Perimeter and rock outcrop margin boundary conditions (zero traveltime <i>T</i> = 0 s and zero thickness <i>D</i> = 0 m) are enforced by default (and can optionally be toggled off). Interior rock outcrops, or vector polygon holes, are natively parsed.
 * **ML Hole Filling & Geomorphological Margin Blending:** Employs the parallelized [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
 * **Final DEMs Spatial Smoothing:** As a post-processing step, spatial smoothing options are available for the calculated DEMs.
@@ -228,7 +228,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `dy` | `float` | `null` | Target grid resolution along Y in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `bounds` | `list[float]` | `null` | Optional spatial bounding box `[minx, miny, maxx, maxy]`. Leave `null` by default. Use only to manually override invalid or missing spatial bounds in DEM raster headers (`.asc`, `.tif`). `bounds` are automatically calculated from `origin`, `dx`, `dy`, and grid dimensions for headerless DEMs (`.csv`, `.npy`). |
 | | `origin` | `list[float]` | `null` | Lower-left coordinate origin `[xll, yll]` in projected metric units for headerless DEM formats (`.csv`, `.npy`, `np.ndarray`). If `null`, defaults to `(0.0, 0.0)`. |
-| | `crs` | `str` / `int` | `null` | Coordinate Reference System (e.g. `"EPSG:32633"`, `32633`, or PROJ string). Automatically checked upon load to enforce projected metric coordinate systems. GeoTIFF is the only self-contained format among the supported input formats that embeds spatial projection metadata (e.g., EPSG code or WKT string) directly inside the file header.  |
+| | `crs` | `str` / `int` | `null` | Coordinate Reference System (optional, e.g. `"EPSG:32633"`, `32633`, or PROJ string). When provided, validates metric projection, checks spatial alignment with vector outlines, and embeds EPSG metadata into output GeoTIFFs. |
 | **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal traveltimes. If `false`, migration is skipped. |
 | | `velocity` | `float` | `0.16` | Signal propagation velocity (default value of `0.16` m/ns is characteristic for radar wave propagation in temperate ice). |
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual migrated depths and horizontal displacement vector plots. |
@@ -280,7 +280,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 `PySole` supports 5 distinct DEM formats:
 
 - **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, CRS, pixel resolution, and `nodata` values using [`rasterio`](https://rasterio.readthedocs.io).
-- **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `nodata_value`. Optional CRS projection can be specified via `spatial_parameters.crs`.
+- **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `nodata_value`.
 - **CSV Grid (`.csv`)**: Supports both **2D elevation matrices** ([Z<sub>nx</sub> × Z<sub>ny</sub>]) and **3-column XYZ grid tables** ([X, Y, Z]). For 3-column tables, cell spacing (`dx`, `dy`) and bounds are automatically inferred; for 2D matrices, metadata is built from `spatial_parameters`.
 - **NumPy Binary Array (`.npy`)**: Fast 2D binary array format. Spatial metadata (`origin`, `crs`, `dx`, `dy`) is defined via `spatial_parameters`.
 - **NumPy 2D Array (`np.ndarray`)**: In-memory array passed directly into the `Solver` constructor (`dem=dem_grid`). Spatial metadata is defined via `spatial_parameters`.
@@ -330,13 +330,15 @@ where:
 To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a small offset (10<sup>−6</sup>) to the main diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
 
 <a id="interpolation-strategies"></a>
-#### 5. Recommended Interpolation Strategies
-While users can combine any available interpolation options, two primary strategies are recommended. These are implemented in `PySole` as the default approaches based on the target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
+#### 5. Robust Baseline Interpolation Strategies
+While users can combine any available interpolation options, the following two strategies are recommended as a robust starting baseline. These are implemented in `PySole` as the default approaches based on the selected target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
 
-- **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field <i>P</i> = <i>T</i> · sin <i>α</i><sub>opt</sub> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i><sub>opt</sub> (post-migration). **Ordinary Kriging** is recommended for BSS-derived product targets.</br>
-> [!CAUTION]
-> Interpolating a BSS-derived product `"P"` with Universal Kriging and the `"sia"` drift model creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artifact leads to implausibly large depths at low slopes and is therefore strongly discouraged.
-- **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration), or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** with the `"sia"` drift model is recommended.
+- **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field <i>P</i> = <i>T</i> · sin <i>α</i><sub>opt</sub> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i><sub>opt</sub> (post-migration). **Ordinary Kriging** is initially recommended for BSS-derived product targets.
+
+  > [!CAUTION]
+  > Interpolating a BSS-derived product `"P"` with Universal Kriging and the `"sia"` drift model creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artifact leads to implausibly large depths at low slopes and is therefore strongly discouraged.
+
+- **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration) or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** with the `"sia"` physical drift model is initially recommended.
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Single and Combined Drift Models
