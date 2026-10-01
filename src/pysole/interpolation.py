@@ -211,7 +211,7 @@ def built_in_kriging_interpolation(
     y_coords: np.ndarray,
     method: str = "universal",
     variogram_model: str = "spherical",
-    external_drift_grid: np.ndarray | None = None,
+    external_drift_grid: np.ndarray | dict[str, np.ndarray] | None = None,
     drift_terms: list[str] | None = None,
     n_cores: int = -1,
     show_progress: bool = True,
@@ -219,7 +219,8 @@ def built_in_kriging_interpolation(
     """
     Robust native NumPy/SciPy Ordinary & Universal Kriging solver with zero-centered
     spatial coordinate normalization and diagonal regularization to prevent ill-conditioned matrix explosion.
-    Supports default quadratic spatial drift terms (1, x, y, x^2, y^2, x*y) and SIA custom external drift (1, U_sia).
+    Supports default quadratic spatial drift terms (1, x, y, x^2, y^2, x*y), custom external drifts
+    (e.g., elevation z_surface, SIA thickness, surface curvature), and multi-drift combinations.
     Accelerated with multi-core CPU chunk parallelization via n_cores.
     """
     valid = ~np.isnan(sample_points[:, 0]) & ~np.isnan(sample_points[:, 1]) & ~np.isnan(sample_points[:, 2])
@@ -266,100 +267,97 @@ def built_in_kriging_interpolation(
     K_sample = variogram_func(sample_dists)
 
     method_clean = str(method).lower().strip()
-    is_sia_mode = (method_clean in ["sia_thickness", "sia", "sia_drift"]) or (external_drift_grid is not None)
-    use_universal = (method_clean in ["universal", "universal_kriging", "sia_thickness", "sia", "sia_drift"]) and (N_pts >= 4)
+    ext_dict: dict[str, np.ndarray] = {}
+    if isinstance(external_drift_grid, dict):
+        ext_dict = external_drift_grid
+    elif isinstance(external_drift_grid, np.ndarray) and external_drift_grid.shape == (M, N):
+        ext_dict = {"external_drift": external_drift_grid}
 
-    u_flat: np.ndarray | None = None
-    if use_universal:
-        if is_sia_mode and external_drift_grid is not None and external_drift_grid.shape == (M, N):
-            u_mean = float(np.mean(external_drift_grid))
-            u_std = float(np.std(external_drift_grid))
-            u_std = max(u_std, 1e-6)
-            u_grid_norm = (external_drift_grid - u_mean) / u_std
-            u_flat = u_grid_norm.ravel()
+    use_universal = (method_clean in ["universal", "universal_kriging", "sia"]) or (len(ext_dict) > 0)
+    use_universal = use_universal and (N_pts >= 4)
 
-            if len(y_coords) > 1 and y_coords[1] < y_coords[0]:
-                y_asc = y_coords[::-1]
-                u_asc = u_grid_norm[::-1, :]
-            else:
-                y_asc = y_coords
-                u_asc = u_grid_norm
-
-            interp_u = RegularGridInterpolator((y_asc, x_coords), u_asc, bounds_error=False, fill_value=0.0)
-            pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
-            pts_u_norm = interp_u(pts_xy)
-            pts_u_norm = np.nan_to_num(pts_u_norm, nan=0.0)
-
-            has_poly_quad = (drift_terms is not None) and ("quadratic" in drift_terms)
-            has_poly_lin = (drift_terms is not None) and any(t in drift_terms for t in ["regional_linear", "linear"])
-
-            if has_poly_quad:
-                n_drift = 7
-                K = np.zeros((N_pts + n_drift, N_pts + n_drift))
-                K[:N_pts, :N_pts] = K_sample
-                K[:N_pts, N_pts] = 1.0
-                K[:N_pts, N_pts + 1] = pts_u_norm
-                K[:N_pts, N_pts + 2] = pts_x_norm
-                K[:N_pts, N_pts + 3] = pts_y_norm
-                K[:N_pts, N_pts + 4] = pts_x_norm**2
-                K[:N_pts, N_pts + 5] = pts_y_norm**2
-                K[:N_pts, N_pts + 6] = pts_x_norm * pts_y_norm
-
-                K[N_pts, :N_pts] = 1.0
-                K[N_pts + 1, :N_pts] = pts_u_norm
-                K[N_pts + 2, :N_pts] = pts_x_norm
-                K[N_pts + 3, :N_pts] = pts_y_norm
-                K[N_pts + 4, :N_pts] = pts_x_norm**2
-                K[N_pts + 5, :N_pts] = pts_y_norm**2
-                K[N_pts + 6, :N_pts] = pts_x_norm * pts_y_norm
-            elif has_poly_lin:
-                n_drift = 4
-                K = np.zeros((N_pts + n_drift, N_pts + n_drift))
-                K[:N_pts, :N_pts] = K_sample
-                K[:N_pts, N_pts] = 1.0
-                K[:N_pts, N_pts + 1] = pts_u_norm
-                K[:N_pts, N_pts + 2] = pts_x_norm
-                K[:N_pts, N_pts + 3] = pts_y_norm
-
-                K[N_pts, :N_pts] = 1.0
-                K[N_pts + 1, :N_pts] = pts_u_norm
-                K[N_pts + 2, :N_pts] = pts_x_norm
-                K[N_pts + 3, :N_pts] = pts_y_norm
-            else:
-                n_drift = 2
-                K = np.zeros((N_pts + n_drift, N_pts + n_drift))
-                K[:N_pts, :N_pts] = K_sample
-                K[:N_pts, N_pts] = 1.0
-                K[:N_pts, N_pts + 1] = pts_u_norm
-
-                K[N_pts, :N_pts] = 1.0
-                K[N_pts + 1, :N_pts] = pts_u_norm
+    # Process external drift rasters and sample point values
+    ext_drifts: list[tuple[np.ndarray, np.ndarray]] = []  # List of (u_flat, pts_u_norm)
+    if use_universal and len(ext_dict) > 0:
+        if len(y_coords) > 1 and y_coords[1] < y_coords[0]:
+            y_asc = y_coords[::-1]
+            flip_y = True
         else:
-            n_drift = 6
-            K = np.zeros((N_pts + n_drift, N_pts + n_drift))
-            K[:N_pts, :N_pts] = K_sample
-            K[:N_pts, N_pts] = 1.0
-            K[:N_pts, N_pts + 1] = pts_x_norm
-            K[:N_pts, N_pts + 2] = pts_y_norm
-            K[:N_pts, N_pts + 3] = pts_x_norm**2
-            K[:N_pts, N_pts + 4] = pts_y_norm**2
-            K[:N_pts, N_pts + 5] = pts_x_norm * pts_y_norm
+            y_asc = y_coords
+            flip_y = False
 
-            K[N_pts, :N_pts] = 1.0
-            K[N_pts + 1, :N_pts] = pts_x_norm
-            K[N_pts + 2, :N_pts] = pts_y_norm
-            K[N_pts + 3, :N_pts] = pts_x_norm**2
-            K[N_pts + 4, :N_pts] = pts_y_norm**2
-            K[N_pts + 5, :N_pts] = pts_x_norm * pts_y_norm
+        pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
+
+        for _, grid in ext_dict.items():
+            if grid is not None and grid.shape == (M, N):
+                u_mean = float(np.nanmean(grid))
+                u_std = max(float(np.nanstd(grid)), 1e-6)
+                u_grid_norm = (grid - u_mean) / u_std
+                u_flat = u_grid_norm.ravel()
+
+                u_asc = u_grid_norm[::-1, :] if flip_y else u_grid_norm
+                interp_u = RegularGridInterpolator((y_asc, x_coords), u_asc, bounds_error=False, fill_value=0.0)
+                pts_u_norm = interp_u(pts_xy)
+                pts_u_norm = np.nan_to_num(pts_u_norm, nan=0.0)
+                ext_drifts.append((u_flat, pts_u_norm))
+
+    has_poly_quad = (drift_terms is not None) and ("quadratic_xy" in drift_terms)
+    has_poly_lin = (drift_terms is not None) and ("linear_xy" in drift_terms)
+
+    if use_universal:
+        n_ext = len(ext_drifts)
+        if n_ext > 0:
+            n_drift = 1 + n_ext
+            if has_poly_quad:
+                n_drift += 5  # x, y, x^2, y^2, xy
+            elif has_poly_lin:
+                n_drift += 2  # x, y
+        else:
+            if has_poly_lin and not has_poly_quad:
+                n_drift = 3  # 1, x, y
+            else:
+                n_drift = 6  # 1, x, y, x^2, y^2, xy
     else:
         n_drift = 1
-        K = np.zeros((N_pts + n_drift, N_pts + n_drift))
-        K[:N_pts, :N_pts] = K_sample
-        K[:N_pts, N_pts] = 1.0
-        K[N_pts, :N_pts] = 1.0
+
+    K = np.zeros((N_pts + n_drift, N_pts + n_drift))
+    K[:N_pts, :N_pts] = K_sample
+    K[:N_pts, N_pts] = 1.0
+    K[N_pts, :N_pts] = 1.0
+
+    curr_col = 1
+    # Add external drift terms to point matrix K
+    for _, pts_u_norm in ext_drifts:
+        K[:N_pts, N_pts + curr_col] = pts_u_norm
+        K[N_pts + curr_col, :N_pts] = pts_u_norm
+        curr_col += 1
+
+    # Add spatial polynomial terms to point matrix K
+    if use_universal and (has_poly_lin or has_poly_quad or (len(ext_drifts) == 0 and n_drift > 1)):
+        # x, y terms
+        K[:N_pts, N_pts + curr_col] = pts_x_norm
+        K[N_pts + curr_col, :N_pts] = pts_x_norm
+        curr_col += 1
+
+        K[:N_pts, N_pts + curr_col] = pts_y_norm
+        K[N_pts + curr_col, :N_pts] = pts_y_norm
+        curr_col += 1
+
+        if has_poly_quad or (len(ext_drifts) == 0 and n_drift >= 6):
+            K[:N_pts, N_pts + curr_col] = pts_x_norm**2
+            K[N_pts + curr_col, :N_pts] = pts_x_norm**2
+            curr_col += 1
+
+            K[:N_pts, N_pts + curr_col] = pts_y_norm**2
+            K[N_pts + curr_col, :N_pts] = pts_y_norm**2
+            curr_col += 1
+
+            K[:N_pts, N_pts + curr_col] = pts_x_norm * pts_y_norm
+            K[N_pts + curr_col, :N_pts] = pts_x_norm * pts_y_norm
+            curr_col += 1
 
     K += np.eye(K.shape[0]) * 1e-6
-    logger.info(f"   [Dual Kriging Engine] Applied 1e-06 * I Tikhonov matrix regularization (N={N_pts} points)")
+    logger.info(f"   [Dual Kriging Engine] Applied 1e-06 * I Tikhonov matrix regularization (N={N_pts} points, n_drift={n_drift})")
 
     z_aug = np.zeros(N_pts + n_drift, dtype=np.float64)
     z_aug[:N_pts] = pts[:, 2]
@@ -398,26 +396,26 @@ def built_in_kriging_interpolation(
         K_rhs_drift_sub = np.zeros((n_drift, sub_size), dtype=np.float64)
         K_rhs_drift_sub[0, :] = 1.0
 
-        if use_universal:
-            if is_sia_mode and u_flat is not None:
-                K_rhs_drift_sub[1, :] = u_flat[start_idx:end_idx]
-                if n_drift >= 4:
-                    sub_x_norm = (sub_x - x_mean) / x_scale
-                    sub_y_norm = (sub_y - y_mean) / y_scale
-                    K_rhs_drift_sub[2, :] = sub_x_norm
-                    K_rhs_drift_sub[3, :] = sub_y_norm
-                if n_drift == 7:
-                    K_rhs_drift_sub[4, :] = sub_x_norm**2
-                    K_rhs_drift_sub[5, :] = sub_y_norm**2
-                    K_rhs_drift_sub[6, :] = sub_x_norm * sub_y_norm
-            else:
-                sub_x_norm = (sub_x - x_mean) / x_scale
-                sub_y_norm = (sub_y - y_mean) / y_scale
-                K_rhs_drift_sub[1, :] = sub_x_norm
-                K_rhs_drift_sub[2, :] = sub_y_norm
-                K_rhs_drift_sub[3, :] = sub_x_norm**2
-                K_rhs_drift_sub[4, :] = sub_y_norm**2
-                K_rhs_drift_sub[5, :] = sub_x_norm * sub_y_norm
+        sub_col = 1
+        for u_flat, _ in ext_drifts:
+            K_rhs_drift_sub[sub_col, :] = u_flat[start_idx:end_idx]
+            sub_col += 1
+
+        if use_universal and (has_poly_lin or has_poly_quad or (len(ext_drifts) == 0 and n_drift > 1)):
+            sub_x_norm = (sub_x - x_mean) / x_scale
+            sub_y_norm = (sub_y - y_mean) / y_scale
+            K_rhs_drift_sub[sub_col, :] = sub_x_norm
+            sub_col += 1
+            K_rhs_drift_sub[sub_col, :] = sub_y_norm
+            sub_col += 1
+
+            if has_poly_quad or (len(ext_drifts) == 0 and n_drift >= 6):
+                K_rhs_drift_sub[sub_col, :] = sub_x_norm**2
+                sub_col += 1
+                K_rhs_drift_sub[sub_col, :] = sub_y_norm**2
+                sub_col += 1
+                K_rhs_drift_sub[sub_col, :] = sub_x_norm * sub_y_norm
+                sub_col += 1
 
         # High-performance Dual Kriging elevation prediction (O(N) 1D dot product)
         z_sub = np.dot(w_sample, K_grid_sub) + np.dot(w_drift, K_rhs_drift_sub)
@@ -533,15 +531,21 @@ def pykrige_kriging_interpolation(
     else:
         from pykrige.uk import UniversalKriging
 
-        if external_drift_grid is not None and external_drift_grid.shape == (M, N):
+        first_grid = None
+        if isinstance(external_drift_grid, dict) and len(external_drift_grid) > 0:
+            first_grid = next(iter(external_drift_grid.values()))
+        elif isinstance(external_drift_grid, np.ndarray) and external_drift_grid.shape == (M, N):
+            first_grid = external_drift_grid
+
+        if first_grid is not None and first_grid.shape == (M, N):
             from scipy.interpolate import RegularGridInterpolator
 
             if len(y_coords) > 1 and y_coords[1] < y_coords[0]:
                 y_asc = y_coords[::-1]
-                u_asc = external_drift_grid[::-1, :]
+                u_asc = first_grid[::-1, :]
             else:
                 y_asc = y_coords
-                u_asc = external_drift_grid
+                u_asc = first_grid
 
             interp_u = RegularGridInterpolator((y_asc, x_coords), u_asc, bounds_error=False, fill_value=0.0)
             pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))
@@ -558,7 +562,7 @@ def pykrige_kriging_interpolation(
                 verbose=False,
                 enable_plotting=False,
             )
-            z_b, v_b = uk.execute("grid", x_coords, y_coords, specified_drift_data=[external_drift_grid])
+            z_b, v_b = uk.execute("grid", x_coords, y_coords, specified_drift_data=[first_grid])
         else:
             uk = UniversalKriging(
                 pts[:, 0],
@@ -588,11 +592,12 @@ def kriging_interpolation(
     engine: str = "native",
     slope_floor_deg: float = 5.0,
     show_progress: bool = True,
+    external_drift_grid: np.ndarray | dict[str, np.ndarray] | None = None,
 ) -> KrigingResult:
     """
     Applies Kriging spatial interpolation on scattered points supporting four distinct approaches:
     1. 'universal' / 'universal_kriging' (Universal Kriging with default quadratic spatial drift)
-    2. 'sia_thickness' / 'sia' (Shallow Ice Approximation custom physical drift U_sia = 1 / sin(alpha_safe))
+    2. 'sia' (Shallow Ice Approximation custom physical drift U_sia = 1 / sin(alpha_safe))
     3. 'ordinary' / 'ordinary_kriging' (Ordinary Kriging assuming constant mean)
     4. 'regression' / 'regression_kriging' (Regression Kriging combining ML regressor with residual Kriging via PyKrige)
 
@@ -634,12 +639,19 @@ def kriging_interpolation(
 
     method_clean = str(method).lower().replace("_kriging", "").strip()
     engine_clean = str(engine).lower().strip()
-    is_sia_mode = (method_clean in ["sia_thickness", "sia", "sia_drift"]) or (drift_terms is not None and "sia_thickness" in drift_terms)
-    is_z_surface_mode = (drift_terms is not None) and any(term in drift_terms for term in ["z_surface", "dem", "elevation"])
 
-    # Compute external drift grid (SIA 1/sin(alpha) or DEM surface elevation z_surface)
-    external_sia_grid = None
-    if is_sia_mode:
+    external_drift_grids: dict[str, np.ndarray] = {}
+    if isinstance(external_drift_grid, dict):
+        external_drift_grids.update(external_drift_grid)
+    elif isinstance(external_drift_grid, np.ndarray) and external_drift_grid.shape == (M, N):
+        external_drift_grids["external_drift"] = external_drift_grid
+
+    is_sia_mode = (method_clean in ["sia"]) or (drift_terms is not None and "sia" in drift_terms)
+    is_z_surface_mode = (drift_terms is not None) and ("z_dem" in drift_terms)
+    is_curvature_mode = (drift_terms is not None) and ("curvature_dem" in drift_terms)
+
+    # Compute external drift grids (SIA 1/sin(alpha), DEM elevation z_dem, surface curvature_dem)
+    if is_sia_mode and "sia" not in external_drift_grids:
         if opt_slope_grid is not None and opt_slope_grid.shape == (M, N):
             opt_slope_sin = np.sin(opt_slope_grid)
         elif dem_grid is not None and dem_grid.shape == (M, N):
@@ -653,18 +665,26 @@ def kriging_interpolation(
         if opt_slope_sin is not None:
             min_slope_sin = np.sin(np.radians(slope_floor_deg))
             safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
-            external_sia_grid = 1.0 / safe_slope_grid
-    elif is_z_surface_mode and dem_grid is not None and dem_grid.shape == (M, N):
-        external_sia_grid = dem_grid
+            external_drift_grids["sia"] = 1.0 / safe_slope_grid
+
+    if is_z_surface_mode and "z_dem" not in external_drift_grids and dem_grid is not None and dem_grid.shape == (M, N):
+        external_drift_grids["z_dem"] = dem_grid
+
+    if is_curvature_mode and "curvature_dem" not in external_drift_grids and dem_grid is not None and dem_grid.shape == (M, N):
+        from .smoothing import compute_surface_curvature
+
+        external_drift_grids["curvature_dem"] = compute_surface_curvature(dem_grid, dx=geometry.dx, dy=geometry.dy)
+
+    has_ext_drifts = len(external_drift_grids) > 0
 
     if engine_clean in ["pykrige"] or method_clean in ["regression", "regression_kriging"]:
         z_b, v_b = pykrige_kriging_interpolation(
             pts,
             x_coords,
             y_coords,
-            method="sia_thickness" if (is_sia_mode or is_z_surface_mode) else method_clean,
+            method="sia" if has_ext_drifts else method_clean,
             variogram_model=variogram_model,
-            external_drift_grid=external_sia_grid,
+            external_drift_grid=external_drift_grids if has_ext_drifts else None,
         )
     else:
         # Fast, robust native vector Kriging engine
@@ -672,9 +692,9 @@ def kriging_interpolation(
             pts,
             x_coords,
             y_coords,
-            method="sia_thickness" if (is_sia_mode or is_z_surface_mode) else method_clean,
+            method="sia" if has_ext_drifts else method_clean,
             variogram_model=variogram_model,
-            external_drift_grid=external_sia_grid,
+            external_drift_grid=external_drift_grids if has_ext_drifts else None,
             drift_terms=drift_terms,
             n_cores=n_cores,
             show_progress=show_progress,

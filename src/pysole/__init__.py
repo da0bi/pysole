@@ -12,7 +12,7 @@ from .config import run_from_config, load_config, main_cli, OutputsConfig
 from .logging import logger, setup_logging
 from . import plotting
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 __all__ = [
     "Solver",

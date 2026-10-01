@@ -52,8 +52,8 @@
     <font size="+1"><b><i>τ</i><sub>b</sub> = <i>ρ</i><sub>ice</sub> <i>g</i> <i>D</i> sin(<i>α</i>)</b></font>
   </p>
 
-  where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. Surface slope smoothing is performed in the frequency domain using a <i>Fast Fourier Transform</i> (FFT) low-pass filter defined by the spatial cutoff wavenumber (<i>k</i><sub>c</sub>). The spatial variance of <i>τ</i><sub>b</sub> is then quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across wavenumber cutoffs and refine the variogram parameters. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths. To accelerate the optimization process, both the FFT low-pass filtering and the corresponding product variogram evaluations are executed via multi-threaded CPU parallelization.
-* **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration—introduced by Binder et al. (2009) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage.
+  where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. Surface DEM smoothing is performed in the frequency domain using a <i>Fast Fourier Transform</i> (FFT) Gaussian low-pass filter defined by the spatial cutoff wavenumber (<i>k</i><sub>c</sub>), from which the smoothed surface slope field is then derived. The spatial variance of <i>τ</i><sub>b</sub> is then quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across wavenumber cutoffs and refine the variogram parameters. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths. To accelerate the optimization process, both the FFT low-pass filtering and the corresponding product variogram evaluations are executed via multi-threaded CPU parallelization.
+* **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration—introduced by Binder et al. (2009) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage. The optimally smoothed surface slope field is also applied during the 3D migration to ensure numerically stable ray displacement vectors.
 * **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging. Two distinct interpolation strategies are recommended: <i>Ordinary Kriging</i> is recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift). For direct interpolation of signal traveltimes or (migrated) depths, <i>Universal Kriging</i> is recommended using the custom `PySole` SIA-based drift model. Corresponding Kriging estimation uncertainty fields are calculated alongside all predicted grids.
 * **Boundary Conditions:** Perimeter and rock outcrop margin boundary conditions (zero traveltime <i>T</i> = 0 s and zero thickness <i>D</i> = 0 m) are enforced by default (and can optionally be toggled off). Interior rock outcrops, or vector polygon holes, are natively parsed.
 * **ML Hole Filling & Geomorphological Margin Blending:** Employs the parallelized [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
@@ -242,13 +242,13 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `pre_migration` | `dict` | *Sub-section* | Configuration for pre-migration traveltime field, <i>T</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `pre_migration.interpolation_target` | `str` | `"P"` | Pre-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>T</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct signal traveltimes (<i>T</i><sub>i</sub>). |
 | | `pre_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (the default for `pre_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
-| | `pre_migration.drift_terms` | `list[str]` | `[]` | Available drift models for Universal Kriging: `["sia_thickness"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`), `["z_surface"]` (or `["dem"]` / `["elevation"]` - surface elevation drift model), `["regional_linear"]` (or `["x", "y"]` - 1st-order linear coordinate trend), `["quadratic"]` (2nd-order quadratic coordinate trend), or <i>combined multi-drift models</i> (e.g. `["z_surface", "quadratic"]` - all available multi-drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes"). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. |
+| | `pre_migration.drift_terms` | `list[str]` | `[]` | Available drift models for Universal Kriging: `["sia"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`), `["z_dem"]` (surface elevation drift model), `["curvature_dem"]` (surface curvature drift model), `["linear_xy"]` (1st-order linear coordinate trend), `["quadratic_xy"]` (2nd-order quadratic coordinate trend), or <i>combined multi-drift models</i> (e.g. `["z_dem", "curvature_dem", "quadratic_xy"]` - all available multi-drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes"). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. |
 | | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 s) along the perimeter and rock outcrop margin outline(s). |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth, <i>D</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
 | | `post_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (the default for `post_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
-| | `post_migration.drift_terms` | `list[str]` | `[]` | Available drift models for Universal Kriging: `["sia_thickness"]` (SIA physical drift model, the default for `post_migration.interpolation_target`: `"D"`), `["z_surface"]` (or `["dem"]` / `["elevation"]` - surface elevation drift model), `["regional_linear"]` (or `["x", "y"]` - 1st-order linear coordinate trend), `["quadratic"]` (2nd-order quadratic coordinate trend), or <i>combined multi-drift models</i> (e.g. `["z_surface", "quadratic"]` - all available multi-drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes"). If left empty `[]` (the default for `post_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. |
+| | `post_migration.drift_terms` | `list[str]` | `[]` | Available drift models for Universal Kriging: `["sia"]` (SIA physical drift model, the default for `post_migration.interpolation_target`: `"D"`), `["z_dem"]` (surface elevation drift model), `["curvature_dem"]` (surface curvature drift model), `["linear_xy"]` (1st-order linear coordinate trend), `["quadratic_xy"]` (2nd-order quadratic coordinate trend), or <i>combined multi-drift models</i> (e.g. `["z_dem", "curvature_dem", "quadratic_xy"]` - all available multi-drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes"). If left empty `[]` (the default for `post_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. |
 | | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
 | **`finalization_parameters`** | `random_forest_gap_filling` | `bool` | `false` | If `true`, applies Random Forest machine learning gap filling across unmeasured interior regions. |
@@ -335,15 +335,15 @@ While users can combine any available interpolation options, two primary strateg
 
 - **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field <i>P</i> = <i>T</i> · sin <i>α</i><sub>opt</sub> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i><sub>opt</sub> (post-migration). **Ordinary Kriging** is recommended for BSS-derived product targets.</br>
 > [!CAUTION]
-> Interpolating a BSS-derived product `"P"` with Universal Kriging and the `"sia_thickness"` drift model creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artifact leads to implausibly large depths at low slopes and is therefore strongly discouraged.
-- **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration), or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** with the `"sia_thickness"` drift model is recommended.
+> Interpolating a BSS-derived product `"P"` with Universal Kriging and the `"sia"` drift model creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artifact leads to implausibly large depths at low slopes and is therefore strongly discouraged.
+- **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration), or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** with the `"sia"` drift model is recommended.
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Drift Models
 The following drift models are implemented in `PySole` for Universal Kriging:
 
-- **Shallow Ice Approximation Physical Drift Model (`["sia_thickness"]`)**:
-   `PySole` offers the physically-informed custom `"sia_thickness"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting the drift term parameter to `["sia_thickness"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
+- **Shallow Ice Approximation Physical Drift Model (`["sia"]`)**:
+   `PySole` offers the physically-informed custom `"sia"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting the drift term parameter to `["sia"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
 
    <p align="center">
      <i>D</i> &prop; sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup>
@@ -351,50 +351,85 @@ The following drift models are implemented in `PySole` for Universal Kriging:
 
    Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps ultra-low slope angles prior to computing the inverse-sine drift, preventing matrix singularities.
 
-- **Surface Elevation Drift Model (`["z_surface"`], [`"dem"`], or [`"elevation"`])**:
-   Uses the DEM surface elevation <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>) as a spatial drift variable:
+- **Surface Elevation Drift Model (`["z_dem"]`)**:
+   Uses the DEM surface elevation <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>) as a spatial drift variable:
    <p align="center">
-     <i>U</i>(<i>x</i>,<i>y</i>) = <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>)
+     <i>U</i>(<i>x</i>,<i>y</i>) = <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>)
    </p>
    This models the glaciological elevation-dependent ice thickness pattern (thicker ice in lower valley basins/confluences, thinner ice on high-altitude ridges) without relying on surface slope angles.
 
-- **Linear Surface Drift Model (`["regional_linear"`] or `["x", "y"]`)**:
+- **Surface Curvature Drift Model (`["curvature_dem"]`)**:
+   Uses the 2D Laplacian surface curvature <i>κ</i><sub><i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = &nabla;<sup>2</sup> <i>Z</i><sub>smooth, <i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) derived from the optimal $k_c$-smoothed DEM surface:
+   <p align="center">
+     <i>U</i>(<i>x</i>,<i>y</i>) = &nabla;<sup>2</sup> <i>Z</i><sub>smooth, <i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = &frac;&part;<sup>2</sup> <i>Z</i> / &part;<i>x</i><sup>2</sup> + &frac;&part;<sup>2</sup> <i>Z</i> / &part;<i>y</i><sup>2</sup>
+   </p>
+   This models morphometric terrain curvature (convex peaks/ridges vs. concave troughs/bowls/valleys), serving as a powerful physical drift variable for glaciated bedrock valleys, cirque basins, and ice-flow channels. Under the **Unified DEM Smoothing Architecture**, <i>κ</i><sub><i>k</i><sub>c</sub></sub> is calculated directly from the optimal $k_c$-smoothed DEM surface $Z_{\text{smooth, } k_c}$, guaranteeing 100% geomorphological consistency between surface slope, curvature, and elevation fields.
+
+- **Linear Surface Drift Model (`["linear_xy"]`)**:
    Fits a 1st-order bivariate spatial coordinate trend surface across the <i>X</i> and <i>Y</i> grid axes:
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>X</i> + <i>a</i><sub>2</sub> <i>Y</i>
    </p>
 
-- **Quadratic Surface Drift Model (`["quadratic"`] or `["x", "y", "x2", "y2", "xy"]`)**:
+- **Quadratic Surface Drift Model (`["quadratic_xy"]`)**:
    Fits a 2nd-order bivariate polynomial trend surface across <i>X</i> and <i>Y</i> coordinates:
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>X</i> + <i>a</i><sub>2</sub> <i>Y</i> + <i>a</i><sub>3</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>4</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>X Y</i>
    </p>
 
 - **Combined Multi-Drift Models**:
-   `PySole` natively supports combining external raster drift models (`["z_surface"]` or `["sia_thickness"]`) with polynomial spatial coordinate trends (`["quadratic"]` or `["regional_linear"]`) into an augmented multi-drift Universal Kriging system. The following 4 combined drift configurations are available:
+   `PySole` natively supports combining external raster drift models (`["z_dem"]`, `["curvature_dem"]`, or `["sia"]`) with polynomial spatial coordinate trends (`["quadratic_xy"]` or `["linear_xy"]`) into an augmented multi-drift Universal Kriging system. The following combined drift configurations are available:
 
-   1. **`["z_surface", "quadratic"]` ($n_{\text{drift}} = 7$)**:
+   1. **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
+      Combines DEM elevation, surface curvature, and a 2nd-order spatial polynomial:
+      <p align="center">
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub> + <i>a</i><sub>2</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub> + <i>a</i><sub>3</sub> <i>X</i> + <i>a</i><sub>4</sub> <i>Y</i> + <i>a</i><sub>5</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>7</sub> <i>X Y</i>
+      </p>
+      <i>Recommended for complex glaciated catchments where macro-elevation guides regional ice distribution, surface curvature captures valley trough/basin concavity, and 2D quadratic coordinates fit regional trend curvature.</i>
+
+   2. **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
+      Combines surface curvature with a 2nd-order spatial polynomial:
+      <p align="center">
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
+      </p>
+      <i>Recommended for alpine valley glaciers and cirques where terrain concavity/convexity is the primary morphometric driver of ice accumulation and thickness.</i>
+
+   3. **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines DEM surface elevation with a 2nd-order spatial polynomial:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
       </p>
       <i>Recommended for radial ice cap complexes with outlet valleys (e.g. APO), where elevation guides the macro-scale dome-to-outlet trend while quadratic space terms capture 2D radial planform geometry.</i>
 
-   2. **`["sia_thickness", "quadratic"]` ($n_{\text{drift}} = 7$)**:
+   4. **`["sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines the SIA slope factor with a 2nd-order spatial polynomial:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup> + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
       </p>
-      <i>Recommended for complex glaciated terrains with strong slope physics and regional spatial curvature (target `"T"` or `"D"`).</i>
+      <i>Recommended for complex glaciated terrains with strong slope physics and regional 2D spatial coordinate trend curvature (target `"T"` or `"D"`).</i>
 
-   3. **`["z_surface", "regional_linear"]` ($n_{\text{drift}} = 4$)**:
+   5. **`["z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
+      Combines DEM elevation, surface curvature, and a 1st-order linear spatial trend:
+      <p align="center">
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub> + <i>a</i><sub>2</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub> + <i>a</i><sub>3</sub> <i>X</i> + <i>a</i><sub>4</sub> <i>Y</i>
+      </p>
+      <i>Recommended for elongated valley glaciers with elevation and curvature trends overlaid on a linear regional gradient.</i>
+
+   6. **`["curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
+      Combines surface curvature with a 1st-order linear spatial trend:
+      <p align="center">
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
+      </p>
+      <i>Recommended for cirque glaciers and headwall valleys governed by local morphometric curvature and linear spatial trends.</i>
+
+   7. **`["z_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines DEM surface elevation with a 1st-order linear spatial trend:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>surface</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
+        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
       </p>
       <i>Recommended for tilted valley glaciers with elevation-dependent trends.</i>
 
-   4. **`["sia_thickness", "regional_linear"]` ($n_{\text{drift}} = 4$)**:
+   8. **`["sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines the SIA slope factor with a 1st-order linear spatial trend:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup> + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>

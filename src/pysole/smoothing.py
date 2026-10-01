@@ -7,11 +7,39 @@ import numpy as np
 from scipy.fft import fft2, ifft2, fftshift, ifftshift, fftfreq
 
 
+def compute_surface_curvature(
+    dem: np.ndarray, dx: float = 1.0, dy: float = 1.0
+) -> np.ndarray:
+    """
+    Computes 2D surface Laplacian curvature kappa = d2Z/dx2 + d2Z/dy2
+    using 2nd-order central finite differences.
+
+    Parameters
+    ----------
+    dem : 2D np.ndarray
+        Surface elevation grid.
+    dx : float
+        Grid spacing along X (columns).
+    dy : float
+        Grid spacing along Y (rows).
+
+    Returns
+    -------
+    curvature : 2D np.ndarray
+        Laplacian surface curvature grid [1/m]. Positive values indicate convex shapes (peaks/ridges),
+        negative values indicate concave shapes (troughs/bowls/valleys).
+    """
+    slope_y, slope_x = np.gradient(dem, dy, dx)
+    d2z_dy2, _ = np.gradient(slope_y, dy, dx)
+    _, d2z_dx2 = np.gradient(slope_x, dy, dx)
+    return d2z_dx2 + d2z_dy2
+
+
 def compute_gradients(
     dem: np.ndarray, dx: float = 1.0, dy: float = 1.0
 ) -> dict[str, np.ndarray]:
     """
-    Computes spatial slope gradients and surface normal trigonometric grids.
+    Computes spatial slope gradients, surface curvature, and surface normal trigonometric grids.
     Ported from GradRad.m.
 
     Parameters
@@ -35,6 +63,7 @@ def compute_gradients(
         - 'sin_alpha_x_grid': sin(atan(Slope_x))
         - 'sin_alpha_y_grid': sin(atan(Slope_y))
         - 'sinus_alpha_grid': sin(Slope_rad)
+        - 'curvature': Laplacian surface curvature (d2Z/dx2 + d2Z/dy2)
     """
     # np.gradient returns gradients along axis 0 (rows/y) then axis 1 (cols/x)
     slope_y, slope_x = np.gradient(dem, dy, dx)
@@ -44,12 +73,11 @@ def compute_gradients(
     slope_rad = np.arctan(slope)
     slope_grad = np.degrees(slope_rad)
 
-    # [VECTORIZATION OPTION 1]: Direct algebraic vectorization of surface trigonometric grids.
-    # Replaces 7 expensive transcendental array function calls (np.arctan, np.cos, np.sin) across full grid
-    # with direct SIMD algebraic hypotenuse identities:
-    #   cos(atan(x)) = 1 / sqrt(1 + x^2)
-    #   sin(atan(x)) = x / sqrt(1 + x^2)
-    #   sin(atan(sqrt(x^2 + y^2))) = sqrt(x^2 + y^2) / sqrt(1 + x^2 + y^2)
+    # Compute 2nd spatial derivatives for Laplacian curvature
+    d2z_dy2, _ = np.gradient(slope_y, dy, dx)
+    _, d2z_dx2 = np.gradient(slope_x, dy, dx)
+    curvature = d2z_dx2 + d2z_dy2
+
     inv_hypot_x = 1.0 / np.sqrt(1.0 + slope_x**2)
     inv_hypot_y = 1.0 / np.sqrt(1.0 + slope_y**2)
     inv_hypot_slope = 1.0 / np.sqrt(1.0 + slope_sq)
@@ -70,6 +98,7 @@ def compute_gradients(
         "sin_alpha_x_grid": sin_alpha_x_grid,
         "sin_alpha_y_grid": sin_alpha_y_grid,
         "sinus_alpha_grid": sinus_alpha_grid,
+        "curvature": curvature,
     }
 
 

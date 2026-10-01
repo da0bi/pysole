@@ -48,12 +48,12 @@ class TestSolverWuk(unittest.TestCase):
             bedrock_map.save(out_file)
             self.assertTrue(os.path.exists(out_file))
 
-    def test_sia_thickness_kriging_drift_wuk(self):
+    def test_sia_kriging_drift_wuk(self):
         model = pysole.Solver(
             dem=self.wuk_dem,
             outline=self.wuk_outline,
             post_kriging_method="universal",
-            post_drift_terms=["sia_thickness"],
+            post_drift_terms=["sia"],
             perform_migration=True,
         )
         model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)

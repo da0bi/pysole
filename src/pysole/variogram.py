@@ -41,6 +41,8 @@ class OptimizationResult:
     optimal_slope_grid: np.ndarray
     all_kc_variances: np.ndarray
     all_smoothed_slopes: dict[float, np.ndarray]
+    optimal_dem_grid: np.ndarray | None = None
+    all_smoothed_dems: dict[float, np.ndarray] | None = None
     dx: float = 1.0
     dy: float = 1.0
 
@@ -284,16 +286,14 @@ def optimize_bss_variance(
     effective_n_cores = (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
 
     # Pre-filter valid survey points ONCE and compute distance matrix ONCE
-    valid_pts_mask = ~np.isnan(survey_points[:, 0]) & ~np.isnan(survey_points[:, 1]) & (survey_points[:, 3] > 0)
+    val_col = 3 if survey_points.shape[1] >= 4 else 2
+    valid_pts_mask = ~np.isnan(survey_points[:, 0]) & ~np.isnan(survey_points[:, 1]) & (survey_points[:, val_col] > 0)
     pts_valid_coords = survey_points[valid_pts_mask, :2]
     survey_dists = pdist(pts_valid_coords) if len(pts_valid_coords) >= 2 else None
 
-    # Compute baseline surface slope
-    grads = compute_gradients(dem, dx=dx, dy=dy)
-    base_slope = grads["slope_rad"]
-
-    # Pre-compute 2D Forward FFT and wavenumber grid ONCE for the entire optimization loop
-    A_shift_slope, k_grid_slope, k_max_grid = precompute_fft_grid(base_slope, dx=dx, dy=dy)
+    # Pre-compute 2D Forward FFT and wavenumber grid ONCE on raw DEM elevation Z_surf
+    A_shift_dem, k_grid_dem, k_max_grid = precompute_fft_grid(dem, dx=dx, dy=dy)
+    base_slope = compute_gradients(dem, dx=dx, dy=dy)["slope_rad"]
 
     kc_max = float(kc_max) if kc_max is not None else 10.0
     kc_min = float(kc_min) if kc_min is not None else 0.01
@@ -330,9 +330,11 @@ def optimize_bss_variance(
 
     all_kc_variances = []
     all_smoothed_slopes = {}
+    all_smoothed_dems = {}
     best_kc = None
     min_var = float("inf")
     best_slope_grid = base_slope.copy()
+    best_dem_grid = dem.copy()
     range_fix = None
 
     def _eval_single_kc(kc_val: float):
@@ -340,16 +342,17 @@ def optimize_bss_variance(
             return None
 
         kc_key = round(float(kc_val), 6)
-        smoothed_slope = fft_gaussian_smooth_precomputed(A_shift_slope, k_grid_slope, kc=kc_val)
+        smoothed_dem = fft_gaussian_smooth_precomputed(A_shift_dem, k_grid_dem, kc=kc_val)
+        smoothed_slope = compute_gradients(smoothed_dem, dx=dx, dy=dy)["slope_rad"]
 
         interp_slope = geometry.create_interpolator(smoothed_slope, fill_value=np.nan)
         pts_xy = np.column_stack((survey_points[:, 1], survey_points[:, 0]))
         slopes_pts = interp_slope(pts_xy)
 
-        thickness_or_t = survey_points[:, 3]
+        thickness_or_t = survey_points[:, val_col]
         bss_product = slopes_pts * thickness_or_t
 
-        valid = ~np.isnan(bss_product) & (survey_points[:, 3] > 0)
+        valid = ~np.isnan(bss_product) & (survey_points[:, val_col] > 0)
         if np.sum(valid) < 3:
             return None
 
@@ -364,7 +367,7 @@ def optimize_bss_variance(
             warn_low_pairs=False,
         )
 
-        return (kc_val, kc_key, smoothed_slope, var_result, mean_product)
+        return (kc_val, kc_key, smoothed_dem, smoothed_slope, var_result, mean_product)
 
     go_on = True
     while go_on:
@@ -402,7 +405,7 @@ def optimize_bss_variance(
         if range_fix is None:
             first_eval = _eval_single_kc(valid_kc_list[0])
             if first_eval is not None:
-                kc_val, kc_key, smoothed_slope, var_result, mean_product = first_eval
+                kc_val, kc_key, smoothed_dem, smoothed_slope, var_result, mean_product = first_eval
                 if len(var_result["val"]) > 0:
                     a_range, sill, nugget, model_curve = fit_variogram_model(
                         var_result["distance"], var_result["val"], model_type="spherical"
@@ -433,7 +436,7 @@ def optimize_bss_variance(
                                             # Recalculate baseline variogram and refit model with updated nrbins
                                             first_eval = _eval_single_kc(valid_kc_list[0])
                                             if first_eval is not None:
-                                                _, _, _, var_result, _ = first_eval
+                                                _, _, _, _, var_result, _ = first_eval
                                                 if len(var_result["val"]) > 0:
                                                     a_range, sill, nugget, model_curve = fit_variogram_model(
                                                         var_result["distance"], var_result["val"], model_type="spherical"
@@ -479,12 +482,12 @@ def optimize_bss_variance(
                 )
             )
 
-
         for res in kc_eval_results:
             if res is None:
                 continue
 
-            kc_val, kc_key, smoothed_slope, var_result, mean_product = res
+            kc_val, kc_key, smoothed_dem, smoothed_slope, var_result, mean_product = res
+            all_smoothed_dems[kc_key] = smoothed_dem.copy()
             all_smoothed_slopes[kc_key] = smoothed_slope.copy()
 
             if len(var_result["val"]) > 0:
@@ -515,6 +518,7 @@ def optimize_bss_variance(
                     min_var = mean_variance
                     best_kc = kc_val
                     best_slope_grid = smoothed_slope
+                    best_dem_grid = smoothed_dem
 
         if (interactive or (plots_dir is not None)) and len(evaluated_variograms) > 0:
             from .plotting import plot_bss_kc_optimization_variograms
@@ -553,6 +557,8 @@ def optimize_bss_variance(
         optimal_slope_grid=best_slope_grid,
         all_kc_variances=kc_var_array,
         all_smoothed_slopes=all_smoothed_slopes,
+        optimal_dem_grid=best_dem_grid,
+        all_smoothed_dems=all_smoothed_dems,
         dx=float(dx),
         dy=float(dy),
     )

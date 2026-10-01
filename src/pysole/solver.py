@@ -74,7 +74,7 @@ class Solver:
         pre_kriging_method : str
             1st-pass pre-migration Kriging approach ('universal', 'ordinary', 'regression'). Default 'universal'.
         pre_drift_terms : list of str, optional
-            1st-pass drift terms (e.g. ['sia_thickness'], ['quadratic'], ['regional_linear']). Default ['sia_thickness'].
+            1st-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
         pre_variogram_model : str
             1st-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'.
         pre_zero_boundary : bool
@@ -82,7 +82,7 @@ class Solver:
         post_kriging_method : str
             2nd-pass post-migration Kriging approach ('universal', 'ordinary', 'regression'). Default 'universal'.
         post_drift_terms : list of str, optional
-            2nd-pass drift terms (e.g. ['sia_thickness'], ['quadratic'], ['regional_linear']). Default ['sia_thickness'].
+            2nd-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
         post_variogram_model : str
             2nd-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'.
         post_zero_boundary : bool
@@ -134,13 +134,13 @@ class Solver:
 
         # Migration & Kriging options (Pre-migration & Post-migration)
         self.pre_kriging_method = pre_kriging_method
-        self.pre_drift_terms = pre_drift_terms if pre_drift_terms is not None else ["sia_thickness"]
+        self.pre_drift_terms = pre_drift_terms if pre_drift_terms is not None else ["sia"]
         self.pre_variogram_model = pre_variogram_model
         self.pre_zero_boundary = bool(pre_zero_boundary)
         self.pre_interpolation_target = str(pre_interpolation_target).upper().strip()
 
         self.post_kriging_method = post_kriging_method
-        self.post_drift_terms = post_drift_terms if post_drift_terms is not None else ["sia_thickness"]
+        self.post_drift_terms = post_drift_terms if post_drift_terms is not None else ["sia"]
         self.post_variogram_model = post_variogram_model
         self.post_zero_boundary = bool(post_zero_boundary)
         self.post_interpolation_target = str(post_interpolation_target).upper().strip()
@@ -154,10 +154,10 @@ class Solver:
         self.g = float(g)
         self.show_progress = bool(show_progress)
 
-        # Gradient and Smoothed Slope Caches
+        # Gradient, DEM, and Feature Caches
         self._gradient_cache: dict[str, np.ndarray] | None = None
-        self._fft_slope_cache: tuple[np.ndarray, np.ndarray] | None = None
-        self._smoothed_slopes_cache: dict[float, np.ndarray] = {}
+        self._fft_dem_cache: tuple[np.ndarray, np.ndarray] | None = None
+        self._smoothed_dem_cache: dict[float, np.ndarray] = {}
 
         # Decoupled sub-engines strictly bound to GridGeometry
         self.migrator = EikonalMigrator(self.dem_grid, geometry=self.geometry, outline_mask=self.outline_mask)
@@ -369,21 +369,29 @@ class Solver:
             self._gradient_cache = compute_gradients(self.dem_grid, dx=self.dx, dy=self.dy)
         return self._gradient_cache
 
-    def _get_fft_slope_grids(self) -> tuple[np.ndarray, np.ndarray]:
-        if self._fft_slope_cache is None:
-            grads = self._get_dem_gradients()
-            base_slope = grads["slope_rad"]
-            A_shift_slope, k_grid_slope, _ = precompute_fft_grid(base_slope, dx=self.dx, dy=self.dy)
-            self._fft_slope_cache = (A_shift_slope, k_grid_slope)
-        return self._fft_slope_cache
+    def _get_fft_dem_grids(self) -> tuple[np.ndarray, np.ndarray]:
+        if self._fft_dem_cache is None:
+            A_shift_dem, k_grid_dem, _ = precompute_fft_grid(self.dem_grid, dx=self.dx, dy=self.dy)
+            self._fft_dem_cache = (A_shift_dem, k_grid_dem)
+        return self._fft_dem_cache
+
+    def get_smoothed_dem(self, kc: float) -> np.ndarray:
+        kc_key = round(float(kc), 6)
+        if kc_key not in self._smoothed_dem_cache:
+            A_shift_dem, k_grid_dem = self._get_fft_dem_grids()
+            smoothed_dem = fft_gaussian_smooth_precomputed(A_shift_dem, k_grid_dem, kc=kc)
+            self._smoothed_dem_cache[kc_key] = smoothed_dem
+        return self._smoothed_dem_cache[kc_key]
 
     def get_smoothed_slope(self, kc: float) -> np.ndarray:
-        kc_key = round(float(kc), 6)
-        if kc_key not in self._smoothed_slopes_cache:
-            A_shift_slope, k_grid_slope = self._get_fft_slope_grids()
-            smoothed_slope = fft_gaussian_smooth_precomputed(A_shift_slope, k_grid_slope, kc=kc)
-            self._smoothed_slopes_cache[kc_key] = smoothed_slope
-        return self._smoothed_slopes_cache[kc_key]
+        smoothed_dem = self.get_smoothed_dem(kc)
+        return compute_gradients(smoothed_dem, dx=self.dx, dy=self.dy)["slope_rad"]
+
+    def get_smoothed_curvature(self, kc: float) -> np.ndarray:
+        from .smoothing import compute_surface_curvature
+
+        smoothed_dem = self.get_smoothed_dem(kc)
+        return compute_surface_curvature(smoothed_dem, dx=self.dx, dy=self.dy)
 
     @classmethod
     def from_config(
@@ -483,25 +491,31 @@ class Solver:
 
         opt_slope_sin = np.sin(self.opt_slope)
 
+        val_col = 3 if points.shape[1] >= 4 else 2
         if target_upper == "P":
             interp_slope = self.geometry.create_interpolator(opt_slope_sin, fill_value=np.nan)
             pts_xy = np.column_stack((points[:, 1], points[:, 0]))  # (Y, X)
             slopes_pts = interp_slope(pts_xy)
             slopes_pts = np.maximum(np.nan_to_num(slopes_pts, nan=0.1), 1e-4)
 
-            product_values = points[:, 3] * slopes_pts
+            product_values = points[:, val_col] * slopes_pts
             sample_pts = np.column_stack((points[:, 0], points[:, 1], product_values))
 
             logger.info(f"   [{pass_name}] Performing {krig_method.capitalize()} Kriging Interpolation for BSS Product P(x,y)...")
-            if drift_terms and "sia_thickness" in drift_terms:
+            if drift_terms and "sia" in drift_terms:
                 logger.warning(
-                    f"   [{pass_name} Warning] 'sia_thickness' drift is active during BSS product P(x,y) interpolation. "
+                    f"   [{pass_name} Warning] 'sia' drift is active during BSS product P(x,y) interpolation. "
                     "This can cause 1/sin^2(alpha) double-scaling artifacts at low-slope margins. "
-                    "Recommendation: Use 'ordinary' Kriging or non-slope spatial drifts (e.g. ['z_surface']) for product targets."
+                    "Recommendation: Use 'ordinary' Kriging or non-slope spatial drifts (e.g. ['z_dem']) for product targets."
                 )
         else:
-            sample_pts = np.column_stack((points[:, 0], points[:, 1], points[:, 3]))
+            sample_pts = np.column_stack((points[:, 0], points[:, 1], points[:, val_col]))
             logger.info(f"   [{pass_name}] Performing Direct {krig_method.capitalize()} Kriging Interpolation for Target '{target_upper}'...")
+
+        ext_drifts: dict[str, np.ndarray] = {}
+        if drift_terms and "curvature_dem" in drift_terms:
+            kc_use = self.opt_kc if self.opt_kc is not None else 0.05
+            ext_drifts["curvature_dem"] = self.get_smoothed_curvature(kc_use)
 
         krig_res = kriging_interpolation(
             sample_points=sample_pts,
@@ -517,6 +531,7 @@ class Solver:
             engine=self.kriging_engine,
             slope_floor_deg=self.slope_floor_deg,
             show_progress=self.show_progress,
+            external_drift_grid=ext_drifts if len(ext_drifts) > 0 else None,
         )
 
         if target_upper == "P":
@@ -714,7 +729,8 @@ class Solver:
 
         self.opt_kc = opt_res.optimal_kc
         self.opt_slope = opt_res.optimal_slope_grid
-        self._smoothed_slopes_cache.update(opt_res.all_smoothed_slopes)
+        if opt_res.all_smoothed_dems:
+            self._smoothed_dem_cache.update(opt_res.all_smoothed_dems)
         return self.opt_kc
 
     def interpolate_kriging(
@@ -745,7 +761,8 @@ class Solver:
         grid_raw = krig_res.bedrock_grid
         prod_var = krig_res.variance_grid
 
-        max_thickness = max(float(np.max(pts[:, 3])) * 1.5, 500.0)
+        val_col = 3 if pts.shape[1] >= 4 else 2
+        max_thickness = max(float(np.max(pts[:, val_col])) * 1.5, 500.0)
         thickness_grid = np.clip(grid_raw, 0.0, max_thickness)
 
         if self.outline_mask is not None:

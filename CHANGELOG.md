@@ -5,6 +5,31 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-10-01
+
+### Added
+- **Unified DEM Smoothing Architecture & Curvature Drift Model**:
+  - Implemented single-pass FFT Gaussian low-pass smoothing directly on the raw surface DEM $Z_{\text{dem}}(x,y)$ to compute $Z_{\text{smooth}, k_c}(x,y)$ once.
+  - Derived both optimal surface slope ($\sin\alpha_{\text{opt}}$) and 2D Laplacian surface curvature ($\kappa_{k_c} = \nabla^2 Z_{\text{smooth}, k_c}$) from the single smoothed DEM, ensuring 100% geomorphological consistency across slope, curvature, and elevation fields while eliminating redundant code paths and double-smoothing computations.
+  - Preserved exact raw DEM elevation embedding outside glacier boundary outlines during final bedrock construction.
+- **Universal Kriging Drift Model Naming Standardization**:
+  - Standardized all Universal Kriging drift model names across PySole to **5 canonical identifiers**:
+    - `"sia"`: Shallow Ice Approximation Physical Drift ($U_{\text{sia}} = \sin(\alpha_{\text{opt}})^{-1}$)
+    - `"z_dem"`: Surface Elevation Drift ($U_z = Z_{\text{dem}}$)
+    - `"curvature_dem"`: Surface Curvature Drift ($U_{\kappa} = \nabla^2 Z_{\text{smooth, } k_c}$)
+    - `"linear_xy"`: 1st-Order Linear Spatial Coordinate Drift ($a_1 X + a_2 Y$)
+    - `"quadratic_xy"`: 2nd-Order Quadratic Spatial Coordinate Drift ($a_1 X + a_2 Y + a_3 X^2 + a_4 Y^2 + a_5 XY$)
+  - Completely purged legacy alias fallback strings (`"sia_thickness"`, `"sia_drift"`, `"z_surface"`, `"dem"`, `"elevation"`, `"surface_curvature"`, `"curvature"`, `"laplacian"`, `"regional_linear"`, `"linear"`, `"quadratic"`).
+- **Surface Curvature Unit Test Module (`tests/test_curvature.py`)**:
+  - Added unit test suite verifying 2nd-order central difference Laplacian curvature on synthetic paraboloids, `compute_gradients()` output dictionary contents, native Dual Kriging with `"curvature_dem"`, combined multi-drift models, and exact raw DEM embedding preservation.
+
+### Changed
+- **Codebase & Architecture Streamlining**:
+  - Updated `built_in_kriging_interpolation()`, `pykrige_kriging_interpolation()`, `kriging_interpolation()`, `Solver`, and `_execute_kriging_pass()` to enforce canonical drift identifiers exclusively.
+  - Streamlined `compute_gradients()` in `src/pysole/smoothing.py` to accept pre-smoothed DEMs directly without redundant internal smoothing logic.
+- **Documentation & Configuration Alignment**:
+  - Updated `README.md` parameter reference tables, Section 6 (Universal Kriging Drift Models), multi-drift model combinations, and workflow notes.
+
 ---
 
 ## [0.3.1] - 2026-09-30
