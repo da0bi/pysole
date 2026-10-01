@@ -335,8 +335,8 @@ While users can combine any available interpolation options, the following two s
 
 - **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field <i>P</i> = <i>T</i> · sin <i>α</i><sub>opt</sub> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i><sub>opt</sub> (post-migration). **Ordinary Kriging** is initially recommended for BSS-derived product targets.
 
-  > [!CAUTION]
-  > Interpolating a BSS-derived product `"P"` with Universal Kriging and the `"sia"` drift model creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artifact leads to implausibly large depths at low slopes and is therefore strongly discouraged.
+> [!CAUTION]
+> Interpolating a BSS-derived product `"P"` with Universal Kriging and the `"sia"` drift model creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact. This artifact leads to implausibly large depths at low slopes and is therefore strongly discouraged.
 
 - **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration) or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** with the `"sia"` physical drift model is initially recommended.
 
