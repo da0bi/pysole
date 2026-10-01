@@ -78,7 +78,7 @@ Grid spacing (`dx`, `dy`) and spatial bounds are automatically extracted from Ge
 For headerless DEM formats (2D `.csv` matrices, `.npy`, or `np.ndarray`), spatial parameters (`origin`, `crs`, `dx`, `dy`) should be provided under `spatial_parameters` to build the spatial metadata object.
 
 > [!CAUTION]
-> All input datasets (DEM, survey picks, and outline geometries) **must share the same projected, metric coordinate reference system** `"crs"` (e.g. 'Universal Transverse Mercator' (UTM)). Geographic coordinates (latitude/longitude in degrees) will cause invalid distance, surface slope, and basal shear stress calculations.
+> All input datasets (DEM, survey picks, and outline geometries) **must share the same projected, metric coordinate reference system** ( `"crs"`, e.g. 'Universal Transverse Mercator' (UTM)). Geographic coordinates (latitude/longitude in degrees) will cause invalid distance, surface slope, and basal shear stress calculations.
 
 #### 2. Pre-Migration Traveltime Interpolation
 Across spatial wavenumber cutoffs <i>k</i><sub>c</sub>, the point products of traveltime observations and corresponding low-pass filtered surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), are evaluated. Once the optimization criterion is satisfied, the optimally smoothed surface slope, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), is deployed in the subsequent Kriging interpolation. By default, the recommended interpolation strategy depends on `pre_migration.interpolation_target`:
@@ -139,7 +139,7 @@ All execution options can be fully defined in a single JSON configuration file, 
         "dem_path": null,
         "outline_path": null,
         "survey_data_path": null,
-        "survey_data_type": "one_way_travel_time",
+        "survey_data_type": "one_way_traveltime",
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,
@@ -218,7 +218,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | **`inputs`** | `dem_path` | `str` | `null` | **(Required)** File path to the surface Digital Elevation Model (`.asc`, `.tif`, `.csv`, `.npy`). |
 | | `outline_path` | `str` | `null` | File path to creeping body / glacier boundary polygon (`.shp`, `.geojson`, `.gpkg`, `.csv`). If `null`, domain is derived from non-NaN DEM pixels. |
 | | `survey_data_path` | `str` | `null` | **(Required)** File path to signal traveltime or thickness observations CSV `[X, Y, value]`. |
-| | `survey_data_type` | `str` | `"one_way_travel_time"` | Observation data type: `"one_way_travel_time"`, `"two_way_travel_time"`, or `"thickness"` / `"ice_thickness"` (skips 3D migration). |
+| | `survey_data_type` | `str` | `"one_way_traveltime"` | Observation data type: `"one_way_traveltime"`, `"two_way_traveltime"`, or `"depth"` (skips 3D migration). |
 | | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (`900.0` kg/m³ for temperate glacier ice by default). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `g` | `float` | `9.81` | Gravitational acceleration constant in m/s² (`9.81` m/s²). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
@@ -279,7 +279,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 #### 1. Supported DEM Formats
 `PySole` supports 5 distinct DEM formats:
 
-- **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, affine transform, CRS, pixel resolution, and `nodata` values using [`rasterio`](https://rasterio.readthedocs.io).
+- **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, CRS, pixel resolution, and `nodata` values using [`rasterio`](https://rasterio.readthedocs.io).
 - **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `nodata_value`. Optional CRS projection can be specified via `spatial_parameters.crs`.
 - **CSV Grid (`.csv`)**: Supports both **2D elevation matrices** ([Z<sub>nx</sub> × Z<sub>ny</sub>]) and **3-column XYZ grid tables** ([X, Y, Z]). For 3-column tables, cell spacing (`dx`, `dy`) and bounds are automatically inferred; for 2D matrices, metadata is built from `spatial_parameters`.
 - **NumPy Binary Array (`.npy`)**: Fast 2D binary array format. Spatial metadata (`origin`, `crs`, `dx`, `dy`) is defined via `spatial_parameters`.
@@ -617,7 +617,7 @@ import pysole
 model = pysole.Solver(
     dem="surface_dem.asc",
     outline="creeping_body.shp",
-    survey_data_type="one_way_travel_time",
+    survey_data_type="one_way_traveltime",
     pre_kriging_method="universal",
     post_kriging_method="universal",
     perform_migration=True,

@@ -16,4 +16,7 @@ git_token.txt
 scratch/
 figures/
 examples/**/figures/
+paper.md
+paper.bib
+CONTRIBUTING.md
 

@@ -3,7 +3,7 @@
         "dem_path": "input_data/dgm_tin_sbk.tif",
         "outline_path": "input_data/gok_obu_rand_poly.csv",
         "survey_data_path": "input_data/Gok_EisdickePicks_2003_04.csv",
-        "survey_data_type": "one_way_travel_time",
+        "survey_data_type": "one_way_traveltime",
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,

@@ -59,7 +59,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "dem_path": None,
         "outline_path": None,
         "survey_data_path": None,
-        "survey_data_type": "one_way_travel_time",
+        "survey_data_type": "one_way_traveltime",
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,

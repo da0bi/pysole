@@ -3,7 +3,7 @@
         "dem_path": null,
         "outline_path": null,
         "survey_data_path": null,
-        "survey_data_type": "one_way_travel_time",
+        "survey_data_type": "one_way_traveltime",
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,

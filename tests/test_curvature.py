@@ -110,7 +110,7 @@ class TestSurfaceCurvatureAndBedrockEmbedding(unittest.TestCase):
             dy=self.dy,
             post_drift_terms=["z_dem", "curvature_dem", "quadratic_xy"],
             perform_migration=False,
-            survey_data_type="ice_thickness",
+            survey_data_type="depth",
         )
 
         solver.survey_points = sample_pts

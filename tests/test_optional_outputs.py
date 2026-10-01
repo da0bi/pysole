@@ -33,7 +33,7 @@ class TestOptionalOutputs(unittest.TestCase):
             [200.0, 200.0, 70.0],
             [250.0, 250.0, 55.0],
         ])
-        np.savetxt(self.pts_path, pts, delimiter=",", header="x,y,owtt", comments="")
+        np.savetxt(self.pts_path, pts, delimiter=",", header="x,y,traveltime", comments="")
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
@@ -54,7 +54,7 @@ class TestOptionalOutputs(unittest.TestCase):
             "inputs": {
                 "dem_path": self.dem_path,
                 "survey_data_path": self.pts_path,
-                "survey_data_type": "one_way_travel_time",
+                "survey_data_type": "one_way_traveltime",
                 "show_progress": False,
             },
             "migration_parameters": {
@@ -102,7 +102,7 @@ class TestOptionalOutputs(unittest.TestCase):
             "inputs": {
                 "dem_path": self.dem_path,
                 "survey_data_path": self.pts_path,
-                "survey_data_type": "thickness",
+                "survey_data_type": "depth",
                 "show_progress": False,
             },
             "migration_parameters": {

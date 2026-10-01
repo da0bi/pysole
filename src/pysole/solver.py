@@ -42,7 +42,7 @@ class Solver:
         post_zero_boundary: bool = True,
         post_interpolation_target: str = "P",
         perform_migration: bool = True,
-        survey_data_type: str = "one_way_travel_time",
+        survey_data_type: str = "one_way_traveltime",
         plots_dir: str | Path | None = None,
         n_cores: int = -1,
         kriging_engine: str = "native",
@@ -90,8 +90,8 @@ class Solver:
         perform_migration : bool
             If True (default), performs 3D Eikonal ray migration on travel times. If False, skips migration.
         survey_data_type : str
-            Type of input survey data defined in inputs section: 'one_way_travel_time' (default),
-            'two_way_travel_time' (converts TWT/2), or 'thickness' / 'ice_thickness' (direct depth/thickness measurements, skips migration).
+            Type of input survey data defined in inputs section: 'one_way_traveltime' (default),
+            'two_way_traveltime' (converts TWT/2), or 'depth' (direct depth/thickness measurements, skips migration).
         plots_dir : str or Path, optional
             Directory where generated plots are automatically saved.
         n_cores : int
@@ -393,6 +393,21 @@ class Solver:
         smoothed_dem = self.get_smoothed_dem(kc)
         return compute_surface_curvature(smoothed_dem, dx=self.dx, dy=self.dy)
 
+    def _normalize_survey_data_type(self) -> str:
+        """
+        Normalizes and validates survey_data_type into one of 3 canonical types:
+          - 'one_way_traveltime'
+          - 'two_way_traveltime'
+          - 'depth'
+        """
+        dtype_str = str(self.survey_data_type).lower().strip()
+        if dtype_str in ("one_way_traveltime", "two_way_traveltime", "depth"):
+            return dtype_str
+        raise ValueError(
+            f"Invalid survey_data_type '{self.survey_data_type}'. "
+            f"Must be one of ['one_way_traveltime', 'two_way_traveltime', 'depth']."
+        )
+
     @classmethod
     def from_config(
         cls,
@@ -408,7 +423,7 @@ class Solver:
         kriging_cfg = cfg.get("kriging_parameters", {})
         outputs = cfg.get("outputs", {})
 
-        survey_dtype = inputs.get("survey_data_type", "one_way_travel_time")
+        survey_dtype = inputs.get("survey_data_type", "one_way_traveltime")
 
         pre_krig_cfg = kriging_cfg.get("pre_migration", {}) if isinstance(kriging_cfg.get("pre_migration"), dict) else {}
         post_krig_cfg = kriging_cfg.get("post_migration", {}) if isinstance(kriging_cfg.get("post_migration"), dict) else {}
@@ -575,18 +590,18 @@ class Solver:
             logger.error(err_msg)
             raise ValueError(err_msg)
 
-        dtype_str = str(self.survey_data_type).lower().strip()
+        dtype_str = self._normalize_survey_data_type()
 
-        if dtype_str in ["two_way_travel_time", "twt", "two_way"]:
+        if dtype_str == "two_way_traveltime":
             logger.info("   [Survey Data Type: TWT] Two-Way Traveltimes detected. Converting to One-Way Traveltimes (OWTT = TWT / 2.0).")
             pts[:, 3] = pts[:, 3] / 2.0
-        elif dtype_str in ["one_way_travel_time", "owtt", "one_way"]:
+        elif dtype_str == "one_way_traveltime":
             logger.info("   [Survey Data Type: OWTT] One-Way Traveltimes detected.")
 
         self.survey_points = pts
 
-        if dtype_str in ["thickness", "ice_thickness", "depth"]:
-            logger.info("   [Survey Data Type: Ice Thickness] Input data represents direct ice thickness measurements. Skipping 3D Eikonal ray migration.")
+        if dtype_str == "depth":
+            logger.info("   [Survey Data Type: Depth] Input data represents direct depth/thickness measurements. Skipping 3D Eikonal ray migration.")
             self.migrated_points = pts.copy()
             if self.outputs_config.get("save_migrated_points", False):
                 logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
@@ -1127,7 +1142,7 @@ class Solver:
         logger.info(f"   Interactive Migration: {migration.get('interactive_migration', False)}")
         logger.info(f"   Plots Output Directory: {self.plots_dir}")
 
-        if self.perform_migration and str(self.survey_data_type).lower().strip() not in ["thickness", "ice_thickness", "depth"]:
+        if self.perform_migration and self._normalize_survey_data_type() != "depth":
             logger.info("2. Performing 3D Eikonal Ray Migration...")
         else:
             logger.info("2. Skipping 3D Eikonal Ray Migration...")
