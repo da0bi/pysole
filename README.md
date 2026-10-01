@@ -342,7 +342,7 @@ While users can combine any available interpolation options, the following two s
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging - Single and Combined Drift Models
-The following <b>single drift models</b> are implemented in `PySole` for Universal Kriging:
+<br>The following **single drift models** are implemented in `PySole` for Universal Kriging:
 
 - **Shallow Ice Approximation Physical Drift Model (`["sia"]`)**:
    `PySole` offers the physically-informed custom `"sia"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting the drift term parameter to `["sia"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
@@ -382,7 +382,8 @@ The following <b>single drift models</b> are implemented in `PySole` for Univers
 - **Empty Drift Model (`[]`)**:
    An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.
 
-</br> `PySole` natively supports combining external raster drift models (`["z_dem"]`, `["curvature_dem"]`, or `["sia"]`) with polynomial spatial coordinate trends (`["quadratic_xy"]` or `["linear_xy"]`) into an augmented multi-drift Universal Kriging system. The following combined **Combined Multi-Drift Models** are available:
+</br> `PySole` natively supports combining external raster drift models (`["z_dem"]`, `["curvature_dem"]`, or `["sia"]`) with polynomial spatial coordinate trends (`["quadratic_xy"]` or `["linear_xy"]`) into an augmented multi-drift Universal Kriging system.<br>
+The following combined **Combined Multi-Drift Models** are available:
 
 - **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
       Combines DEM elevation, surface curvature, and a 2nd-order spatial polynomial:
