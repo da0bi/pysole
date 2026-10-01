@@ -382,60 +382,58 @@ The following <b>single drift models</b> are implemented in `PySole` for Univers
 - **Empty Drift Model (`[]`)**:
    An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.
 
-</br> `PySole` natively supports combining external raster drift models (`["z_dem"]`, `["curvature_dem"]`, or `["sia"]`) with polynomial spatial coordinate trends (`["quadratic_xy"]` or `["linear_xy"]`) into an augmented multi-drift Universal Kriging system. The following combined drift configurations are available:
+</br> `PySole` natively supports combining external raster drift models (`["z_dem"]`, `["curvature_dem"]`, or `["sia"]`) with polynomial spatial coordinate trends (`["quadratic_xy"]` or `["linear_xy"]`) into an augmented multi-drift Universal Kriging system. The following combined **Combined Multi-Drift Models** are available:
 
-- **Combined Multi-Drift Models**:
-
-   1. **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
+- **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
       Combines DEM elevation, surface curvature, and a 2nd-order spatial polynomial:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub> + <i>a</i><sub>2</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub> + <i>a</i><sub>3</sub> <i>X</i> + <i>a</i><sub>4</sub> <i>Y</i> + <i>a</i><sub>5</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>7</sub> <i>X Y</i>
       </p>
       <i>Recommended for complex glaciated catchments where macro-elevation guides regional ice distribution, surface curvature captures local valley trough/basin concavity, and 2D quadratic spatial coordinates capture large-scale regional trend curvature (e.g. the central dome of an ice cap). Can be safely combined with `interpolation_target`: `"P"`.</i>
 
-   2. **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
+- **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines surface curvature with a 2nd-order spatial polynomial:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
       </p>
       <i>Recommended for alpine valley glaciers and cirques where terrain concavity/convexity is the primary morphometric driver of ice accumulation and thickness. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
-   3. **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
+- **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines DEM surface elevation with a 2nd-order spatial polynomial:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
       </p>
       <i>Recommended for radial complexes with outlet valleys, where elevation guides the macro-scale dome-to-outlet trend while quadratic space terms capture 2D radial planform geometry. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
-   4. **`["sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
+- **`["sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines the SIA slope factor with a 2nd-order spatial polynomial:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup> + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
       </p>
       <i>Recommended for complex glaciated terrains with strong slope physics and regional 2D spatial coordinate trend curvature. Use `interpolation_target`: `"T"`, or `"D"`.</i>
 
-   5. **`["z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
+- **`["z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
       Combines DEM elevation, surface curvature, and a 1st-order linear spatial trend:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub> + <i>a</i><sub>2</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub> + <i>a</i><sub>3</sub> <i>X</i> + <i>a</i><sub>4</sub> <i>Y</i>
       </p>
       <i>Recommended for elongated valley glaciers with elevation and curvature trends overlaid on a linear regional gradient.  Can be safely combined with `interpolation_target`: `"P"`.</i>
 
-   6. **`["curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
+- **`["curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines surface curvature with a 1st-order linear spatial trend:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
       </p>
       <i>Recommended for cirque glaciers and headwall valleys governed by local morphometric curvature and linear spatial trends.  Can be safely combined with `interpolation_target`: `"P"`.</i>
 
-   7. **`["z_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
+- **`["z_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines DEM surface elevation with a 1st-order linear spatial trend:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
       </p>
       <i>Recommended for tilted valley glaciers with elevation-dependent trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
-   8. **`["sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
+- **`["sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines the SIA slope factor with a 1st-order linear spatial trend:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup> + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
