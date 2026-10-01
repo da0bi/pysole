@@ -390,14 +390,14 @@ While users can combine any available interpolation options, the following two s
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub> + <i>a</i><sub>2</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub> + <i>a</i><sub>3</sub> <i>X</i> + <i>a</i><sub>4</sub> <i>Y</i> + <i>a</i><sub>5</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>7</sub> <i>X Y</i>
       </p>
-      <i>Recommended for complex glaciated catchments where macro-elevation guides regional ice distribution, surface curvature captures local valley trough/basin concavity, and 2D quadratic spatial coordinates capture large-scale regional trend curvature (e.g. the central dome of an ice cap). Can be safely combined with `interpolation_target`: `"P"`.</i>
+      <i>Recommended for complex glaciated catchments where elevation guides regional ice distribution, surface curvature captures local ridge or basin concavity, and 2D quadratic spatial coordinates capture large-scale regional trend curvature (e.g. the central dome of an ice cap). Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines surface curvature with a 2nd-order spatial polynomial:
       <p align="center">
         <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
       </p>
-      <i>Recommended for alpine valley glaciers and cirques where terrain concavity/convexity is the primary morphometric driver of ice accumulation and thickness. Can be safely combined with `interpolation_target`: `"P"`.</i>
+      <i>Recommended for alpine-type valley glaciers and cirques where terrain concavity/convexity is the primary morphometric driver of ice accumulation and thickness. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines DEM surface elevation with a 2nd-order spatial polynomial:
