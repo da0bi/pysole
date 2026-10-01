@@ -361,9 +361,9 @@ The following single drift models are implemented in `PySole` for Universal Krig
    This models the glaciological elevation-dependent ice thickness pattern (thicker ice in lower valley basins/confluences, thinner ice on high-altitude ridges) without relying on surface slope angles.
 
 - **Surface Curvature Drift Model (`["curvature_dem"]`)**:
-   Uses the 2D Laplacian surface curvature <i>κ</i><sub><i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = &nabla;<sup>2</sup> <i>Z</i><sub>smooth, <i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) derived from the optimal $k_c$-smoothed DEM surface:
+   Uses the 2D Laplacian surface curvature <i>C</i><sub><i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = &nabla;<sup>2</sup> <i>Z</i><sub>smooth, <i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) derived from the optimal smoothed DEM surface:
    <p align="center">
-     <i>U</i>(<i>x</i>,<i>y</i>) = &nabla;<sup>2</sup> <i>Z</i><sub>smooth, <i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = &frac;&part;<sup>2</sup> <i>Z</i> / &part;<i>x</i><sup>2</sup> + &frac;&part;<sup>2</sup> <i>Z</i> / &part;<i>y</i><sup>2</sup>
+     <i>U</i>(<i>x</i>,<i>y</i>) = &nabla;<sup>2</sup> <i>Z</i><sub>smooth, <i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = &part;<sup>2</sup> <i>Z</i> / &part;<i>x</i><sup>2</sup> + &part;<sup>2</sup> <i>Z</i> / &part;<i>y</i><sup>2</sup>
    </p>
    This models morphometric terrain curvature (convex peaks/ridges vs. concave troughs/bowls/valleys), serving as a powerful physical drift variable for glaciated bedrock valleys, cirque basins, and ice-flow channels.
 
