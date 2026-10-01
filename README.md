@@ -365,7 +365,7 @@ The following single drift models are implemented in `PySole` for Universal Krig
    <p align="center">
      <i>U</i>(<i>x</i>,<i>y</i>) = &nabla;<sup>2</sup> <i>Z</i><sub>smooth, <i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = &frac;&part;<sup>2</sup> <i>Z</i> / &part;<i>x</i><sup>2</sup> + &frac;&part;<sup>2</sup> <i>Z</i> / &part;<i>y</i><sup>2</sup>
    </p>
-   This models morphometric terrain curvature (convex peaks/ridges vs. concave troughs/bowls/valleys), serving as a powerful physical drift variable for glaciated bedrock valleys, cirque basins, and ice-flow channels. Under the **Unified DEM Smoothing Architecture**, <i>κ</i><sub><i>k</i><sub>c</sub></sub> is calculated directly from the optimal $k_c$-smoothed DEM surface $Z_{\text{smooth, } k_c}$, guaranteeing 100% geomorphological consistency between surface slope, curvature, and elevation fields.
+   This models morphometric terrain curvature (convex peaks/ridges vs. concave troughs/bowls/valleys), serving as a powerful physical drift variable for glaciated bedrock valleys, cirque basins, and ice-flow channels.
 
 - **Linear Surface Drift Model (`["linear_xy"]`)**:
    Fits a 1st-order bivariate spatial coordinate trend surface across the <i>X</i> and <i>Y</i> grid axes:
