@@ -365,7 +365,7 @@ The following single drift models are implemented in `PySole` for Universal Krig
    <p align="center">
      $$C_{k_c}(x,y) = \nabla^2 Z_{\text{smooth, } k_c}(x,y) = \frac{\partial^2 Z}{\partial x^2} + \frac{\partial^2 Z}{\partial y^2}$$
    </p>
-   This models morphometric terrain curvature (convex peaks/ridges vs. concave troughs/bowls/valleys), serving as a powerful physical drift variable for glaciated valleys, cirque basins, and ice-flow channels.
+   This models morphometric terrain curvature (convex peaks and ridges vs. concave bowls and valleys), serving as a powerful physical drift variable for modeling viscous flow dynamics.
 
 - **Linear Surface Drift Model (`["linear_xy"]`)**:
    Fits a 1st-order bivariate spatial coordinate trend surface across the <i>X</i> and <i>Y</i> grid axes:
