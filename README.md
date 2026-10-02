@@ -360,7 +360,7 @@ While users can combine any available interpolation options, the following two s
    $$U(x,y) = Z_{\text{dem}}(x,y)$$
    </p>
 
-   This models elevation-dependent thickness pattern—larger depths in lower valley basins/confluence zones, and smaller depths on high-altitude ridges and summits.
+   <i>This models elevation-dependent thickness pattern—larger depths in lower valley basins/confluence zones, and smaller depths on high-altitude ridges and summits.</i>
 
 - **Surface Curvature Drift Model (`["curvature_dem"]`)**:
    Uses the 2D Laplacian surface curvature $C_{k_c}(x,y)$ derived from the optimal smoothed DEM surface:
@@ -369,7 +369,7 @@ While users can combine any available interpolation options, the following two s
    $$C_{k_c}(x,y) = \nabla^2 Z_{\text{smooth, } k_c}(x,y) = \frac{\partial^2 Z}{\partial x^2} + \frac{\partial^2 Z}{\partial y^2}$$
    </p>
 
-   This models morphometric terrain curvature—predicting smaller depths at convex peaks and ridges ($\nabla^2 Z < 0$), and larger depths at concave bowls and valleys ($\nabla^2 Z > 0$).
+   <i>This models morphometric terrain curvature—predicting smaller depths at convex peaks and ridges ($\nabla^2 Z < 0$), and larger depths at concave bowls and valleys ($\nabla^2 Z > 0$).</i>
 
 - **Linear Surface Drift Model (`["linear_xy"]`)**:
    Fits a flat, tilted 2D plane across the $X$ and $Y$ grid axes whose contour lines are straight, parallel, and evenly spaced across map space:
