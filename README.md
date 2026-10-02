@@ -396,76 +396,76 @@ While users can combine any available interpolation options, the following two s
 <br>`PySole` provides the following **Multi Drift Models**:
 
 - **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
-      Combines DEM elevation, surface curvature, and a 2nd-order spatial polynomial:
+   Combines DEM elevation, surface curvature, and a 2nd-order spatial polynomial:
 
-      <p align="center">
-      $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y + a_5 X^2 + a_6 Y^2 + a_7 X Y$$
-      </p>
+   <p align="center">
+   $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y + a_5 X^2 + a_6 Y^2 + a_7 X Y$$
+   </p>
 
-      <i>Recommended for more complex viscous flow features where elevation guides regional thickness distribution, surface curvature captures local ridge or basin concavity, and 2D quadratic spatial coordinates capture large-scale regional trend curvature (e.g. the central dome of an ice cap). Can be safely combined with `interpolation_target`: `"P"`.</i>
+   <i>Recommended for more complex viscous flow features where elevation guides regional thickness distribution, surface curvature captures local ridge or basin concavity, and 2D quadratic spatial coordinates capture large-scale regional trend curvature (e.g. the central dome of an ice cap). Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
-      Combines surface curvature with a 2nd-order spatial polynomial:
+   Combines surface curvature with a 2nd-order spatial polynomial:
 
-      <p align="center">
-      $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
-      </p>
+   <p align="center">
+   $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
+   </p>
 
-      <i>Recommended for e.g. alpine-type valley glaciers and cirques where terrain concavity/convexity is the primary morphometric indicator of ice thickness. Can be safely combined with `interpolation_target`: `"P"`.</i>
+   <i>Recommended for e.g. alpine-type valley glaciers and cirques where terrain concavity/convexity is the primary morphometric indicator of ice thickness. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
-      Combines DEM surface elevation with a 2nd-order spatial polynomial:
+   Combines DEM surface elevation with a 2nd-order spatial polynomial:
 
-      <p align="center">
-      $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
-      </p>
+   <p align="center">
+   $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
+   </p>
 
-      <i>Recommended for radial complexes with outlet valleys, where elevation guides the macro-scale dome-to-outlet trend while quadratic space terms capture 2D radial planform geometry. Can be safely combined with `interpolation_target`: `"P"`.</i>
+   <i>Recommended for radial complexes with outlet valleys, where elevation guides the macro-scale dome-to-outlet trend while quadratic space terms capture 2D radial planform geometry. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
-      Combines the SIA slope factor with a 2nd-order spatial polynomial:
+   Combines the SIA slope factor with a 2nd-order spatial polynomial:
 
-      <p align="center">
-      $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
-      </p>
+   <p align="center">
+   $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
+   </p>
 
-      <i>Recommended for viscous flow phenomena whose depth is dominated by surface slope and regional 2D spatial coordinate trend curvature. Use `interpolation_target`: `"T"`, or `"D"`.</i>
+   <i>Recommended for viscous flow phenomena whose depth is dominated by surface slope and regional 2D spatial coordinate trend curvature. Use `interpolation_target`: `"T"`, or `"D"`.</i>
 
 - **`["z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
-      Combines DEM elevation, surface curvature, and a 1st-order linear spatial trend:
+   Combines DEM elevation, surface curvature, and a 1st-order linear spatial trend:
 
-      <p align="center">
-      $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y$$
-      </p>
+   <p align="center">
+   $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y$$
+   </p>
 
-      <i>Recommended for e.g. elongated valley glaciers with elevation and curvature trends overlaid on a linear regional gradient. Can be safely combined with `interpolation_target`: `"P"`.</i>
+   <i>Recommended for e.g. elongated valley glaciers with elevation and curvature trends overlaid on a linear regional gradient. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
-      Combines surface curvature with a 1st-order linear spatial trend:
+   Combines surface curvature with a 1st-order linear spatial trend:
 
-      <p align="center">
-      $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y$$
-      </p>
+   <p align="center">
+   $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y$$
+   </p>
 
-      <i>Recommended for e.g. cirque glaciers and headwall valleys governed by local morphometric curvature and linear spatial trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
+   <i>Recommended for e.g. cirque glaciers and headwall valleys governed by local morphometric curvature and linear spatial trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["z_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
-      Combines DEM surface elevation with a 1st-order linear spatial trend:
+   Combines DEM surface elevation with a 1st-order linear spatial trend:
 
-      <p align="center">
-      $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y$$
-      </p>
+   <p align="center">
+   $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y$$
+   </p>
 
-      <i>Recommended for e.g. tilted valley glaciers with elevation-dependent trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
+   <i>Recommended for e.g. tilted valley glaciers with elevation-dependent trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
-      Combines the SIA slope factor with a 1st-order linear spatial trend:
+   Combines the SIA slope factor with a 1st-order linear spatial trend:
 
-      <p align="center">
-      $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y$$
-      </p>
+   <p align="center">
+   $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y$$
+   </p>
 
-      <i>Recommended for e.g. tilted valley glaciers governed by viscous flow physics and linear spatial trends. Use `interpolation_target`: `"T"`, or `"D"`.</i>
+   <i>Recommended for e.g. tilted valley glaciers governed by viscous flow physics and linear spatial trends. Use `interpolation_target`: `"T"`, or `"D"`.</i>
 
 <a id="depth-uncertainty-derivation"></a>
 #### 7. Depth Uncertainty Derivation in Meters
