@@ -378,7 +378,7 @@ While users can combine any available interpolation options, the following two s
    $$U(x,y) = a_1 X + a_2 Y$$
    </p>
 
-   This models a constant regional spatial gradient across the entire map space—ideal for flow features with a linear regional trend.
+   <i>This models a constant regional spatial gradient across the entire map space—ideal for flow features with a linear regional trend.</i>
 
 - **Quadratic Surface Drift Model (`["quadratic_xy"]`)**:
    Fits a parabolic surface (3D paraboloid, bowl, dome, or saddle) across the $X$ and $Y$ grid axes with curved parabolas, ellipses, or hyperbolas as contour lines:
@@ -387,10 +387,10 @@ While users can combine any available interpolation options, the following two s
    $$U(x,y) = a_1 X + a_2 Y + a_3 X^2 + a_4 Y^2 + a_5 X Y$$
    </p>
 
-   This captures regional spatial bends, ice cap domes, or radial thickness distributions across the entire map space.
+   <i>This captures regional spatial bends, ice cap domes, or radial thickness distributions across the entire map space.</i>
 
 - **Empty Drift Model (`[]`)**:
-   An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.
+   <i>An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.</i>
 
 <br>`PySole` natively supports combining external raster drift models (`["z_dem"]`, `["curvature_dem"]`, or `["sia"]`) with polynomial spatial coordinate trends (`["quadratic_xy"]` or `["linear_xy"]`) into an augmented multi-drift Universal Kriging system.<br>
 <br>`PySole` provides the following **Multi Drift Models**:
