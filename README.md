@@ -317,13 +317,13 @@ $$\mathbf{K} \mathbf{w}_{\text{z}} = \mathbf{z}_{\text{aug}}$$
 where $\mathbf{K}$ is the augmented sample-to-sample covariance/variogram matrix, $\mathbf{z}_{\text{aug}} = [z_1, \dots, z_N, 0, \dots, 0]^\top$ contains the known data points augmented with zero drift constraints, and $\mathbf{w}_{\text{z}} = [\mathbf{w}_{\text{sample}}^\top, \mathbf{w}_{\text{drift}}^\top]^\top = [b_1, \dots, b_N, a_1, \dots, a_L]^\top$ is the single global dual weight vector solved via *Lower-Upper* (LU) matrix decomposition. Once $\mathbf{w}_{\text{z}}$ is computed, spatial interpolation across all target grid nodes simplifies to a single *Basic Linear Algebra Subprograms* (BLAS)-accelerated 1D vector dot product:
 
 <p align="center">
-$$Z_{\text{grid}} = \mathbf{w}_{\text{sample}} \cdot \mathbf{\Gamma}_{\text{grid}} + \mathbf{w}_{\text{drift}} \cdot \mathbf{F}_{\text{grid}}$$
+$$Z_{\text{grid}} = \mathbf{w}_{\text{sample}} \cdot \boldsymbol{\Gamma}_{\text{grid}} + \mathbf{w}_{\text{drift}} \cdot \mathbf{F}_{\text{grid}}$$
 </p>
 
 where:
 - $Z_{\text{grid}}$ is the predicted output value (e.g., bedrock elevation or depth) at target grid node $(x, y)$.
 - $\mathbf{w}_{\text{sample}} = [b_1, \dots, b_N]$ are the solved dual spatial weights for each of the $N$ data points.
-- $\mathbf{\Gamma}_{\text{grid}} = [\gamma(x_1, x_{\text{grid}}), \dots, \gamma(x_N, x_{\text{grid}})]^\top$ is the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each data point and target node $(x, y)$.
+- $\boldsymbol{\Gamma}_{\text{grid}} = [\gamma(x_1, x_{\text{grid}}), \dots, \gamma(x_N, x_{\text{grid}})]^\top$ is the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each data point and target node $(x, y)$.
 - $\mathbf{w}_{\text{drift}} = [a_1, \dots, a_L]$ are the solved dual drift model coefficients.
 - $\mathbf{F}_{\text{grid}}$ is the drift function vector evaluated at target node $(x, y)$ (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
 
