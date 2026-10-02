@@ -1,4 +1,4 @@
-# PySole Drift Analyzer & Unprobed Glacier Survey Planner Guide
+# PySole Drift Analyzer & Survey Planner Guide
 
 `PySole` includes an automated diagnostic helper tool (**Drift Analyzer**) for selecting optimal Universal Kriging single/multi-drift models and a forward **Survey Planner** for designing GPR/Seismic campaigns on unprobed glaciers.
 
