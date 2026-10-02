@@ -347,45 +347,45 @@ While users can combine any available interpolation options, the following two s
 - **Shallow Ice Approximation Physical Drift Model (`["sia"]`)**:
    `PySole` offers the physically-informed custom `"sia"` drift model. Re-arranging the basal shear stress $\tau_{\text{b}}$ for ice depth $D$ yields the inverse relationship between $D(x,y)$ and $\sin(\alpha_{\text{opt}}(x,y))$. Setting the drift term parameter to `["sia"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
 
-   $$
-   U(x,y) = \sin(\alpha_{\text{opt}}(x,y))^{-1}
-   $$
+   <p align="center">
+   $$U(x,y) = \sin(\alpha_{\text{opt}}(x,y))^{-1}$$
+   </p>
 
    Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute $\tau_{\text{b}}$ values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps ultra-low slope angles prior to computing the inverse-sine drift, preventing matrix singularities. Just use it with `interpolation_target`: `"T"`, or `"D"` to avoid double-scaling artifacts .
 
 - **Surface Elevation Drift Model (`["z_dem"]`)**:
    Uses the DEM surface elevation $Z_{\text{dem}}(x,y)$ as a spatial drift variable:
 
-   $$
-   U(x,y) = Z_{\text{dem}}(x,y)
-   $$
+   <p align="center">
+   $$U(x,y) = Z_{\text{dem}}(x,y)$$
+   </p>
 
    This models elevation-dependent thickness pattern—larger depths in lower valley basins/confluence zones, and smaller depths on high-altitude ridges and summits.
 
 - **Surface Curvature Drift Model (`["curvature_dem"]`)**:
    Uses the 2D Laplacian surface curvature $C_{k_c}(x,y)$ derived from the optimal smoothed DEM surface:
 
-   $$
-   C_{k_c}(x,y) = \nabla^2 Z_{\text{smooth, } k_c}(x,y) = \frac{\partial^2 Z}{\partial x^2} + \frac{\partial^2 Z}{\partial y^2}
-   $$
+   <p align="center">
+   $$C_{k_c}(x,y) = \nabla^2 Z_{\text{smooth, } k_c}(x,y) = \frac{\partial^2 Z}{\partial x^2} + \frac{\partial^2 Z}{\partial y^2}$$
+   </p>
 
    This models morphometric terrain curvature—predicting smaller depths at convex peaks and ridges ($\nabla^2 Z < 0$), and larger depths at concave bowls and valleys ($\nabla^2 Z > 0$).
 
 - **Linear Surface Drift Model (`["linear_xy"]`)**:
    Fits a flat, tilted 2D plane across the $X$ and $Y$ grid axes whose contour lines are straight, parallel, and evenly spaced across map space:
 
-   $$
-   U(x,y) = a_1 X + a_2 Y
-   $$
+   <p align="center">
+   $$U(x,y) = a_1 X + a_2 Y$$
+   </p>
 
    This models a constant regional spatial gradient across the entire map space—ideal for flow features with a linear regional trend.
 
 - **Quadratic Surface Drift Model (`["quadratic_xy"]`)**:
    Fits a parabolic surface (3D paraboloid, bowl, dome, or saddle) across the $X$ and $Y$ grid axes with curved parabolas, ellipses, or hyperbolas as contour lines:
 
-   $$
-   U(x,y) = a_1 X + a_2 Y + a_3 X^2 + a_4 Y^2 + a_5 X Y
-   $$
+   <p align="center">
+   $$U(x,y) = a_1 X + a_2 Y + a_3 X^2 + a_4 Y^2 + a_5 X Y$$
+   </p>
 
    This captures regional spatial bends, ice cap domes, or radial thickness distributions across the entire map space.
 
@@ -398,72 +398,72 @@ While users can combine any available interpolation options, the following two s
 - **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
       Combines DEM elevation, surface curvature, and a 2nd-order spatial polynomial:
 
-      $$
-      U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y + a_5 X^2 + a_6 Y^2 + a_7 X Y
-      $$
+      <p align="center">
+      $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y + a_5 X^2 + a_6 Y^2 + a_7 X Y$$
+      </p>
 
       <i>Recommended for more complex viscous flow features where elevation guides regional thickness distribution, surface curvature captures local ridge or basin concavity, and 2D quadratic spatial coordinates capture large-scale regional trend curvature (e.g. the central dome of an ice cap). Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines surface curvature with a 2nd-order spatial polynomial:
 
-      $$
-      U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y
-      $$
+      <p align="center">
+      $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
+      </p>
 
       <i>Recommended for e.g. alpine-type valley glaciers and cirques where terrain concavity/convexity is the primary morphometric indicator of ice thickness. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines DEM surface elevation with a 2nd-order spatial polynomial:
 
-      $$
-      U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y
-      $$
+      <p align="center">
+      $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
+      </p>
 
       <i>Recommended for radial complexes with outlet valleys, where elevation guides the macro-scale dome-to-outlet trend while quadratic space terms capture 2D radial planform geometry. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines the SIA slope factor with a 2nd-order spatial polynomial:
 
-      $$
-      U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y
-      $$
+      <p align="center">
+      $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
+      </p>
 
       <i>Recommended for viscous flow phenomena whose depth is dominated by surface slope and regional 2D spatial coordinate trend curvature. Use `interpolation_target`: `"T"`, or `"D"`.</i>
 
 - **`["z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
       Combines DEM elevation, surface curvature, and a 1st-order linear spatial trend:
 
-      $$
-      U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y
-      $$
+      <p align="center">
+      $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y$$
+      </p>
 
       <i>Recommended for e.g. elongated valley glaciers with elevation and curvature trends overlaid on a linear regional gradient. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines surface curvature with a 1st-order linear spatial trend:
 
-      $$
-      U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y
-      $$
+      <p align="center">
+      $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y$$
+      </p>
 
       <i>Recommended for e.g. cirque glaciers and headwall valleys governed by local morphometric curvature and linear spatial trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["z_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines DEM surface elevation with a 1st-order linear spatial trend:
 
-      $$
-      U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y
-      $$
+      <p align="center">
+      $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y$$
+      </p>
 
       <i>Recommended for e.g. tilted valley glaciers with elevation-dependent trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines the SIA slope factor with a 1st-order linear spatial trend:
 
-      $$
-      U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y
-      $$
+      <p align="center">
+      $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y$$
+      </p>
 
       <i>Recommended for e.g. tilted valley glaciers governed by viscous flow physics and linear spatial trends. Use `interpolation_target`: `"T"`, or `"D"`.</i>
 
@@ -471,15 +471,15 @@ While users can combine any available interpolation options, the following two s
 #### 7. Depth Uncertainty Derivation in Meters
 Kriging interpolation provides uncertainty estimates by variance of the product field $\sigma_{\text{P}}^2(x,y)$ [m$^2$]. The 2D depth estimation variance field $\sigma_{\text{D}}^2(x,y)$ [m$^2$] is obtained via linear error propagation:
 
-$$
-\sigma_{\text{D}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m}^2]
-$$
+<p align="center">
+$$\sigma_{\text{D}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m}^2]$$
+</p>
 
 Taking the square root converts the variance field into the **Kriging Standard Error $\sigma_{\text{D}}(x,y)$ in meters**:
 
-$$
-\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}]
-$$
+<p align="center">
+$$\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}]$$
+</p>
 
 Under Gaussian linear estimation theory, $\pm 1.00 \sigma_{\text{D}}(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96 \sigma_{\text{D}}(x,y)$ represents the 95% confidence margin of error.
 
@@ -487,12 +487,12 @@ Under Gaussian linear estimation theory, $\pm 1.00 \sigma_{\text{D}}(x,y)$ repre
 #### 8. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
 The depth field $D(x,y)$ is obtained by dividing the Kriged product field $P_{\text{D}}(x,y)$ with the optimally smoothed surface slope field $\sin(\alpha_{\text{opt}}(x,y))$. When post-processing DEM spatial smoothing is enabled (`smooth_bedrock: true`), `PySole` applies the spatial smoothing operator $S$ **directly to the ice depth field $D(x,y)$**:
 
-$$
-\begin{aligned}
+<p align="center">
+$$\begin{aligned}
 D_{\text{smooth}}(x,y) &= S(D(x,y)) \\
 Z_{\text{bed}}(x,y) &= Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)
-\end{aligned}
-$$
+\end{aligned}$$
+</p>
 
 Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual ($Z_{\text{surface}} - S(Z_{\text{surface}})$) from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
@@ -500,50 +500,48 @@ Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM 
 #### 9. Conversion of Wavenumber to Wavelength
 In `PySole` 2D lowpass spatial smoothing operates in the discrete frequency domain. Spatial wavenumber components along the orthogonal grid axes $X$ and $Y$ are constructed as:
 
-$$
-\begin{aligned}
+<p align="center">
+$$\begin{aligned}
 k_x &= f_{x,\text{pixel}} \cdot (2\pi \cdot |dx|) \quad [\text{rad}] \\
 k_y &= f_{y,\text{pixel}} \cdot (2\pi \cdot |dy|) \quad [\text{rad}]
-\end{aligned}
-$$
+\end{aligned}$$
+</p>
 
 where $f_{x,\text{pixel}}, f_{y,\text{pixel}} \in [-0.5, +0.5]$ are discrete frequencies in **[cycles / pixel]**, and $dx, dy$ are grid pixel spacings in **[meters / pixel]**.
 
 Because physical spatial frequencies are $f_{x,\text{phys}} = f_{x,\text{pixel}} / dx$ and $f_{y,\text{phys}} = f_{y,\text{pixel}} / dy$ [cycles / m], the physical spatial wavenumbers $k_{x,\text{phys}}, k_{y,\text{phys}}$ [rad / m] relate to the code wavenumbers by:
 
-$$
-\begin{aligned}
+<p align="center">
+$$\begin{aligned}
 k_{x,\text{phys}} &= 2\pi f_{x,\text{phys}} = \frac{k_x}{dx^2} \quad [\text{rad/m}] \\
 k_{y,\text{phys}} &= 2\pi f_{y,\text{phys}} = \frac{k_y}{dy^2} \quad [\text{rad/m}]
-\end{aligned}
-$$
+\end{aligned}$$
+</p>
 
 Thus, the directional physical spatial cutoff wavelengths $\lambda_{\text{c},x}$ and $\lambda_{\text{c},y}$ [meters] corresponding to a corner frequency cutoff $k_{\text{c}}$ are:
 
-$$
-\begin{aligned}
+<p align="center">
+$$\begin{aligned}
 \lambda_{\text{c},x} &= \frac{2\pi}{k_{x,\text{phys}}} = \frac{2\pi \cdot dx^2}{k_{\text{c}}} \quad [\text{m}] \\
 \lambda_{\text{c},y} &= \frac{2\pi}{k_{y,\text{phys}}} = \frac{2\pi \cdot dy^2}{k_{\text{c}}} \quad [\text{m}]
-\end{aligned}
-$$
+\end{aligned}$$
+</p>
 
 The overall 2D effective spatial cutoff wavelength $\lambda_{\text{c,eff}}$ (geometric mean across both coordinate axes) is:
 
-$$
-\lambda_{\text{c,eff}} = \sqrt{\lambda_{\text{c},x} \cdot \lambda_{\text{c},y}} = \frac{2\pi \cdot |dx \cdot dy|}{k_{\text{c}}} = \frac{2\pi \cdot ds^2}{k_{\text{c}}} \quad [\text{meters}]
-$$
+<p align="center">
+$$\lambda_{\text{c,eff}} = \sqrt{\lambda_{\text{c},x} \cdot \lambda_{\text{c},y}} = \frac{2\pi \cdot |dx \cdot dy|}{k_{\text{c}}} = \frac{2\pi \cdot ds^2}{k_{\text{c}}} \quad [\text{meters}]$$
+</p>
 
 where $ds = \sqrt{|dx \cdot dy|}$ represents the effective spatial grid cell resolution (or grid cell area scale $ds^2 = |dx \cdot dy|$).
 
 For example, on an isotropic grid with $dx = dy = 5.0$ m ($ds = 5.0$ m, $ds^2 = 25.0$ m$^2$), an optimal corner frequency $k_{\text{c,opt}} = 0.4000$ corresponds to a physical spatial cutoff wavelength:
 
-$$
-\lambda_{\text{c,opt}} = \frac{2\pi \cdot 25.0}{0.4000} \approx 392.70 \quad [\text{meters}]
-$$
+<p align="center">
+$$\lambda_{\text{c,opt}} = \frac{2\pi \cdot 25.0}{0.4000} \approx 392.70 \quad [\text{meters}]$$
+</p>
 
 This physical cutoff wavelength is reported alongside $k_{\text{c,opt}}$ in the `PySole` logging outputs (`pysole.log`).
-
-This physical cutoff wavelength is reported alongside <i>k</i><sub>c,opt</sub> in the `PySole` logging outputs (`pysole.log`).
 
 ---
 
