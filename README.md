@@ -310,35 +310,35 @@ Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns 
 #### 4. High-Performance Dual Kriging Vector Engine
 `PySole` features a native, numerically optimized geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike standard Kriging implementations (Primal Kriging) that solve node-specific linear systems point-by-point for every target grid node (requiring millions of repetitive matrix inversions across a high-resolution DEM), Dual Kriging solves the global linear system only once for the entire sample observation set:
 
-$$
-\mathbf{K} \mathbf{w}_{\text{z}} = \mathbf{z}_{\text{aug}}
-$$
+<p align="center">
+$$\mathbf{K} \mathbf{w}_{\text{z}} = \mathbf{z}_{\text{aug}}$$
+</p>
 
-where $\mathbf{K}$ is the augmented sample-to-sample covariance/variogram matrix, $\mathbf{z}_{\text{aug}} = [z_1, \dots, z_N, 0, \dots, 0]^{\text{T}}$ contains the known data points augmented with zero drift constraints, and $\mathbf{w}_{\text{z}} = [\mathbf{w}_{\text{sample}}^{\text{T}}, \mathbf{w}_{\text{drift}}^{\text{T}}]^{\text{T}} = [b_1, \dots, b_N, a_1, \dots, a_L]^{\text{T}}$ is the single global dual weight vector solved via *Lower-Upper* (LU) matrix decomposition. Once $\mathbf{w}_{\text{z}}$ is computed, spatial interpolation across all target grid nodes simplifies to a single *Basic Linear Algebra Subprograms* (BLAS)-accelerated 1D vector dot product:
+where $\mathbf{K}$ is the augmented sample-to-sample covariance/variogram matrix, $\mathbf{z}_{\text{aug}} = [z_1, \dots, z_N, 0, \dots, 0]^\top$ contains the known data points augmented with zero drift constraints, and $\mathbf{w}_{\text{z}} = [\mathbf{w}_{\text{sample}}^\top, \mathbf{w}_{\text{drift}}^\top]^\top = [b_1, \dots, b_N, a_1, \dots, a_L]^\top$ is the single global dual weight vector solved via *Lower-Upper* (LU) matrix decomposition. Once $\mathbf{w}_{\text{z}}$ is computed, spatial interpolation across all target grid nodes simplifies to a single *Basic Linear Algebra Subprograms* (BLAS)-accelerated 1D vector dot product:
 
-$$
-Z_{\text{grid}} = \mathbf{w}_{\text{sample}} \cdot \mathbf{\Gamma}_{\text{grid}} + \mathbf{w}_{\text{drift}} \cdot \mathbf{F}_{\text{grid}}
-$$
+<p align="center">
+$$Z_{\text{grid}} = \mathbf{w}_{\text{sample}} \cdot \mathbf{\Gamma}_{\text{grid}} + \mathbf{w}_{\text{drift}} \cdot \mathbf{F}_{\text{grid}}$$
+</p>
 
 where:
-- <i>Z</i><sub>grid</sub> is the predicted output value (e.g., bedrock elevation or depth) at target grid node (<i>x</i>, <i>y</i>).
-- <i>w</i><sub>sample</sub> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>] are the solved dual spatial weights for each of the <i>N</i> data points.
-- <i>Γ</i><sub>grid</sub> = [&gamma;(<i>x</i><sub>1</sub>, <i>x</i><sub>grid</sub>), ..., &gamma;(<i>x</i><sub><i>N</i></sub>, <i>x</i><sub>grid</sub>)]<sup>T</sup> is the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each data point and target node (<i>x</i>, <i>y</i>).
-- <i>w</i><sub>drift</sub> = [<i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>] are the solved dual drift model coefficients.
-- <i>F</i><sub>grid</sub> is the drift function vector evaluated at target node (<i>x</i>, <i>y</i>) (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
+- $Z_{\text{grid}}$ is the predicted output value (e.g., bedrock elevation or depth) at target grid node $(x, y)$.
+- $\mathbf{w}_{\text{sample}} = [b_1, \dots, b_N]$ are the solved dual spatial weights for each of the $N$ data points.
+- $\mathbf{\Gamma}_{\text{grid}} = [\gamma(x_1, x_{\text{grid}}), \dots, \gamma(x_N, x_{\text{grid}})]^\top$ is the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each data point and target node $(x, y)$.
+- $\mathbf{w}_{\text{drift}} = [a_1, \dots, a_L]$ are the solved dual drift model coefficients.
+- $\mathbf{F}_{\text{grid}}$ is the drift function vector evaluated at target node $(x, y)$ (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
 
-To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a small offset (10<sup>−6</sup>) to the main diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
+To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a small offset ($10^{-6}$) to the main diagonal of $\mathbf{K}$, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
 
 <a id="interpolation-strategies"></a>
 #### 5. Robust Baseline Interpolation Strategies
 While users can combine any available interpolation options, the following two strategies are recommended as a robust starting baseline. These are implemented in `PySole` as the default approaches based on the selected target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
 
-- **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field <i>P</i> = <i>T</i> · sin <i>α</i><sub>opt</sub> (pre-migration) or <i>P</i> = <i>D</i> · sin <i>α</i><sub>opt</sub> (post-migration). **Ordinary Kriging** is initially recommended for BSS-derived product targets.
+- **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field $P = T \sin \alpha_{\text{opt}}$ (pre-migration) or $P = D \sin \alpha_{\text{opt}}$ (post-migration). **Ordinary Kriging** is initially recommended for BSS-derived product targets.
 
 > [!CAUTION]
-> Avoid interpolating a BSS-derived product `"P"` with Universal Kriging applying the `"sia"` drift model! This creates a 1/sin<sup>2</sup>(<i>α</i>) double-scaling artifact which leads to implausibly large depths at low slopes and is therefore strongly discouraged.
+> Avoid interpolating a BSS-derived product `"P"` with Universal Kriging applying the `"sia"` drift model! This creates a $1/\sin^2(\alpha)$ double-scaling artifact which leads to implausibly large depths at low slopes and is therefore strongly discouraged.
 
-- **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> (pre-migration) or (migrated) depths <i>D</i><sub>i</sub>. **Universal Kriging** with the `"sia"` physical drift model is initially recommended.
+- **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes $T_i$ (pre-migration) or (migrated) depths $D_i$. **Universal Kriging** with the `"sia"` physical drift model is initially recommended.
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Drift Models
@@ -494,7 +494,7 @@ Z_{\text{bed}}(x,y) &= Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)
 \end{aligned}$$
 </p>
 
-Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual ($Z_{\text{surface}} - S(Z_{\text{surface}})$) from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
+Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual $Z_{\text{surface}} - S(Z_{\text{surface}})$ from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
 #### 9. Conversion of Wavenumber to Wavelength
