@@ -15,6 +15,9 @@ from .interpolation import blend_margin_topography, kriging_interpolation, Krigi
 from .smoothing import compute_gradients, fft_gaussian_smooth, precompute_fft_grid, fft_gaussian_smooth_precomputed
 from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir
 from .logging import logger
+from .drift_analyzer import DriftAnalyzer
+from .survey_planner import SurveyPlanner
+import sys
 
 
 class Solver:
@@ -525,7 +528,51 @@ class Solver:
                 )
         else:
             sample_pts = np.column_stack((points[:, 0], points[:, 1], points[:, val_col]))
-            logger.info(f"   [{pass_name}] Performing Direct {krig_method.capitalize()} Kriging Interpolation for Target '{target_upper}'...")
+        is_pre = "Pass 1" in pass_name
+        pass_cfg = self.config.get("kriging_parameters", {}).get("pre_migration" if is_pre else "post_migration", {})
+        run_analyzer = pass_cfg.get("drift_analyzer", False)
+
+        if krig_method.lower() == "ordinary":
+            if run_analyzer:
+                logger.info("   [INFO] Ordinary Kriging detected: drift_analyzer automatically set to False.")
+            run_analyzer = False
+
+        if run_analyzer:
+            is_batch = getattr(self, "is_batch_mode", False) or not sys.stdin.isatty()
+            if is_batch:
+                logger.info("   [INFO] Non-interactive environment detected (TTY disabled or --batch flag set). Automatically overriding interactive options to False.")
+
+            analyzer = DriftAnalyzer(
+                mode="pre_migration" if is_pre else "post_migration",
+                target_name=self.survey_data_type,
+                interpolation_target=target_upper,
+                include_zero_boundary=zero_boundary,
+                survey_profile_column=self.config.get("inputs", {}).get("survey_profile_column"),
+            )
+
+            a_0 = 100.0
+            if hasattr(self, "opt_variogram_params") and self.opt_variogram_params:
+                a_0 = float(self.opt_variogram_params.get("range", 100.0))
+
+            var_params = {"nugget": 0.0, "sill": 1.0, "range": a_0}
+            alpha_deg = np.degrees(self.opt_slope) if self.opt_slope is not None else np.zeros_like(self.dem_grid)
+
+            diag = analyzer.run_diagnostics(
+                x_pts=points[:, 0],
+                y_pts=points[:, 1],
+                z_values=sample_pts[:, 2],
+                dem_grid=self.dem_grid,
+                dx=self.dx,
+                dy=self.dy,
+                bounds=self.bounds,
+                alpha_opt_deg=alpha_deg,
+                variogram_model=var_model,
+                variogram_params=var_params,
+                interactive=not is_batch,
+            )
+            if diag:
+                drift_terms = diag[0].terms
+                krig_method = "universal"
 
         ext_drifts: dict[str, np.ndarray] = {}
         if drift_terms and "curvature_dem" in drift_terms:
@@ -1098,6 +1145,94 @@ class Solver:
             name="final_bedrock",
         )
 
+    def recommend_drift_model(
+        self,
+        stage: str = "post_migration",
+        interactive: bool = False,
+    ) -> list[Any]:
+        """
+        Runs Universal Kriging Drift Analyzer diagnostics to recommend optimal drift models.
+        """
+        target_name = "traveltime" if stage == "pre_migration" else "depth"
+        stage_prefix = stage.split("_")[0]
+        interp_target = getattr(self, f"{stage_prefix}_interpolation_target", "P")
+        inc_zero = getattr(self, f"{stage_prefix}_zero_boundary", True)
+
+        analyzer = DriftAnalyzer(
+            mode=stage,
+            target_name=target_name,
+            interpolation_target=interp_target,
+            include_zero_boundary=inc_zero,
+            survey_profile_column=self.survey_profile_column,
+        )
+
+        pts = self.migrated_points if (stage == "post_migration" and self.migrated_points is not None) else getattr(self, "pre_kriging_points", None)
+        if pts is None:
+            if stage == "post_migration" and self.migrated_points is not None:
+                pts = self.migrated_points
+            else:
+                pts = np.column_stack((self.dem_grid.ravel(), self.dem_grid.ravel(), np.zeros(self.dem_grid.size)))
+
+        x_pts, y_pts, z_vals = pts[:, 0], pts[:, 1], pts[:, 2]
+        opt_alpha = np.degrees(self.opt_slope) if self.opt_slope is not None else np.zeros_like(self.dem_grid)
+
+        return analyzer.run_diagnostics(
+            x_pts=x_pts,
+            y_pts=y_pts,
+            z_values=z_vals,
+            dem_grid=self.dem_grid,
+            dx=self.dx,
+            dy=self.dy,
+            bounds=self.bounds,
+            alpha_opt_deg=opt_alpha,
+            variogram_model="spherical",
+            variogram_params={"range": 100.0, "sill": 1.0, "nugget": 0.0},
+            interactive=interactive,
+        )
+
+    def plan_survey(
+        self,
+        kc: float = 3.0,
+        tau_0: float = 100e3,
+        max_length_km: float = 10.0,
+        output_prefix: str | None = None,
+        output_dir: str | Path | None = None,
+        plots_dir: str | Path | None = None,
+        output_format: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Executes forward survey planning for unprobed glaciers using synthetic SIA modeling.
+        """
+        cfg = getattr(self, "config", {})
+        outputs = cfg.get("outputs", {})
+
+        prefix = output_prefix or outputs.get("output_prefix", "final")
+        out_d = output_dir or self.output_dir or resolve_output_dir(outputs.get("output_dir"), config_path=self.config_path)
+        plots_d = plots_dir or self.plots_dir
+        fmt = output_format or outputs.get("output_format", "tif")
+        if isinstance(fmt, list):
+            fmt = fmt[0]
+
+        planner = SurveyPlanner(
+            dem=self.dem_grid,
+            outline=self.outline_mask,
+            dx=self.dx,
+            dy=self.dy,
+            bounds=self.bounds,
+            crs=self.meta.get("crs"),
+            ice_density=float(self.config.get("inputs", {}).get("ice_density", 900.0)),
+            g=float(self.config.get("inputs", {}).get("g", 9.81)),
+        )
+        return planner.plan_survey(
+            kc=kc,
+            tau_0=tau_0,
+            max_length_km=max_length_km,
+            output_prefix=prefix,
+            output_dir=out_d,
+            plots_dir=plots_d,
+            output_format=fmt,
+        )
+
     def run_pipeline(
         self,
         survey_data_path: str | Path | os.PathLike | None = None,
@@ -1127,7 +1262,9 @@ class Solver:
 
         survey_data_path = self.survey_data_path or inputs.get("survey_data_path")
         if not survey_data_path:
-            raise ValueError("Survey data path must be specified via survey_data_path parameter or configuration 'inputs.survey_data_path'.")
+            logger.info("[INFO] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
+            res = self.plan_survey()
+            return BedrockMap(grid=res["d_sia"], bounds=self.bounds, crs=self.meta.get("crs"), transform=self.meta.get("transform"), name="sia_modelled_depth")
 
         cfg_name = getattr(self, "config_path", "pysole.json")
         logger.info("================================================================================")

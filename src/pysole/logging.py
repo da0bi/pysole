@@ -5,8 +5,18 @@ Provides centralized logging to both console (stdout) and a log file (default: p
 
 import logging
 from pathlib import Path
-import sys
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable=None, total=None, desc="", unit="", ascii=None, bar_format=None, disable=False, leave=True):
+        if iterable is not None:
+            return iterable
+        class DummyBar:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def update(self, n=1): pass
+            def set_description(self, desc=None): pass
+        return DummyBar()
 
 # Global PySole logger
 logger = logging.getLogger("pysole")

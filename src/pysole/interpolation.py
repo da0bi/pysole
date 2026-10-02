@@ -782,3 +782,164 @@ def random_forest_hole_filling(
 
     filled_bedrock = np.minimum(filled_bedrock, dem)
     return filled_bedrock
+
+
+def get_drift_functions(drift_terms: list[str]) -> list[Any]:
+    """
+    Returns spatial drift basis functions for given drift term keywords.
+    Each function has signature fn(x_pts, y_pts, dem_grid, dx, dy, bounds, alpha_opt_deg).
+    """
+    funcs = []
+    terms_set = set(drift_terms)
+
+    if "linear_xy" in terms_set or "x" in terms_set:
+        funcs.append(lambda x, y, dem, dx, dy, b, a: (x - np.mean(x)) / max(np.ptp(x), 1.0))
+    if "linear_xy" in terms_set or "y" in terms_set:
+        funcs.append(lambda x, y, dem, dx, dy, b, a: (y - np.mean(y)) / max(np.ptp(y), 1.0))
+    if "quadratic_xy" in terms_set:
+        funcs.append(lambda x, y, dem, dx, dy, b, a: ((x - np.mean(x)) / max(np.ptp(x), 1.0))**2)
+        funcs.append(lambda x, y, dem, dx, dy, b, a: ((y - np.mean(y)) / max(np.ptp(y), 1.0))**2)
+        funcs.append(lambda x, y, dem, dx, dy, b, a: ((x - np.mean(x)) / max(np.ptp(x), 1.0)) * ((y - np.mean(y)) / max(np.ptp(y), 1.0)))
+    if any(t in terms_set for t in ["z_dem", "sia_z_dem", "sia_z_dem_curvature", "full_physical", "full_spatial_physical"]):
+        def eval_z_dem(x, y, dem, dx, dy, b, a):
+            if dem is None or b is None:
+                return np.zeros_like(x)
+            minx, miny, maxx, maxy = b
+            M, N = dem.shape
+            cols = np.clip(((x - minx) / dx).astype(int), 0, N - 1)
+            rows = np.clip(((maxy - y) / dy).astype(int), 0, M - 1)
+            vals = dem[rows, cols]
+            return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
+        funcs.append(eval_z_dem)
+    if any(t in terms_set for t in ["sia", "sia_space", "sia_z_dem", "sia_curvature", "sia_z_dem_curvature", "full_physical", "full_spatial_physical"]):
+        def eval_sia(x, y, dem, dx, dy, b, a):
+            if a is None or dem is None or b is None:
+                return np.zeros_like(x)
+            minx, miny, maxx, maxy = b
+            M, N = dem.shape
+            cols = np.clip(((x - minx) / dx).astype(int), 0, N - 1)
+            rows = np.clip(((maxy - y) / dy).astype(int), 0, M - 1)
+            a_pts = a[rows, cols]
+            sin_a = np.sin(np.radians(np.maximum(a_pts, 1.0)))
+            vals = 1.0 / np.maximum(sin_a, 1e-3)
+            return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
+        funcs.append(eval_sia)
+
+    if not funcs:
+        funcs.append(lambda x, y, dem, dx, dy, b, a: (x - np.mean(x)) / max(np.ptp(x), 1.0))
+
+    return funcs
+
+
+class DualKrigingSolver:
+    """
+    Fast Dual Kriging solver used for point validation in DriftAnalyzer cross-validation.
+    """
+    def __init__(
+        self,
+        x_pts: np.ndarray,
+        y_pts: np.ndarray,
+        z_pts: np.ndarray,
+        variogram_model: str = "spherical",
+        nugget: float = 0.0,
+        sill: float = 1.0,
+        range_param: float = 100.0,
+        drift_terms: list[str] | None = None,
+    ):
+        self.x_pts = np.asarray(x_pts, dtype=np.float64)
+        self.y_pts = np.asarray(y_pts, dtype=np.float64)
+        self.z_pts = np.asarray(z_pts, dtype=np.float64)
+        self.variogram_model = str(variogram_model).lower()
+        self.nugget = float(nugget)
+        self.sill = float(sill) if sill > 0 else 1.0
+        self.range_param = float(range_param) if range_param > 0 else 100.0
+        self.drift_terms = drift_terms or []
+
+        N = len(self.x_pts)
+        pts_xy = np.column_stack((self.x_pts, self.y_pts))
+        dists = cdist(pts_xy, pts_xy)
+
+        if "exp" in self.variogram_model:
+            K = self.nugget + self.sill * (1.0 - np.exp(-3.0 * dists / max(self.range_param, 1e-6)))
+        elif "gauss" in self.variogram_model:
+            K = self.nugget + self.sill * (1.0 - np.exp(-3.0 * (dists / max(self.range_param, 1e-6))**2))
+        elif "lin" in self.variogram_model:
+            K = self.nugget + self.sill * np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
+        else:
+            h_ratio = np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
+            gamma = self.sill * (1.5 * h_ratio - 0.5 * (h_ratio**3))
+            gamma[dists > self.range_param] = self.sill
+            K = self.nugget + gamma
+
+        np.fill_diagonal(K, 0.0)
+
+        F_list = [np.ones((N, 1))]
+        if "linear_xy" in self.drift_terms or "quadratic_xy" in self.drift_terms:
+            x_norm = (self.x_pts - np.mean(self.x_pts)) / max(np.ptp(self.x_pts), 1.0)
+            y_norm = (self.y_pts - np.mean(self.y_pts)) / max(np.ptp(self.y_pts), 1.0)
+            F_list.extend([x_norm.reshape(-1, 1), y_norm.reshape(-1, 1)])
+            if "quadratic_xy" in self.drift_terms:
+                F_list.extend([(x_norm**2).reshape(-1, 1), (y_norm**2).reshape(-1, 1), (x_norm*y_norm).reshape(-1, 1)])
+
+        F = np.hstack(F_list)
+        n_drift = F.shape[1]
+
+        A = np.zeros((N + n_drift, N + n_drift))
+        A[:N, :N] = K + np.eye(N) * 1e-8
+        A[:N, N:] = F
+        A[N:, :N] = F.T
+
+        rhs = np.zeros(N + n_drift)
+        rhs[:N] = self.z_pts
+
+        try:
+            sol = np.linalg.solve(A, rhs)
+            self.b = sol[:N]
+            self.a = sol[N:]
+            self.success = True
+        except Exception:
+            self.success = False
+
+    def predict(
+        self,
+        x_val: np.ndarray,
+        y_val: np.ndarray,
+        dem_grid: np.ndarray | None = None,
+        dx: float = 5.0,
+        dy: float = 5.0,
+        bounds: tuple[float, float, float, float] | None = None,
+        alpha_opt_deg: np.ndarray | None = None,
+    ) -> np.ndarray:
+        if not self.success:
+            return np.full_like(x_val, np.nan)
+
+        x_val = np.asarray(x_val, dtype=np.float64)
+        y_val = np.asarray(y_val, dtype=np.float64)
+        N_val = len(x_val)
+
+        val_xy = np.column_stack((x_val, y_val))
+        pts_xy = np.column_stack((self.x_pts, self.y_pts))
+        dists = cdist(val_xy, pts_xy)
+
+        if "exp" in self.variogram_model:
+            K_val = self.nugget + self.sill * (1.0 - np.exp(-3.0 * dists / max(self.range_param, 1e-6)))
+        elif "gauss" in self.variogram_model:
+            K_val = self.nugget + self.sill * (1.0 - np.exp(-3.0 * (dists / max(self.range_param, 1e-6))**2))
+        elif "lin" in self.variogram_model:
+            K_val = self.nugget + self.sill * np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
+        else:
+            h_ratio = np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
+            gamma = self.sill * (1.5 * h_ratio - 0.5 * (h_ratio**3))
+            gamma[dists > self.range_param] = self.sill
+            K_val = self.nugget + gamma
+
+        F_list = [np.ones((N_val, 1))]
+        if "linear_xy" in self.drift_terms or "quadratic_xy" in self.drift_terms:
+            x_norm = (x_val - np.mean(self.x_pts)) / max(np.ptp(self.x_pts), 1.0)
+            y_norm = (y_val - np.mean(self.y_pts)) / max(np.ptp(self.y_pts), 1.0)
+            F_list.extend([x_norm.reshape(-1, 1), y_norm.reshape(-1, 1)])
+            if "quadratic_xy" in self.drift_terms:
+                F_list.extend([(x_norm**2).reshape(-1, 1), (y_norm**2).reshape(-1, 1), (x_norm*y_norm).reshape(-1, 1)])
+
+        F_val = np.hstack(F_list)
+        return K_val @ self.b + F_val @ self.a

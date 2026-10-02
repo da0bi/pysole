@@ -60,6 +60,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "outline_path": None,
         "survey_data_path": None,
         "survey_data_type": "one_way_traveltime",
+        "survey_profile_column": None,
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,
@@ -91,6 +92,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "pre_migration": {
             "interpolation_target": "P",
             "method": "ordinary",
+            "drift_analyzer": False,
             "drift_terms": [],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": True,
@@ -98,6 +100,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "post_migration": {
             "interpolation_target": "P",
             "method": "ordinary",
+            "drift_analyzer": False,
             "drift_terms": [],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": True,
@@ -357,6 +360,41 @@ def main_cli() -> None:
         version=f"PySole {__version__}",
         help="Show PySole package version and exit.",
     )
+    parser.add_argument(
+        "--batch",
+        "--non-interactive",
+        dest="batch",
+        action="store_true",
+        help="Runs PySole in batch mode, automatically disabling all interactive prompts.",
+    )
+    parser.add_argument(
+        "--drift-analyzer",
+        dest="drift_analyzer",
+        action="store_true",
+        help="Enables the interactive Drift Analyzer helper tool.",
+    )
+    parser.add_argument(
+        "--profile-col",
+        dest="survey_profile_column",
+        type=str,
+        default=None,
+        metavar="SURVEY_PROFILE_COLUMN",
+        help="Specifies the survey profile column name in the survey dataset CSV.",
+    )
+
+    # Subparsers for plan-survey CLI
+    subparsers = parser.add_subparsers(dest="subcommand", help="Optional subcommands.")
+    plan_parser = subparsers.add_parser("plan-survey", help="Run the unprobed glacier survey planner.")
+    plan_parser.add_argument("--dem", required=True, help="Path to surface DEM raster.")
+    plan_parser.add_argument("--outline", default=None, help="Path to glacier boundary outline.")
+    plan_parser.add_argument("--kc", type=float, default=3.0, help="DEM smoothing parameter k_c.")
+    plan_parser.add_argument("--tau", type=float, default=100.0, help="Target basal shear stress tau_0 in kPa.")
+    plan_parser.add_argument("--max-km", type=float, default=10.0, help="Maximum total survey length budget in km.")
+    plan_parser.add_argument("--prefix", default="final", help="Output prefix.")
+    plan_parser.add_argument("--out-dir", default=None, help="Output directory.")
+    plan_parser.add_argument("--plots-dir", default=None, help="Plots output directory.")
+    plan_parser.add_argument("--format", default="tif", help="Output raster format (tif, asc).")
+
     args = parser.parse_args()
 
     if args.init:
@@ -365,5 +403,33 @@ def main_cli() -> None:
         logger.info(f"Created template configuration file at: {target}")
         sys.exit(0)
 
+    if args.subcommand == "plan-survey":
+        from .survey_planner import SurveyPlanner
+        planner = SurveyPlanner(dem=args.dem, outline=args.outline)
+        planner.plan_survey(
+            kc=args.kc,
+            tau_0=args.tau * 1000.0,
+            max_length_km=args.max_km,
+            output_prefix=args.prefix,
+            output_dir=args.out_dir,
+            plots_dir=args.plots_dir,
+            output_format=args.format,
+        )
+        sys.exit(0)
+
     log_level = "DEBUG" if args.debug else None
-    run_from_config(args.config, log_level=log_level)
+    from .solver import Solver
+    solver = Solver.from_config(args.config, log_level=log_level)
+
+    # CLI Overrides
+    if args.batch:
+        solver.is_batch_mode = True
+    if args.drift_analyzer:
+        if "pre_migration" in solver.config.get("kriging_parameters", {}):
+            solver.config["kriging_parameters"]["pre_migration"]["drift_analyzer"] = True
+        if "post_migration" in solver.config.get("kriging_parameters", {}):
+            solver.config["kriging_parameters"]["post_migration"]["drift_analyzer"] = True
+    if args.survey_profile_column:
+        solver.config.get("inputs", {})["survey_profile_column"] = args.survey_profile_column
+
+    solver.run_pipeline()

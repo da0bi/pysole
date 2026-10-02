@@ -4,6 +4,7 @@
         "outline_path": "input_data/wuk_unten_xyz_rand.csv",
         "survey_data_path": "input_data/Wuk_unten_EisdickePicks_2002.csv",
         "survey_data_type": "one_way_traveltime",
+        "survey_profile_column": null,
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,
@@ -35,6 +36,7 @@
         "pre_migration": {
             "interpolation_target": "P",
             "method": "ordinary",
+            "drift_analyzer": false,
             "drift_terms": [],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true
@@ -42,6 +44,7 @@
         "post_migration": {
             "interpolation_target": "P",
             "method": "ordinary",
+            "drift_analyzer": false,
             "drift_terms": [],
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true
