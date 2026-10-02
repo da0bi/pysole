@@ -97,9 +97,9 @@ class TestSurveyPlanner(unittest.TestCase):
             with open(config_file, "w") as f:
                 json.dump(config, f)
 
-            solver = pysole.Solver(config_file=config_file)
+            solver = pysole.Solver.from_config(config_file)
             res = solver.run_pipeline()
-            self.assertIsInstance(res, dict)
+            self.assertIsInstance(res, pysole.BedrockMap)
             self.assertTrue(os.path.exists(os.path.join(tmp_dir, "unprobed_wuk_sia_modelled_depth.tif")))
             self.assertTrue(os.path.exists(os.path.join(tmp_dir, "unprobed_wuk_survey_plan.gpx")))
             self.assertTrue(os.path.exists(os.path.join(tmp_dir, "unprobed_wuk_survey_plan.geojson")))

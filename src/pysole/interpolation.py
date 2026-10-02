@@ -800,7 +800,7 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
         funcs.append(lambda x, y, dem, dx, dy, b, a: ((x - np.mean(x)) / max(np.ptp(x), 1.0))**2)
         funcs.append(lambda x, y, dem, dx, dy, b, a: ((y - np.mean(y)) / max(np.ptp(y), 1.0))**2)
         funcs.append(lambda x, y, dem, dx, dy, b, a: ((x - np.mean(x)) / max(np.ptp(x), 1.0)) * ((y - np.mean(y)) / max(np.ptp(y), 1.0)))
-    if any(t in terms_set for t in ["z_dem", "sia_z_dem", "sia_z_dem_curvature", "full_physical", "full_spatial_physical"]):
+    if any(t in terms_set for t in ["z_dem", "sia_z_dem", "sia_z_dem_curvature_dem", "z_dem_curvature_dem", "full_physical", "full_spatial_physical"]):
         def eval_z_dem(x, y, dem, dx, dy, b, a):
             if dem is None or b is None:
                 return np.zeros_like(x)
@@ -811,7 +811,7 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
             vals = dem[rows, cols]
             return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
         funcs.append(eval_z_dem)
-    if any(t in terms_set for t in ["sia", "sia_space", "sia_z_dem", "sia_curvature", "sia_z_dem_curvature", "full_physical", "full_spatial_physical"]):
+    if any(t in terms_set for t in ["sia", "sia_space", "sia_z_dem", "sia_curvature_dem", "sia_z_dem_curvature_dem", "full_physical", "full_spatial_physical"]):
         def eval_sia(x, y, dem, dx, dy, b, a):
             if a is None or dem is None or b is None:
                 return np.zeros_like(x)
@@ -824,6 +824,19 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
             vals = 1.0 / np.maximum(sin_a, 1e-3)
             return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
         funcs.append(eval_sia)
+    if any(t in terms_set for t in ["curvature_dem", "sia_curvature_dem", "z_dem_curvature_dem", "sia_z_dem_curvature_dem", "full_physical", "full_spatial_physical"]):
+        def eval_curvature_dem(x, y, dem, dx, dy, b, a):
+            if dem is None or b is None:
+                return np.zeros_like(x)
+            from .smoothing import compute_surface_curvature
+            curvature = compute_surface_curvature(dem, dx=dx, dy=dy)
+            minx, miny, maxx, maxy = b
+            M, N = dem.shape
+            cols = np.clip(((x - minx) / dx).astype(int), 0, N - 1)
+            rows = np.clip(((maxy - y) / dy).astype(int), 0, M - 1)
+            vals = curvature[rows, cols]
+            return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
+        funcs.append(eval_curvature_dem)
 
     if not funcs:
         funcs.append(lambda x, y, dem, dx, dy, b, a: (x - np.mean(x)) / max(np.ptp(x), 1.0))

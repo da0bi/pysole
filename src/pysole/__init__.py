@@ -8,11 +8,13 @@ from .migration import migrate_eikonal_points, EikonalMigrator, MigrationResult
 from .smoothing import compute_gradients, fft_gaussian_smooth
 from .variogram import optimize_bss_variance, calculate_variogram, fit_variogram_model, BSSOptimizer, OptimizationResult
 from .interpolation import blend_margin_topography, kriging_interpolation, random_forest_hole_filling, KrigingEngine, BedrockFinalizer, KrigingResult
+from .drift_analyzer import DriftAnalyzer
+from .survey_planner import SurveyPlanner
 from .config import run_from_config, load_config, main_cli, OutputsConfig
 from .logging import logger, setup_logging
 from . import plotting
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 
 __all__ = [
     "Solver",
@@ -38,6 +40,8 @@ __all__ = [
     "KrigingResult",
     "random_forest_hole_filling",
     "BedrockFinalizer",
+    "DriftAnalyzer",
+    "SurveyPlanner",
     "run_from_config",
     "load_config",
     "OutputsConfig",

@@ -5,6 +5,7 @@ Provides centralized logging to both console (stdout) and a log file (default: p
 
 import logging
 from pathlib import Path
+import sys
 try:
     from tqdm import tqdm
 except ImportError:

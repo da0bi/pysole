@@ -62,9 +62,9 @@ class SurveyPlanner:
         Computes synthetic SIA ice thickness grid D_SIA(x,y) [m].
         """
         # Smooth surface DEM
-        smoothed_dem = fft_gaussian_smooth(self.dem, self.dx, self.dy, kc)
-        dz_dx, dz_dy = compute_gradients(smoothed_dem, self.dx, self.dy)
-        slope_rad = np.arctan(np.hypot(dz_dx, dz_dy))
+        smoothed_dem, _, _ = fft_gaussian_smooth(self.dem, self.dx, self.dy, kc)
+        grads = compute_gradients(smoothed_dem, self.dx, self.dy)
+        slope_rad = grads["slope_rad"]
         slope_floor_rad = np.radians(slope_floor_deg)
         slope_clamped = np.maximum(slope_rad, slope_floor_rad)
 
@@ -235,8 +235,9 @@ class SurveyPlanner:
         saved_gpx = self.export_gpx(tracks, gpx_path)
         logger.info(f"4. Saved planned survey tracks to: {saved_geojson} & {saved_gpx}")
 
-        # Render & save plot: <plots_dir>/<output_prefix>_survey_plan_map.png
-        plot_path = fig_dir / f"{output_prefix}_survey_plan_map.png"
+        # Render & save plot: <plots_dir>/<output_prefix_name>_survey_plan_map.png
+        file_prefix = Path(output_prefix).name
+        plot_path = fig_dir / f"{file_prefix}_survey_plan_map.png"
         fig, ax = plt.subplots(figsize=(10, 8))
         im = ax.imshow(
             d_sia,
@@ -262,6 +263,7 @@ class SurveyPlanner:
 
         return {
             "d_sia": d_sia,
+            "sia_grid": d_sia,
             "tracks": tracks,
             "saved_raster": saved_raster,
             "saved_geojson": saved_geojson,

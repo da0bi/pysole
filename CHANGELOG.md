@@ -5,6 +5,34 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-02
+
+### Added
+- **Universal Kriging Drift Analyzer (`src/pysole/drift_analyzer.py`)**:
+  - Implemented automated recommendation and diagnostic engine for single and multi-drift Universal Kriging models (`sia`, `z_dem`, `curvature_dem`, `linear_xy`, `quadratic_xy`, and compound physical combinations).
+  - Added Variance Inflation Factor (VIF) auditing to detect and penalize multicollinear drift vectors.
+  - Integrated linear Pearson correlation screening and Random Forest Permutation Feature Importance calculation.
+  - Implemented Spatial Cross-Validation: automatically executes **Leave-One-Profile-Out (LOPO-CV)** when `inputs.survey_profile_column` is provided ($N_{\text{profiles}} \ge 3$), with fallback to **Spatial Buffer LOOCV** with spatial exclusion prompt in **meters** based on pre-fitted variogram range $a_0$.
+  - Implemented glaciological safeguard warnings when SIA slope drift is evaluated on product targets $P(x,y)$ to prevent $1/\sin^2\alpha$ double-scaling margin artifacts.
+  - Added terminal ranking table sorted by AICc/RMSE and interactive drift selection prompt.
+- **Forward Unprobed Glacier Survey Planner (`src/pysole/survey_planner.py`)**:
+  - Implemented forward survey campaign design mode, automatically dispatched when `dem_path` and `outline_path` are defined without `survey_data_path`.
+  - Calculates synthetic Shallow Ice Approximation (SIA) ice thickness grid $D_{\text{SIA}}(x,y) = \frac{\tau_0}{\rho g \sin \bar{\alpha}_{\text{opt}}}$.
+  - Generates optimal longitudinal central flowline tracks and transverse cross-profile tracks subject to maximum track length budget $L_{\text{max}}$.
+  - Exports synthetic SIA raster map `<output_prefix>_sia_modelled_depth.<ext>`, vector tracks `<output_prefix>_survey_plan.gpx` and `<output_prefix>_survey_plan.geojson`, and diagnostic map plot `<plots_dir>/<output_prefix>_survey_plan_map.png`.
+- **Non-Interactive Batch Execution & CLI Enhancements**:
+  - Added `--batch` / `--non-interactive` CLI flags to automatically disable interactive terminal prompts when running PySole in batch processing scripts or non-TTY environments (`not sys.stdin.isatty()`).
+  - Added `--drift-analyzer` and `--profile-col` CLI parameters to `main_cli()`.
+  - Added `plan-survey` CLI subcommand for standalone campaign planning.
+  - Implemented Ordinary Kriging override rule: setting `method: "ordinary"` automatically forces `drift_analyzer = false`.
+- **Documentation & Test Suite**:
+  - Added detailed User Guide and documentation manual in [`docs/drift_analyzer.md`](file:///home/db/Software/pysole/docs/drift_analyzer.md).
+  - Updated JSON configuration templates ([`pysole.json`](file:///home/db/Software/pysole/pysole.json), [`examples/gok/pysole_gok.json`](file:///home/db/Software/pysole/examples/gok/pysole_gok.json), [`examples/wuk/pysole_wuk.json`](file:///home/db/Software/pysole/examples/wuk/pysole_wuk.json)) with `"survey_profile_column"` and `"drift_analyzer"`.
+  - Updated [`README.md`](file:///home/db/Software/pysole/README.md) key features, JSON configuration snippet, and Parameter Reference table.
+  - Created dedicated unit test suites in [`tests/test_drift_analyzer.py`](file:///home/db/Software/pysole/tests/test_drift_analyzer.py) and [`tests/test_survey_planner.py`](file:///home/db/Software/pysole/tests/test_survey_planner.py).
+
+---
+
 ## [0.3.2] - 2026-10-01
 
 ### Added

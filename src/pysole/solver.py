@@ -186,6 +186,7 @@ class Solver:
         self.final_grid: np.ndarray | None = None
         self.config: dict[str, Any] = {}
         self.config_path: str | None = None
+        self.survey_profile_column: str | None = None
 
     @property
     def traveltime_grid(self) -> np.ndarray | None:
@@ -1163,7 +1164,7 @@ class Solver:
             target_name=target_name,
             interpolation_target=interp_target,
             include_zero_boundary=inc_zero,
-            survey_profile_column=self.survey_profile_column,
+            survey_profile_column=getattr(self, "survey_profile_column", None),
         )
 
         pts = self.migrated_points if (stage == "post_migration" and self.migrated_points is not None) else getattr(self, "pre_kriging_points", None)
