@@ -345,39 +345,41 @@ While users can combine any available interpolation options, the following two s
 `PySole` provides the following **Single Drift Models**:
 
 - **Shallow Ice Approximation Physical Drift Model (`["sia"]`)**:
-   `PySole` offers the physically-informed custom `"sia"` drift model. Re-arranging the basal shear stress <i>τ</i><sub>b</sub> for ice depth <i>D</i> yields the inverse relationship between <i>D</i>(<i>x</i>,<i>y</i>) and sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)). Setting the drift term parameter to `["sia"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
+   `PySole` offers the physically-informed custom `"sia"` drift model. Re-arranging the basal shear stress $\tau_{\text{b}}$ for ice depth $D$ yields the inverse relationship between $D(x,y)$ and $\sin(\alpha_{\text{opt}}(x,y))$. Setting the drift term parameter to `["sia"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
 
    <p align="center">
-     <i>D</i> &prop; sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup>
+     $$U(x,y) = \sin(\alpha_{\text{opt}}(x,y))^{-1}$$
    </p>
 
-   Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute <i>τ</i><sub>b</sub> values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps ultra-low slope angles prior to computing the inverse-sine drift, preventing matrix singularities.
+   Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute $\tau_{\text{b}}$ values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps ultra-low slope angles prior to computing the inverse-sine drift, preventing matrix singularities. Just use it with `interpolation_target`: `"T"`, or `"D"` to avoid double-scaling artifacts .
 
 - **Surface Elevation Drift Model (`["z_dem"]`)**:
-   Uses the DEM surface elevation <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>) as a spatial drift variable:
+   Uses the DEM surface elevation $Z_{\text{dem}}(x,y)$ as a spatial drift variable:
    <p align="center">
-     <i>U</i>(<i>x</i>,<i>y</i>) = <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>)
+     $$U(x,y) = Z_{\text{dem}}(x,y)$$
    </p>
-   This models the glaciological elevation-dependent ice thickness pattern (thicker ice in lower valley basins/confluences, thinner ice on high-altitude ridges) without relying on surface slope angles.
+   This models the glaciological elevation-dependent ice thickness pattern—thicker ice in lower valley basins/confluence zones, and thinner ice on high-altitude ridges and summits.
 
 - **Surface Curvature Drift Model (`["curvature_dem"]`)**:
-   Uses the 2D Laplacian surface curvature $$C_{k_c}(x,y)$$ derived from the optimal smoothed DEM surface:
+   Uses the 2D Laplacian surface curvature $C_{k_c}(x,y)$ derived from the optimal smoothed DEM surface:
    <p align="center">
      $$C_{k_c}(x,y) = \nabla^2 Z_{\text{smooth, } k_c}(x,y) = \frac{\partial^2 Z}{\partial x^2} + \frac{\partial^2 Z}{\partial y^2}$$
    </p>
-   This models morphometric terrain curvature (convex peaks and ridges vs. concave bowls and valleys), serving as a powerful physical drift variable for modeling viscous flow dynamics.
+   This models morphometric terrain curvature—predicting smaller depths at convex peaks and ridges ($\nabla^2 Z < 0$), and larger depths at concave bowls and valleys ($\nabla^2 Z > 0$).
 
 - **Linear Surface Drift Model (`["linear_xy"]`)**:
-   Fits a 1st-order bivariate spatial coordinate trend surface across the <i>X</i> and <i>Y</i> grid axes:
+   Fits a flat, tilted 2D plane across the $X$ and $Y$ grid axes whose contour lines are straight, parallel, and evenly spaced across map space:
    <p align="center">
-     <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>X</i> + <i>a</i><sub>2</sub> <i>Y</i>
+     $$U(x,y) = a_1 X + a_2 Y$$
    </p>
+   This models a constant regional spatial gradient across the entire map space—ideal for flow features with a linear regional trend.
 
 - **Quadratic Surface Drift Model (`["quadratic_xy"]`)**:
-   Fits a 2nd-order bivariate polynomial trend surface across <i>X</i> and <i>Y</i> coordinates:
+   Fits a parabolic surface (3D paraboloid, bowl, dome, or saddle) across the $X$ and $Y$ grid axes with curved parabolas, ellipses, or hyperbolas as contour lines:
    <p align="center">
-     <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>X</i> + <i>a</i><sub>2</sub> <i>Y</i> + <i>a</i><sub>3</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>4</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>X Y</i>
+     $$U(x,y) = a_1 X + a_2 Y + a_3 X^2 + a_4 Y^2 + a_5 X Y$$
    </p>
+   This captures regional spatial bends, ice cap domes, or radial thickness distributions across the entire map space.
 
 - **Empty Drift Model (`[]`)**:
    An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.
@@ -388,56 +390,56 @@ While users can combine any available interpolation options, the following two s
 - **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
       Combines DEM elevation, surface curvature, and a 2nd-order spatial polynomial:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub> + <i>a</i><sub>2</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub> + <i>a</i><sub>3</sub> <i>X</i> + <i>a</i><sub>4</sub> <i>Y</i> + <i>a</i><sub>5</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>7</sub> <i>X Y</i>
+        $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y + a_5 X^2 + a_6 Y^2 + a_7 X Y$$
       </p>
       <i>Recommended for complex glaciated catchments where elevation guides regional ice distribution, surface curvature captures local ridge or basin concavity, and 2D quadratic spatial coordinates capture large-scale regional trend curvature (e.g. the central dome of an ice cap). Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines surface curvature with a 2nd-order spatial polynomial:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
+        $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
       </p>
       <i>Recommended for alpine-type valley glaciers and cirques where terrain concavity/convexity is the primary morphometric indicator of ice thickness. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines DEM surface elevation with a 2nd-order spatial polynomial:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
+        $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
       </p>
       <i>Recommended for radial complexes with outlet valleys, where elevation guides the macro-scale dome-to-outlet trend while quadratic space terms capture 2D radial planform geometry. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
       Combines the SIA slope factor with a 2nd-order spatial polynomial:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup> + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i> + <i>a</i><sub>4</sub> <i>X</i><sup>2</sup> + <i>a</i><sub>5</sub> <i>Y</i><sup>2</sup> + <i>a</i><sub>6</sub> <i>X Y</i>
+        $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
       </p>
       <i>Recommended for complex glaciated terrains with a viscous flow dominated surface and regional 2D spatial coordinate trend curvature. Use `interpolation_target`: `"T"`, or `"D"`.</i>
 
 - **`["z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
       Combines DEM elevation, surface curvature, and a 1st-order linear spatial trend:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub> + <i>a</i><sub>2</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub> + <i>a</i><sub>3</sub> <i>X</i> + <i>a</i><sub>4</sub> <i>Y</i>
+        $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y$$
       </p>
       <i>Recommended for elongated valley glaciers with elevation and curvature trends overlaid on a linear regional gradient. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines surface curvature with a 1st-order linear spatial trend:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> &nabla;<sup>2</sup> <i>Z</i><sub>smooth</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
+        $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y$$
       </p>
       <i>Recommended for cirque glaciers and headwall valleys governed by local morphometric curvature and linear spatial trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["z_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines DEM surface elevation with a 1st-order linear spatial trend:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>) + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
+        $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y$$
       </p>
       <i>Recommended for tilted valley glaciers with elevation-dependent trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
 
 - **`["sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
       Combines the SIA slope factor with a 1st-order linear spatial trend:
       <p align="center">
-        <i>U</i>(<i>x</i>,<i>y</i>) = <i>a</i><sub>1</sub> sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>))<sup>-1</sup> + <i>a</i><sub>2</sub> <i>X</i> + <i>a</i><sub>3</sub> <i>Y</i>
+        $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y$$
       </p>
       <i>Recommended for tilted valley glaciers governed by viscous flow physics and linear spatial trends. Use `interpolation_target`: `"T"`, or `"D"`.</i>
 
