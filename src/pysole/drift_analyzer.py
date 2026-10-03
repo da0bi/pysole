@@ -127,11 +127,14 @@ class DriftAnalyzer:
             rf_importances = np.zeros(len(feature_cols))
 
         for idx, col in enumerate(feature_cols):
-            # Compute Pearson correlation
-            corr, _ = stats.pearsonr(covariates_df[col].values, target_values)
+            # Compute Pearson linear correlation
+            p_corr, _ = stats.pearsonr(covariates_df[col].values, target_values)
+            # Compute Spearman rank correlation
+            s_rho, _ = stats.spearmanr(covariates_df[col].values, target_values)
             results.append({
                 "feature": col,
-                "pearson_corr": corr if not np.isnan(corr) else 0.0,
+                "pearson_corr": p_corr if not np.isnan(p_corr) else 0.0,
+                "spearman_rho": s_rho if not np.isnan(s_rho) else 0.0,
                 "rf_importance": rf_importances[idx] if idx < len(rf_importances) else 0.0,
             })
 

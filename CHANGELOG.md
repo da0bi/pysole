@@ -5,13 +5,13 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-10-02
+## [0.4.0] - 2026-10-03
 
 ### Added
 - **Universal Kriging Drift Analyzer (`src/pysole/drift_analyzer.py`)**:
   - Implemented automated recommendation and diagnostic engine for single and multi-drift Universal Kriging models (`sia`, `z_dem`, `curvature_dem`, `linear_xy`, `quadratic_xy`, and compound physical combinations).
-  - Added Variance Inflation Factor (VIF) auditing to detect and penalize multicollinear drift vectors.
-  - Integrated linear Pearson correlation screening and Random Forest Permutation Feature Importance calculation.
+  - Added Variance Inflation Factor (VIF) auditing with exact linear least-squares $R_j^2$ decomposition to detect and penalize multicollinear drift vectors ($\text{VIF} > 10$).
+  - Integrated non-parametric Spearman rank correlation ($\rho_s$) alongside parametric linear Pearson correlation ($r$) and Random Forest Permutation Feature Importance calculation to detect non-linear monotonic trends and evaluate feature transformation potential.
   - Implemented Spatial Cross-Validation: automatically executes **Leave-One-Profile-Out (LOPO-CV)** when `inputs.survey_profile_column` is provided ($N_{\text{profiles}} \ge 3$), with fallback to **Spatial Buffer LOOCV** with spatial exclusion prompt in **meters** based on pre-fitted variogram range $a_0$.
   - Implemented glaciological safeguard warnings when SIA slope drift is evaluated on product targets $P(x,y)$ to prevent $1/\sin^2\alpha$ double-scaling margin artifacts.
   - Added terminal ranking table sorted by AICc/RMSE and interactive drift selection prompt.
@@ -25,11 +25,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `--drift-analyzer` and `--profile-col` CLI parameters to `main_cli()`.
   - Added `plan-survey` CLI subcommand for standalone campaign planning.
   - Implemented Ordinary Kriging override rule: setting `method: "ordinary"` automatically forces `drift_analyzer = false`.
-- **Documentation & Test Suite**:
-  - Added detailed User Guide and documentation manual in [`docs/drift_analyzer.md`](file:///home/db/Software/pysole/docs/drift_analyzer.md).
+- **Package Architecture Diagram (`scripts/plot_package_structure.py`)**:
+  - Standardized inter-card vertical gap spacing to an exact uniform **2.2 Y-units** across Column 2 and Column 3.
+  - Perfectly aligned the lower card margins of Column 1 (`pysole.solver`), Column 2 (`pysole.survey_planner`), and Column 3 (`pysole.drift_analyzer`) at **$Y = 2.9$**.
+  - Styled `pysole.drift_analyzer` card border and orchestrator method `recommend_drift_model(...)` highlights with **Bright Fuchsia** (`#e879f9`) for consistent visual mapping across the diagram.
+  - Increased font size and vertical line spacing in `pysole.solver` orchestrator card by **+20%**.
+- **Documentation & Methodological Reference**:
+  - Expanded [`docs/drift_analyzer_&_survey_planner.md`](file:///home/db/Software/pysole/docs/drift_analyzer_&_survey_planner.md) with comprehensive equations for Universal Kriging, VIF, Pearson $r$, Spearman $\rho_s$, Spatial Buffer LOOCV, AICc, SIA depth modeling, and survey track layout algorithms, including a tri-metric diagnostic evaluation matrix table.
+  - Created [`docs/drift_analyzer.md`](file:///home/db/Software/pysole/docs/drift_analyzer.md) pointing to the comprehensive guide.
   - Updated JSON configuration templates ([`pysole.json`](file:///home/db/Software/pysole/pysole.json), [`examples/gok/pysole_gok.json`](file:///home/db/Software/pysole/examples/gok/pysole_gok.json), [`examples/wuk/pysole_wuk.json`](file:///home/db/Software/pysole/examples/wuk/pysole_wuk.json)) with `"survey_profile_column"` and `"drift_analyzer"`.
   - Updated [`README.md`](file:///home/db/Software/pysole/README.md) key features, JSON configuration snippet, and Parameter Reference table.
   - Created dedicated unit test suites in [`tests/test_drift_analyzer.py`](file:///home/db/Software/pysole/tests/test_drift_analyzer.py) and [`tests/test_survey_planner.py`](file:///home/db/Software/pysole/tests/test_survey_planner.py).
+
+### Changed
+- **Dual Kriging Spatial Cross-Validation (`src/pysole/interpolation.py`)**:
+  - Generalized `DualKrigingSolver` to evaluate all physical DEM drift models (`sia`, `z_dem`, `curvature_dem`, and compound physical/spatial combinations) during spatial cross-validation (`predict_validation()`).
+  - Refactored `get_drift_functions()` to decompose compound drift specifications into canonical primitives (`sia`, `z_dem`, `curvature_dem`, `linear_xy`, `quadratic_xy`).
+- **Codebase Audit & Streamlining**:
+  - Thoroughly audited the codebase and removed obsolete backward compatibility fallbacks and redundant drift evaluation code paths.
+  - Ensured strict canonical drift model naming across all modules (`solver.py`, `interpolation.py`, `drift_analyzer.py`, `survey_planner.py`).
 
 ---
 

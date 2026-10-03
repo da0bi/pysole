@@ -790,17 +790,31 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
     Each function has signature fn(x_pts, y_pts, dem_grid, dx, dy, bounds, alpha_opt_deg).
     """
     funcs = []
-    terms_set = set(drift_terms)
+    primitives: set[str] = set()
+    for term in drift_terms:
+        if term == "sia_space":
+            primitives.update(["sia", "linear_xy"])
+        elif term == "sia_z_dem":
+            primitives.update(["sia", "z_dem"])
+        elif term == "sia_curvature_dem":
+            primitives.update(["sia", "curvature_dem"])
+        elif term == "z_dem_curvature_dem":
+            primitives.update(["z_dem", "curvature_dem"])
+        elif term in ["sia_z_dem_curvature_dem", "full_physical"]:
+            primitives.update(["sia", "z_dem", "curvature_dem"])
+        elif term == "full_spatial_physical":
+            primitives.update(["sia", "z_dem", "curvature_dem", "linear_xy"])
+        else:
+            primitives.add(term)
 
-    if "linear_xy" in terms_set or "x" in terms_set:
+    if "linear_xy" in primitives or "x" in primitives:
         funcs.append(lambda x, y, dem, dx, dy, b, a: (x - np.mean(x)) / max(np.ptp(x), 1.0))
-    if "linear_xy" in terms_set or "y" in terms_set:
         funcs.append(lambda x, y, dem, dx, dy, b, a: (y - np.mean(y)) / max(np.ptp(y), 1.0))
-    if "quadratic_xy" in terms_set:
+    if "quadratic_xy" in primitives:
         funcs.append(lambda x, y, dem, dx, dy, b, a: ((x - np.mean(x)) / max(np.ptp(x), 1.0))**2)
         funcs.append(lambda x, y, dem, dx, dy, b, a: ((y - np.mean(y)) / max(np.ptp(y), 1.0))**2)
         funcs.append(lambda x, y, dem, dx, dy, b, a: ((x - np.mean(x)) / max(np.ptp(x), 1.0)) * ((y - np.mean(y)) / max(np.ptp(y), 1.0)))
-    if any(t in terms_set for t in ["z_dem", "sia_z_dem", "sia_z_dem_curvature_dem", "z_dem_curvature_dem", "full_physical", "full_spatial_physical"]):
+    if "z_dem" in primitives:
         def eval_z_dem(x, y, dem, dx, dy, b, a):
             if dem is None or b is None:
                 return np.zeros_like(x)
@@ -811,7 +825,7 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
             vals = dem[rows, cols]
             return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
         funcs.append(eval_z_dem)
-    if any(t in terms_set for t in ["sia", "sia_space", "sia_z_dem", "sia_curvature_dem", "sia_z_dem_curvature_dem", "full_physical", "full_spatial_physical"]):
+    if "sia" in primitives:
         def eval_sia(x, y, dem, dx, dy, b, a):
             if a is None or dem is None or b is None:
                 return np.zeros_like(x)
@@ -824,7 +838,7 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
             vals = 1.0 / np.maximum(sin_a, 1e-3)
             return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
         funcs.append(eval_sia)
-    if any(t in terms_set for t in ["curvature_dem", "sia_curvature_dem", "z_dem_curvature_dem", "sia_z_dem_curvature_dem", "full_physical", "full_spatial_physical"]):
+    if "curvature_dem" in primitives:
         def eval_curvature_dem(x, y, dem, dx, dy, b, a):
             if dem is None or b is None:
                 return np.zeros_like(x)
@@ -858,6 +872,11 @@ class DualKrigingSolver:
         sill: float = 1.0,
         range_param: float = 100.0,
         drift_terms: list[str] | None = None,
+        dem_grid: np.ndarray | None = None,
+        dx: float = 5.0,
+        dy: float = 5.0,
+        bounds: tuple[float, float, float, float] | None = None,
+        alpha_opt_deg: np.ndarray | None = None,
     ):
         self.x_pts = np.asarray(x_pts, dtype=np.float64)
         self.y_pts = np.asarray(y_pts, dtype=np.float64)
@@ -886,13 +905,11 @@ class DualKrigingSolver:
 
         np.fill_diagonal(K, 0.0)
 
+        drift_funcs = get_drift_functions(self.drift_terms)
         F_list = [np.ones((N, 1))]
-        if "linear_xy" in self.drift_terms or "quadratic_xy" in self.drift_terms:
-            x_norm = (self.x_pts - np.mean(self.x_pts)) / max(np.ptp(self.x_pts), 1.0)
-            y_norm = (self.y_pts - np.mean(self.y_pts)) / max(np.ptp(self.y_pts), 1.0)
-            F_list.extend([x_norm.reshape(-1, 1), y_norm.reshape(-1, 1)])
-            if "quadratic_xy" in self.drift_terms:
-                F_list.extend([(x_norm**2).reshape(-1, 1), (y_norm**2).reshape(-1, 1), (x_norm*y_norm).reshape(-1, 1)])
+        for fn in drift_funcs:
+            f_col = fn(self.x_pts, self.y_pts, dem_grid, dx, dy, bounds, alpha_opt_deg).reshape(-1, 1)
+            F_list.append(f_col)
 
         F = np.hstack(F_list)
         n_drift = F.shape[1]
@@ -946,13 +963,11 @@ class DualKrigingSolver:
             gamma[dists > self.range_param] = self.sill
             K_val = self.nugget + gamma
 
+        drift_funcs = get_drift_functions(self.drift_terms)
         F_list = [np.ones((N_val, 1))]
-        if "linear_xy" in self.drift_terms or "quadratic_xy" in self.drift_terms:
-            x_norm = (x_val - np.mean(self.x_pts)) / max(np.ptp(self.x_pts), 1.0)
-            y_norm = (y_val - np.mean(self.y_pts)) / max(np.ptp(self.y_pts), 1.0)
-            F_list.extend([x_norm.reshape(-1, 1), y_norm.reshape(-1, 1)])
-            if "quadratic_xy" in self.drift_terms:
-                F_list.extend([(x_norm**2).reshape(-1, 1), (y_norm**2).reshape(-1, 1), (x_norm*y_norm).reshape(-1, 1)])
+        for fn in drift_funcs:
+            f_col = fn(x_val, y_val, dem_grid, dx, dy, bounds, alpha_opt_deg).reshape(-1, 1)
+            F_list.append(f_col)
 
         F_val = np.hstack(F_list)
         return K_val @ self.b + F_val @ self.a

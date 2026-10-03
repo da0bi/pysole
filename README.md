@@ -222,7 +222,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | :--- | :--- | :--- | :--- | :--- |
 | **`inputs`** | `dem_path` | `str` | `null` | **(Required)** File path to the surface Digital Elevation Model (`.asc`, `.tif`, `.csv`, `.npy`). |
 | | `outline_path` | `str` | `null` | File path to creeping body / glacier boundary polygon (`.shp`, `.geojson`, `.gpkg`, `.csv`). If `null`, domain is derived from non-NaN DEM pixels. |
-| | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[X, Y, value]`. If no file path is defined, `PySole` automatically starts the interactive <i>Survey Planner</i>. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
+| | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[(profile_id), X, Y, value]`. If `null`, `PySole` automatically starts the interactive <i>Survey Planner</i>. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
 | | `survey_data_type` | `str` | `"one_way_traveltime"` | Observation data type: `"one_way_traveltime"`, `"two_way_traveltime"`, or `"depth"` (skips 3D migration). |
 | | `survey_profile_column` | `str` | `null` | Optional CSV column name specifying survey line / profile IDs for the drift analyzer's <i>Leave-One-Profile-Out</i> cross-validation (LOPO-CV). |
 | | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (`900.0` kg/m³ for temperate glacier ice by default). Used to calculate basal shear stress $\tau_{\text{b}}$. |
