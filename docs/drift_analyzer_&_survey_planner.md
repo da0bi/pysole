@@ -201,7 +201,7 @@ When a user provides a surface DEM (`dem_path`) and glacier outline (`outline_pa
 #### 1. Frequency-Domain Surface DEM Smoothing
 Raw DEM elevations $Z_{\text{dem}}(x,y)$ contain high-frequency micro-topography. `PySole` applies a 2D Gaussian low-pass filter in the frequency domain using spatial corner wavenumber $k_c$:
 
-$$Z_{\text{smooth}, k_c}(x,y) = \text{Re}\left( \mathcal{F}^{-1} \left\{ \mathcal{F}\{Z_{\text{dem}}(x,y)\} \cdot \exp\left(-\frac{k_x^2 + k_y^2}{2 k_c^2}\right) \right\} \right)$$
+$$Z_{\text{smooth}, k_c}(x,y) = \text{Re}\left[ \mathcal{F}^{-1} \left( \mathcal{F}\left[ Z_{\text{dem}}(x,y) \right] \cdot \exp\left( -\frac{k_x^2 + k_y^2}{2 k_c^2} \right) \right) \right]$$
 
 where $k_x, k_y$ are spatial wavenumbers ($2\pi / \lambda$).
 
