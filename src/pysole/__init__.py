@@ -10,11 +10,12 @@ from .variogram import optimize_bss_variance, calculate_variogram, fit_variogram
 from .interpolation import blend_margin_topography, kriging_interpolation, random_forest_hole_filling, KrigingEngine, BedrockFinalizer, KrigingResult
 from .drift_analyzer import DriftAnalyzer
 from .survey_planner import SurveyPlanner
-from .config import run_from_config, load_config, main_cli, OutputsConfig
+from .config import load_config, main_cli
+from .pipeline import run_from_config, OutputsConfig, PipelineExporter
 from .logging import logger, setup_logging
 from . import plotting
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 __all__ = [
     "Solver",
@@ -45,6 +46,7 @@ __all__ = [
     "run_from_config",
     "load_config",
     "OutputsConfig",
+    "PipelineExporter",
     "main_cli",
     "logger",
     "setup_logging",

@@ -418,18 +418,5 @@ def main_cli() -> None:
         sys.exit(0)
 
     log_level = "DEBUG" if args.debug else None
-    from .solver import Solver
-    solver = Solver.from_config(args.config, log_level=log_level)
-
-    # CLI Overrides
-    if args.batch:
-        solver.is_batch_mode = True
-    if args.drift_analyzer:
-        if "pre_migration" in solver.config.get("kriging_parameters", {}):
-            solver.config["kriging_parameters"]["pre_migration"]["drift_analyzer"] = True
-        if "post_migration" in solver.config.get("kriging_parameters", {}):
-            solver.config["kriging_parameters"]["post_migration"]["drift_analyzer"] = True
-    if args.survey_profile_column:
-        solver.config.get("inputs", {})["survey_profile_column"] = args.survey_profile_column
-
-    solver.run_pipeline()
+    from .pipeline import run_from_config
+    run_from_config(args.config, log_level=log_level, is_batch=args.batch)

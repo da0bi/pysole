@@ -151,7 +151,7 @@ class Solver:
         self.perform_migration = perform_migration
         self.survey_data_type = survey_data_type
         self.n_cores = n_cores
-        self.kriging_engine = str(kriging_engine).lower().strip()
+        self.engine_type = str(kriging_engine).lower().strip()
         self.nrbins = int(nrbins) if nrbins is not None else None
         self.ice_density = float(ice_density)
         self.g = float(g)
@@ -645,12 +645,17 @@ class Solver:
 
     def migrate_eikonal(
         self,
-        travel_times: str | Path | os.PathLike | np.ndarray,
+        travel_times: str | Path | os.PathLike | np.ndarray | None = None,
         velocity: float | None = None,
         interactive: bool = False,
         plotit: bool = False,
     ) -> np.ndarray:
         """Migrates zero-offset GPR or seismic travel times into 3D space using the Eikonal equation."""
+        if travel_times is None:
+            travel_times = self.survey_data_path
+        if travel_times is None:
+            raise ValueError("No survey_data_path or travel_times provided for Eikonal migration.")
+
         if not self.survey_data_path and isinstance(travel_times, (str, Path, os.PathLike)):
             self.survey_data_path = str(travel_times)
 
@@ -833,6 +838,10 @@ class Solver:
             self._smoothed_dem_cache.update(opt_res.all_smoothed_dems)
         return self.opt_kc
 
+    def calculate_bedrock(self, *args, **kwargs):
+        """Alias for interpolate_kriging()."""
+        return self.interpolate_kriging(*args, **kwargs)
+
     def interpolate_kriging(
         self,
         method: str | None = None,
@@ -956,6 +965,10 @@ class Solver:
             out_grid[valid_mask] = smoothed[valid_mask]
 
         return out_grid
+
+    def finalize_bedrock(self, *args, **kwargs) -> BedrockMap:
+        """Alias for finalize_topography()."""
+        return self.finalize_topography(*args, **kwargs)
 
     def finalize_topography(
         self,
@@ -1316,25 +1329,29 @@ class Solver:
         else:
             logger.info("2. Skipping 3D Eikonal Ray Migration...")
 
+        is_batch = (not self.show_progress) or (not sys.stdin.isatty())
+        opt_interactive = False if is_batch else opt.get("interactive_optimization", False)
+        mig_interactive = False if is_batch else migration.get("interactive_migration", False)
+
         self.migrate_eikonal(
             travel_times=survey_data_path,
             velocity=migration.get("velocity"),
-            interactive=migration.get("interactive_migration", False),
+            interactive=mig_interactive,
             plotit=True,
         )
 
         logger.info("3. Performing Post-Migration BSS Slope Optimization & Depth Interpolation (Field D(x,y))...")
         opt_kc = self.optimize_bss(
-            interactive=opt.get("interactive_optimization", False),
+            interactive=opt_interactive,
             plotit=True,
         )
         opt_wl = compute_cutoff_wavelength(opt_kc, self.dx, self.dy)
         logger.info(f"   Optimal Post-Migration Corner Frequency k_c = {opt_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
-        self.interpolate_kriging(interactive=opt.get("interactive_optimization", False), plotit=True)
+        self.interpolate_kriging(interactive=opt_interactive, plotit=True)
 
         logger.info("4. Finalizing Bedrock Topography...")
         bedrock_map = self.finalize_topography(
-            interactive=opt.get("interactive_optimization", False),
+            interactive=opt_interactive,
             plotit=True,
             random_forest_gap_filling=fin_cfg.get("random_forest_gap_filling", False),
             apply_margin_blend=fin_cfg.get("apply_margin_blend", False),

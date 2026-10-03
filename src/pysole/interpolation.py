@@ -818,10 +818,8 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
         def eval_z_dem(x, y, dem, dx, dy, b, a):
             if dem is None or b is None:
                 return np.zeros_like(x)
-            minx, miny, maxx, maxy = b
-            M, N = dem.shape
-            cols = np.clip(((x - minx) / dx).astype(int), 0, N - 1)
-            rows = np.clip(((maxy - y) / dy).astype(int), 0, M - 1)
+            geom = GridGeometry.create(dem.shape, dx=dx, dy=dy, bounds=b)
+            rows, cols = geom.coords_to_grid_indices(x, y)
             vals = dem[rows, cols]
             return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
         funcs.append(eval_z_dem)
@@ -829,10 +827,8 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
         def eval_sia(x, y, dem, dx, dy, b, a):
             if a is None or dem is None or b is None:
                 return np.zeros_like(x)
-            minx, miny, maxx, maxy = b
-            M, N = dem.shape
-            cols = np.clip(((x - minx) / dx).astype(int), 0, N - 1)
-            rows = np.clip(((maxy - y) / dy).astype(int), 0, M - 1)
+            geom = GridGeometry.create(dem.shape, dx=dx, dy=dy, bounds=b)
+            rows, cols = geom.coords_to_grid_indices(x, y)
             a_pts = a[rows, cols]
             sin_a = np.sin(np.radians(np.maximum(a_pts, 1.0)))
             vals = 1.0 / np.maximum(sin_a, 1e-3)
@@ -844,10 +840,8 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
                 return np.zeros_like(x)
             from .smoothing import compute_surface_curvature
             curvature = compute_surface_curvature(dem, dx=dx, dy=dy)
-            minx, miny, maxx, maxy = b
-            M, N = dem.shape
-            cols = np.clip(((x - minx) / dx).astype(int), 0, N - 1)
-            rows = np.clip(((maxy - y) / dy).astype(int), 0, M - 1)
+            geom = GridGeometry.create(dem.shape, dx=dx, dy=dy, bounds=b)
+            rows, cols = geom.coords_to_grid_indices(x, y)
             vals = curvature[rows, cols]
             return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
         funcs.append(eval_curvature_dem)

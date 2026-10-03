@@ -256,10 +256,9 @@ class SurveyPlanner:
         ax.set_xlabel("X [m]")
         ax.set_ylabel("Y [m]")
         ax.legend(loc="upper right")
-        plt.tight_layout()
-        plt.savefig(plot_path, dpi=300)
+        from .plotting import _save_figure
+        _save_figure(plt, fig_dir, f"{file_prefix}_survey_plan_map.png")
         plt.close()
-        logger.info(f"5. Saved survey plan map plot to: {plot_path}")
 
         return {
             "d_sia": d_sia,

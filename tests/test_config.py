@@ -25,7 +25,7 @@ class TestConfigWorkflowWuk(unittest.TestCase):
         solver_gok = pysole.Solver.from_config(gok_config)
         self.assertEqual(solver_gok.n_cores, -1)
 
-        bedrock_map = pysole.run_from_config(wuk_config)
+        bedrock_map = pysole.run_from_config(wuk_config, is_batch=True)
         self.assertIsInstance(bedrock_map, pysole.BedrockMap)
         self.assertEqual(bedrock_map.shape, (179, 213))
         self.assertTrue(np.all(np.isfinite(bedrock_map.grid)))

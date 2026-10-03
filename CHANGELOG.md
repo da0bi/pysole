@@ -5,6 +5,31 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-03
+
+### Added
+- **Architectural Decoupling (`src/pysole/pipeline.py`)**:
+  - Introduced `PipelineManager`, `PipelineExporter`, and `PipelineConfig` in `src/pysole/pipeline.py` to decouple JSON configuration parsing, workspace path resolution, and disk export management from `Solver`.
+  - Streamlined `src/pysole/config.py` into a lightweight CLI parser and default dictionary manager (~150 lines).
+  - Re-exported `run_from_config` and `OutputsConfig` in `src/pysole/__init__.py` from `pipeline.py` to maintain 100% backward compatibility for all existing 1-line Python API scripts.
+- **Code Streamlining & Helper Utilities**:
+  - Added `GridGeometry.coords_to_grid_indices(x, y)` to `src/pysole/raster.py` to consolidate spatial coordinate-to-pixel index transformations across `interpolation.py`, `drift_analyzer.py`, and `survey_planner.py`.
+  - Centralized figure exports in `src/pysole/survey_planner.py` using `pysole.plotting._save_figure()`.
+- **Comprehensive API Documentation (`Examples:` Docstrings)**:
+  - Added explicit NumPy/Google-style `Examples:` docstring blocks to all public functions and classes across `pysole.run_from_config()`, `Solver`, `DriftAnalyzer`, `SurveyPlanner`, `migrate_eikonal_points`, `optimize_bss_variance`, `kriging_interpolation`, `blend_margin_topography`, `load_dem`, and `BedrockMap`.
+- **Wurtenkees (WUK) Tutorial Notebook (`examples/pysole_quickstart.ipynb`)**:
+  - Created interactive Jupyter Notebook tutorial demonstrating high-level API execution, `DriftAnalyzer` model selection, and bedrock elevation grid inspection on the Wurtenkees (WUK) benchmark dataset.
+- **JOSS & PyPI Publication Infrastructure**:
+  - Added GitHub Actions CI workflow (`.github/workflows/ci.yml`) testing the package across Python 3.10, 3.11, 3.12, and 3.13.
+  - Added GitHub Actions PyPI release workflow (`.github/workflows/publish-pypi.yml`) for automated release publishing via OIDC Trusted Publisher.
+  - Added `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1).
+
+### Refactored
+- **`Solver` Engine Optimization (`src/pysole/solver.py`)**:
+  - Refactored `Solver` into a pure memory-first computational physics engine, purging redundant path resolution helpers and disk export functions.
+  - Fixed attribute collision between string option choice (`self.engine_type`) and `KrigingEngine` class instance (`self.kriging_engine`).
+  - Reduced `solver.py` file size by ~380 lines (~28% reduction, down to ~980 lines).
+
 ## [0.4.0] - 2026-10-03
 
 ### Added
