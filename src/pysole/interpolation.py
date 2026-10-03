@@ -646,8 +646,8 @@ def kriging_interpolation(
     elif isinstance(external_drift_grid, np.ndarray) and external_drift_grid.shape == (M, N):
         external_drift_grids["external_drift"] = external_drift_grid
 
-    is_sia_mode = (method_clean in ["sia"]) or (drift_terms is not None and "sia" in drift_terms)
-    is_z_surface_mode = (drift_terms is not None) and ("z_dem" in drift_terms)
+    is_sia_mode = (drift_terms is not None) and ("sia" in drift_terms)
+    is_z_dem_mode = (drift_terms is not None) and ("z_dem" in drift_terms)
     is_curvature_mode = (drift_terms is not None) and ("curvature_dem" in drift_terms)
 
     # Compute external drift grids (SIA 1/sin(alpha), DEM elevation z_dem, surface curvature_dem)
@@ -667,7 +667,7 @@ def kriging_interpolation(
             safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
             external_drift_grids["sia"] = 1.0 / safe_slope_grid
 
-    if is_z_surface_mode and "z_dem" not in external_drift_grids and dem_grid is not None and dem_grid.shape == (M, N):
+    if is_z_dem_mode and "z_dem" not in external_drift_grids and dem_grid is not None and dem_grid.shape == (M, N):
         external_drift_grids["z_dem"] = dem_grid
 
     if is_curvature_mode and "curvature_dem" not in external_drift_grids and dem_grid is not None and dem_grid.shape == (M, N):
@@ -807,7 +807,7 @@ def get_drift_functions(drift_terms: list[str]) -> list[Any]:
         else:
             primitives.add(term)
 
-    if "linear_xy" in primitives or "x" in primitives:
+    if "linear_xy" in primitives:
         funcs.append(lambda x, y, dem, dx, dy, b, a: (x - np.mean(x)) / max(np.ptp(x), 1.0))
         funcs.append(lambda x, y, dem, dx, dy, b, a: (y - np.mean(y)) / max(np.ptp(y), 1.0))
     if "quadratic_xy" in primitives:

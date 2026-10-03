@@ -258,7 +258,7 @@ def load_config(
             if target == direct_target_char:
                 sec["method"] = "universal"
                 if "drift_terms" not in user_sec:
-                    sec["drift_terms"] = ["sia_thickness"]
+                    sec["drift_terms"] = ["sia"]
             else:
                 sec["method"] = "ordinary"
                 if "drift_terms" not in user_sec:

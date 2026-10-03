@@ -10,7 +10,7 @@
 ## Table of Contents
 
 [Key Features](#key-features)<br><br>
-[Workflow & Methodology](#workflow-and-methodology)<br><br>
+[Baseline Workflow & Methodology](#workflow-and-methodology)<br><br>
 [Installation](#installation)<br><br>
 [JSON Configuration File](#json-configuration)<br><br>
 [JSON Configuration Parameter Reference](#json-configuration-parameter-reference)<br><br>
@@ -59,12 +59,12 @@
 * **Interactive Drift Analyzer:** A fully automated diagnostic engine to identify the optimal Universal Kriging drift model for each individual survey dataset. Evaluates and ranks the available `PySole` drift models by a suite of statistical metrics. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md).
 * **ML Hole Filling & Geomorphological Margin Blending:** Employs the parallelized [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
 * **Final DEMs Spatial Smoothing:** As a post-processing step, spatial smoothing options are available for the calculated DEMs.
-* **Unprobed Glacier Survey Planner:** Automatically designs forward geophysical survey campaigns for unprobed glaciers. Based on a SIA ice thickness model, optimal longitudinal flowline and transverse cross-profile tracks are computed. Exports tracks to field-ready GPX and GeoJSON vector formats along with SIA model maps. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md).
+* **Survey Planner:** While Kriging uncertainty fields clearly reveal target regions for additional surveys, the `Survey Planner` automatically designs an optimal survey layout for future campaigns on unprobed glaciers. Optimal longitudinal flowline and transverse cross-profile survey tracks are computed based on a SIA ice thickness model. Exports tracks to field-ready GPX and GeoJSON vector formats along with the SIA model thickness map. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md).
 
 ---
 
 <a id="workflow-and-methodology"></a>
-## Workflow & Methodology
+## Baseline Workflow & Methodology
 
 <p align="center">
   <a href="images/pysole_processing_pipeline.png">
@@ -222,9 +222,9 @@ All execution options can be fully defined in a single JSON configuration file, 
 | :--- | :--- | :--- | :--- | :--- |
 | **`inputs`** | `dem_path` | `str` | `null` | **(Required)** File path to the surface Digital Elevation Model (`.asc`, `.tif`, `.csv`, `.npy`). |
 | | `outline_path` | `str` | `null` | File path to creeping body / glacier boundary polygon (`.shp`, `.geojson`, `.gpkg`, `.csv`). If `null`, domain is derived from non-NaN DEM pixels. |
-| | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[(profile_id), X, Y, value]`. If `null`, `PySole` automatically starts the interactive <i>Survey Planner</i>. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
+| | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[(profile_id), X, Y, value]`. If `null`, `PySole` automatically starts the interactive `Survey Planner` and saves the results to the file paths defined in the `outputs` section. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
 | | `survey_data_type` | `str` | `"one_way_traveltime"` | Observation data type: `"one_way_traveltime"`, `"two_way_traveltime"`, or `"depth"` (skips 3D migration). |
-| | `survey_profile_column` | `str` | `null` | Optional CSV column name specifying survey line / profile IDs for the drift analyzer's <i>Leave-One-Profile-Out</i> cross-validation (LOPO-CV). |
+| | `survey_profile_column` | `str` | `null` | Optional CSV column name specifying survey line / profile IDs for the `Drift Analyzer'´s <i>Leave-One-Profile-Out</i> cross-validation. |
 | | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (`900.0` kg/m³ for temperate glacier ice by default). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `g` | `float` | `9.81` | Gravitational acceleration constant in m/s² (`9.81` m/s²). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
@@ -248,14 +248,14 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `pre_migration` | `dict` | *Sub-section* | Configuration for pre-migration traveltime field, <i>T</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `pre_migration.interpolation_target` | `str` | `"P"` | Pre-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>T</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct signal traveltimes (<i>T</i><sub>i</sub>). |
 | | `pre_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (the default for `pre_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
-| | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging Drift Analyzer tool. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
+| | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` tool. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
 | | `pre_migration.drift_terms` | `list[str]` | `[]` | `["sia"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes". |
 | | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 s) along the perimeter and rock outcrop margin outline(s). |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth, <i>D</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
 | | `post_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (the default for `post_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
-| | `post_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging Drift Analyzer tool. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
+| | `post_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` tool. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
 | | `post_migration.drift_terms` | `list[str]` | `[]` |  `["sia"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes". |
 | | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
@@ -339,7 +339,7 @@ To guarantee numerical stability during matrix decomposition, diagonal Tikhonov 
 
 <a id="interpolation-strategies"></a>
 #### 5. Robust Baseline Interpolation Strategies
-While users can combine any available interpolation options, the following two strategies are recommended as a robust starting baseline. These are implemented in `PySole` as the default approaches based on the selected target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
+While users can combine any available interpolation options and deploy the `Drift Analyzer` to find the optimum Universal Kriging drift model, the following two interpolation strategies are recommended as a robust starting baseline. These are implemented in `PySole` as the default approaches based on the selected target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
 
 - **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field $P = T \sin \alpha_{\text{opt}}$ (pre-migration) or $P = D \sin \alpha_{\text{opt}}$ (post-migration). **Ordinary Kriging** is initially recommended for BSS-derived product targets.
 

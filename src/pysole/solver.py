@@ -157,10 +157,11 @@ class Solver:
         self.g = float(g)
         self.show_progress = bool(show_progress)
 
-        # Gradient, DEM, and Feature Caches
+        # Gradient, DEM, Feature, and Sample Points Caches
         self._gradient_cache: dict[str, np.ndarray] | None = None
         self._fft_dem_cache: tuple[np.ndarray, np.ndarray] | None = None
         self._smoothed_dem_cache: dict[float, np.ndarray] = {}
+        self._sample_pts_cache: dict[tuple[str, str], np.ndarray] = {}
 
         # Decoupled sub-engines strictly bound to GridGeometry
         self.migrator = EikonalMigrator(self.dem_grid, geometry=self.geometry, outline_mask=self.outline_mask)
@@ -434,13 +435,13 @@ class Solver:
 
         pre_target = pre_krig_cfg.get("interpolation_target", "P")
         pre_method = pre_krig_cfg.get("method", "universal" if str(pre_target).upper() == "T" else "ordinary")
-        pre_drifts = pre_krig_cfg.get("drift_terms", ["sia_thickness"] if str(pre_target).upper() == "T" else [])
+        pre_drifts = pre_krig_cfg.get("drift_terms", ["sia"] if str(pre_target).upper() == "T" else [])
         pre_var_model = pre_krig_cfg.get("variogram_model", "spherical")
         pre_zero_boundary = pre_krig_cfg.get("include_zero_boundary_condition", True)
 
         post_target = post_krig_cfg.get("interpolation_target", "P")
         post_method = post_krig_cfg.get("method", "universal" if str(post_target).upper() == "D" else "ordinary")
-        post_drifts = post_krig_cfg.get("drift_terms", ["sia_thickness"] if str(post_target).upper() == "D" else [])
+        post_drifts = post_krig_cfg.get("drift_terms", ["sia"] if str(post_target).upper() == "D" else [])
         post_var_model = post_krig_cfg.get("variogram_model", "spherical")
         post_zero_boundary = post_krig_cfg.get("include_zero_boundary_condition", True)
 
@@ -488,6 +489,54 @@ class Solver:
         solver.config_path = str(config_path)
         return solver
 
+    def get_sample_points(self, stage: str, target_type: str = "P") -> np.ndarray:
+        """
+        Retrieves or constructs cached 3-column sample points matrix [X, Y, Target]
+        for the specified stage ('pre_migration' or 'post_migration') and target_type ('P', 'T', 'D').
+        Guarantees that slope interpolation and multiplication for Product 'P' (T*sin(alpha) or D*sin(alpha))
+        is evaluated ONCE and cached.
+        """
+        stage_key = "pre_migration" if "pre" in stage.lower() else "post_migration"
+        target_upper = str(target_type).upper().strip()
+        cache_key = (stage_key, target_upper)
+
+        if not hasattr(self, "_sample_pts_cache"):
+            self._sample_pts_cache = {}
+
+        if cache_key in self._sample_pts_cache:
+            return self._sample_pts_cache[cache_key]
+
+        pts = self.migrated_points if (stage_key == "post_migration" and self.migrated_points is not None) else getattr(self, "pre_kriging_points", None)
+        if pts is None:
+            if stage_key == "post_migration" and self.migrated_points is not None:
+                pts = self.migrated_points
+            else:
+                pts = getattr(self, "survey_points", None)
+
+        if pts is None:
+            raise ValueError(f"No survey/migrated points available to create sample points for stage '{stage_key}'.")
+
+        if self.opt_slope is None:
+            prefix = "01_" if stage_key == "pre_migration" else "03_"
+            self.optimize_bss(prefix=prefix)
+
+        val_col = 3 if pts.shape[1] >= 4 else 2
+
+        if target_upper == "P":
+            opt_slope_sin = np.sin(self.opt_slope)
+            interp_slope = self.geometry.create_interpolator(opt_slope_sin, fill_value=np.nan)
+            pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
+            slopes_pts = interp_slope(pts_xy)
+            slopes_pts = np.maximum(np.nan_to_num(slopes_pts, nan=0.1), 1e-4)
+
+            product_values = pts[:, val_col] * slopes_pts
+            sample_pts = np.column_stack((pts[:, 0], pts[:, 1], product_values))
+        else:
+            sample_pts = np.column_stack((pts[:, 0], pts[:, 1], pts[:, val_col]))
+
+        self._sample_pts_cache[cache_key] = sample_pts
+        return sample_pts
+
     def _execute_kriging_pass(
         self,
         target_type: str,
@@ -503,23 +552,12 @@ class Solver:
         or BSS product targets ('P').
         """
         target_upper = str(target_type).upper().strip()
+        is_pre = "Pass 1" in pass_name
+        stage_key = "pre_migration" if is_pre else "post_migration"
 
-        if self.opt_slope is None:
-            logger.info(f"   [{pass_name}] Evaluating BSS Surface Slope Optimization...")
-            self.optimize_bss(prefix="01_" if "Pass 1" in pass_name else "03_")
+        sample_pts = self.get_sample_points(stage_key, target_upper)
 
-        opt_slope_sin = np.sin(self.opt_slope)
-
-        val_col = 3 if points.shape[1] >= 4 else 2
         if target_upper == "P":
-            interp_slope = self.geometry.create_interpolator(opt_slope_sin, fill_value=np.nan)
-            pts_xy = np.column_stack((points[:, 1], points[:, 0]))  # (Y, X)
-            slopes_pts = interp_slope(pts_xy)
-            slopes_pts = np.maximum(np.nan_to_num(slopes_pts, nan=0.1), 1e-4)
-
-            product_values = points[:, val_col] * slopes_pts
-            sample_pts = np.column_stack((points[:, 0], points[:, 1], product_values))
-
             logger.info(f"   [{pass_name}] Performing {krig_method.capitalize()} Kriging Interpolation for BSS Product P(x,y)...")
             if drift_terms and "sia" in drift_terms:
                 logger.warning(
@@ -527,10 +565,8 @@ class Solver:
                     "This can cause 1/sin^2(alpha) double-scaling artifacts at low-slope margins. "
                     "Recommendation: Use 'ordinary' Kriging or non-slope spatial drifts (e.g. ['z_dem']) for product targets."
                 )
-        else:
-            sample_pts = np.column_stack((points[:, 0], points[:, 1], points[:, val_col]))
-        is_pre = "Pass 1" in pass_name
-        pass_cfg = self.config.get("kriging_parameters", {}).get("pre_migration" if is_pre else "post_migration", {})
+
+        pass_cfg = self.config.get("kriging_parameters", {}).get(stage_key, {})
         run_analyzer = pass_cfg.get("drift_analyzer", False)
 
         if krig_method.lower() == "ordinary":
@@ -544,7 +580,7 @@ class Solver:
                 logger.info("   [INFO] Non-interactive environment detected (TTY disabled or --batch flag set). Automatically overriding interactive options to False.")
 
             analyzer = DriftAnalyzer(
-                mode="pre_migration" if is_pre else "post_migration",
+                mode=stage_key,
                 target_name=self.survey_data_type,
                 interpolation_target=target_upper,
                 include_zero_boundary=zero_boundary,
@@ -559,8 +595,8 @@ class Solver:
             alpha_deg = np.degrees(self.opt_slope) if self.opt_slope is not None else np.zeros_like(self.dem_grid)
 
             diag = analyzer.run_diagnostics(
-                x_pts=points[:, 0],
-                y_pts=points[:, 1],
+                x_pts=sample_pts[:, 0],
+                y_pts=sample_pts[:, 1],
                 z_values=sample_pts[:, 2],
                 dem_grid=self.dem_grid,
                 dx=self.dx,
@@ -598,6 +634,7 @@ class Solver:
         )
 
         if target_upper == "P":
+            opt_slope_sin = np.sin(self.opt_slope)
             min_slope_sin = np.sin(np.radians(self.slope_floor_deg))
             safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
             grid = krig_res.bedrock_grid / safe_slope_grid
@@ -1167,14 +1204,8 @@ class Solver:
             survey_profile_column=getattr(self, "survey_profile_column", None),
         )
 
-        pts = self.migrated_points if (stage == "post_migration" and self.migrated_points is not None) else getattr(self, "pre_kriging_points", None)
-        if pts is None:
-            if stage == "post_migration" and self.migrated_points is not None:
-                pts = self.migrated_points
-            else:
-                pts = np.column_stack((self.dem_grid.ravel(), self.dem_grid.ravel(), np.zeros(self.dem_grid.size)))
-
-        x_pts, y_pts, z_vals = pts[:, 0], pts[:, 1], pts[:, 2]
+        sample_pts = self.get_sample_points(stage, interp_target)
+        x_pts, y_pts, z_vals = sample_pts[:, 0], sample_pts[:, 1], sample_pts[:, 2]
         opt_alpha = np.degrees(self.opt_slope) if self.opt_slope is not None else np.zeros_like(self.dem_grid)
 
         return analyzer.run_diagnostics(

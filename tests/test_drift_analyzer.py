@@ -100,9 +100,19 @@ class TestDriftAnalyzer(unittest.TestCase):
         model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
         model.optimize_bss(kc_min=0.01, kc_max=10.0, d_kc=2.0)
 
+        # Test single-computation caching via get_sample_points
+        pts1 = model.get_sample_points("post_migration", "P")
+        pts2 = model.get_sample_points("post_migration", "P")
+        self.assertIs(pts1, pts2)  # Identical cached object
+
         recommended = model.recommend_drift_model(stage="post_migration", interactive=False)
         self.assertIsInstance(recommended, list)
         self.assertGreater(len(recommended), 0)
+
+        # Verify sia slope drift receives is_penalized=True on Product P target
+        sia_res = next((r for r in recommended if r.name == "sia"), None)
+        if sia_res is not None:
+            self.assertTrue(sia_res.is_penalized)
 
 
 if __name__ == "__main__":

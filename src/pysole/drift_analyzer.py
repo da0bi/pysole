@@ -5,13 +5,13 @@ and recommend optimal single and multi-drift models for Universal Kriging.
 """
 
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 import logging
 import sys
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.linalg import lu_factor, lu_solve, LinAlgError
+from scipy.linalg import LinAlgError
 from sklearn.ensemble import RandomForestRegressor
 
 from .logging import logger
@@ -38,7 +38,6 @@ class CandidateDriftResult:
 CANDIDATE_DRIFT_MODELS: list[dict[str, Any]] = [
     {"name": "linear_xy", "terms": ["linear_xy"], "type": "single"},
     {"name": "quadratic_xy", "terms": ["quadratic_xy"], "type": "single"},
-    {"name": "cubic_xy", "terms": ["cubic_xy"], "type": "single"},
     {"name": "z_dem", "terms": ["z_dem"], "type": "single"},
     {"name": "sia", "terms": ["sia"], "type": "single"},
     {"name": "curvature_dem", "terms": ["curvature_dem"], "type": "single"},
@@ -340,7 +339,8 @@ class DriftAnalyzer:
         """
         Executes complete diagnostic pipeline and handles interactive terminal session.
         """
-        logger.info(f"[INFO] DriftAnalyzer initialized (Mode: {self.mode.title()}, Target: {self.target_name}, Boundary Conditions: {self.include_zero_boundary}).")
+        target_descr = f"Product P(x,y) = {self.target_name[0].upper()}*sin(alpha)" if self.interpolation_target == "P" else f"Direct Field {self.interpolation_target}(x,y)"
+        logger.info(f"[INFO] DriftAnalyzer initialized (Mode: {self.mode.title()}, Target: {self.target_name} [{target_descr}], Boundary Conditions: {self.include_zero_boundary}).")
         logger.info(f"[INFO] Extracting spatial covariates (Z_dem, C_kc, sin(alpha_opt)^-1, X, Y) at N = {len(z_values)} sample locations...")
 
         a_0 = float(variogram_params.get("range", 100.0))
