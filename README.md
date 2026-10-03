@@ -617,8 +617,6 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
 
 * **Run with Verbose / Debug Logging:**
   ```bash
-  pysole pysole.json -v
-  # or
   pysole pysole.json --verbose
   ```
   *(Enables `DEBUG` level logging verbosity for detailed computational diagnostics. Acts as a temporary CLI runtime override taking precedence over the `log_level` defined in `pysole.json`).*
