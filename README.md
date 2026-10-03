@@ -543,10 +543,10 @@ $$\lambda_{\text{c,eff}} = \sqrt{\lambda_{\text{c},x} \cdot \lambda_{\text{c},y}
 
 where $ds = \sqrt{|dx \cdot dy|}$ represents the effective spatial grid cell resolution (or grid cell area scale $ds^2 = |dx \cdot dy|$).
 
-For example, on an isotropic grid with $dx = dy = 5.0$ m ($ds = 5.0$ m, $ds^2 = 25.0$ m$^2$), an optimal corner frequency $k_{\text{c,opt}} = 0.4000$ corresponds to a physical spatial cutoff wavelength:
+For example, on an isotropic grid with $dx = dy = 5.0$ m ($ds = 5.0$ m, $ds^2 = 25.0$ $m^2$), an optimal corner frequency $k_{\text{c,opt}} = 0.4$ corresponds to a physical spatial cutoff wavelength:
 
 <p align="center">
-$$\lambda_{\text{c,opt}} = \frac{2\pi \cdot 25.0}{0.4000} \approx 392.70 \quad [\text{meters}]$$
+$$\lambda_{\text{c,opt}} = \frac{2\pi \cdot 25.0}{0.4} \approx 392.70 \quad [\text{meters}]$$
 </p>
 
 This physical cutoff wavelength is reported alongside $k_{\text{c,opt}}$ in the `PySole` logging outputs (`pysole.log`).
