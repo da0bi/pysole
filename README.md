@@ -561,7 +561,7 @@ This physical cutoff wavelength is reported alongside $k_{\text{c,opt}}$ in the 
     <img src="images/pysole_package_structure.png" width="100%" alt="PySole Package Structure & Submodules">
   </a>
   <br>
-  <em>Figure 2: Overview of PySole package architecture, class structure, sub-engine modules, and API methods. High-level Solver methods are color-coded by their underlying sub-engine domain. Click diagram to view in high resolution.</em>
+  <em>Figure 2: Overview of PySole package architecture, class structure, sub-engine modules, and API methods. High-level Pipeline and Solver methods are color-coded by their underlying sub-engine domain. Click diagram to view in high resolution.</em>
 </p>
 
 ---
@@ -595,31 +595,31 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole --init
   ```
-  *(Creates a clean template `pysole.json` configuration file in your current working directory).*
+  *Creates a clean template `pysole.json` configuration file in your current working directory.*
 
 * **Run PySole with Default `pysole.json` Configuration:**
   ```bash
   pysole
   ```
-  *(Automatically loads and executes `pysole.json` in the current working directory).*
+  *Automatically loads and executes `pysole.json` in the current working directory.*
 
 * **Run PySole with a Custom Configuration File:**
   ```bash
   pysole path/to/custom_config.json
   ```
-  *(Executes the full pipeline defined in `custom_config.json`).*
+  *Executes the full pipeline defined in `custom_config.json`.*
 
 * **Run in Non-Interactive Batch Mode:**
   ```bash
   pysole pysole.json --batch
   ```
-  *(Runs PySole in non-interactive batch mode, automatically disabling all interactive prompts and terminal dialogs. Built-in mode for HPC cluster jobs and automated background pipelines).*
+  *Runs PySole in non-interactive batch mode, automatically disabling all interactive prompts and terminal dialogs. Built-in mode for HPC cluster jobs and automated background pipelines.*
 
 * **Run with Verbose / Debug Logging:**
   ```bash
   pysole pysole.json --verbose
   ```
-  *(Enables `DEBUG` level logging verbosity for detailed computational diagnostics. Acts as a temporary CLI runtime override taking precedence over the `log_level` defined in `pysole.json`).*
+  *Enables `DEBUG` level logging verbosity for detailed computational diagnostics. Acts as a temporary CLI runtime override taking precedence over the `log_level` defined in `pysole.json`.*
 
 * **Display CLI Help & Usage Options:**
   ```bash
