@@ -25,10 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1).
 
 ### Refactored
-- **`Solver` Engine Optimization (`src/pysole/solver.py`)**:
-  - Refactored `Solver` into a pure memory-first computational physics engine, purging redundant path resolution helpers and disk export functions.
-  - Fixed attribute collision between string option choice (`self.engine_type`) and `KrigingEngine` class instance (`self.kriging_engine`).
-  - Reduced `solver.py` file size by ~380 lines (~28% reduction, down to ~980 lines).
+- **`Solver` Engine & Method Canonicalization (`src/pysole/solver.py`)**:
+  - Consolidated `calculate_bedrock()` and `finalize_bedrock()` as the primary canonical methods on `Solver`, keeping `interpolate_kriging()` and `finalize_topography()` as transparent aliases.
+  - Purged obsolete legacy aliases (`compute_eikonal_migration()`, `calculate_topography()`, `solve_kriging()`).
+- **Drift Analyzer Multi-Variable VIF (`src/pysole/drift_analyzer.py`)**:
+  - Upgraded `calculate_vif()` to execute exact multi-variable linear least-squares regression with an intercept column across target drift matrices, replacing single-variable linear approximations.
+- **Survey Planner & Pipeline Key Standardization (`src/pysole/survey_planner.py`, `src/pysole/pipeline.py`)**:
+  - Standardized dictionary return keys for SIA ice thickness output grids (`"sia_modelled_depth"`) across `SurveyPlanner` and `PipelineManager`.
 
 ## [0.4.0] - 2026-10-03
 

@@ -300,6 +300,7 @@ def create_template_config(config_path: str | Path | os.PathLike = "pysole.json"
 def run_from_config(
     config_path: str | Path | os.PathLike = "pysole.json",
     log_level: str | None = None,
+    is_batch: bool = False,
 ) -> Any:
     """
     Executes the full PySole workflow using parameters defined in pysole.json.
@@ -310,16 +311,16 @@ def run_from_config(
         Path to pysole.json configuration file.
     log_level : str, optional
         Explicit log level override (e.g. 'DEBUG').
+    is_batch : bool, default False
+        If True, disables interactive terminal prompts.
 
     Returns
     -------
     bedrock_map : BedrockMap
         Final predicted bedrock elevation grid.
     """
-    from .solver import Solver
-
-    solver = Solver.from_config(config_path, log_level=log_level)
-    return solver.run_pipeline()
+    from .pipeline import run_from_config as _run_pipeline
+    return _run_pipeline(config_path=config_path, log_level=log_level, is_batch=is_batch)
 
 
 def main_cli() -> None:

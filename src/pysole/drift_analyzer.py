@@ -74,7 +74,7 @@ class DriftAnalyzer:
 
     def calculate_vif(self, X_drift: np.ndarray) -> tuple[float, list[float]]:
         """
-        Calculates Variance Inflation Factor (VIF) for each column in a drift basis matrix.
+        Calculates Variance Inflation Factor (VIF) for each column in a drift basis matrix using exact linear least-squares regression.
         """
         n_samples, n_features = X_drift.shape
         if n_features <= 1:
@@ -84,13 +84,17 @@ class DriftAnalyzer:
         for i in range(n_features):
             y_i = X_drift[:, i]
             X_others = np.delete(X_drift, i, axis=1)
-            # Standard linear regression R^2
+            # Add intercept column for exact multi-variable linear regression
+            A = np.column_stack([np.ones(n_samples), X_others])
             try:
-                slope, intercept, r_value, p_value, std_err = stats.linregress(
-                    X_others[:, 0] if X_others.shape[1] == 1 else np.mean(X_others, axis=1),
-                    y_i
-                )
-                r_sq = r_value ** 2 if not np.isnan(r_value) else 0.0
+                coef, residuals, rank, s = np.linalg.lstsq(A, y_i, rcond=None)
+                y_pred = A @ coef
+                ss_tot = np.sum((y_i - np.mean(y_i)) ** 2)
+                if ss_tot <= 1e-12:
+                    r_sq = 0.0
+                else:
+                    ss_res = np.sum((y_i - y_pred) ** 2)
+                    r_sq = max(0.0, 1.0 - (ss_res / ss_tot))
             except Exception:
                 r_sq = 0.0
 
@@ -98,7 +102,7 @@ class DriftAnalyzer:
                 vif = 999.0
             else:
                 vif = 1.0 / (1.0 - r_sq)
-            vifs.append(vif)
+            vifs.append(float(vif))
 
         return float(np.max(vifs)), vifs
 

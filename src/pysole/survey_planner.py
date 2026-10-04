@@ -269,8 +269,6 @@ class SurveyPlanner:
         plt.close()
 
         return {
-            "d_sia": d_sia,
-            "sia_grid": d_sia,
             "sia_modelled_depth": d_sia,
             "tracks": tracks,
             "saved_raster": saved_raster,

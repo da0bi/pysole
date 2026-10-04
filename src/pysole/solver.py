@@ -245,6 +245,72 @@ class Solver:
         """Minimum surface slope angle threshold in degrees [°]."""
         return float(self.optimization_config.get("slope_floor_deg", 5.0))
 
+    def _cfg_get(self, section: str, key: str, default: Any = None) -> Any:
+        """Helper method for safe configuration parameter lookup."""
+        sec = self.config.get(section, {})
+        if isinstance(sec, dict):
+            val = sec.get(key)
+            return val if val is not None else default
+        return default
+
+    @property
+    def bedrock_map(self) -> BedrockMap | None:
+        """Returns the final bedrock elevation grid as a BedrockMap object."""
+        if self.final_grid is None:
+            return None
+        return BedrockMap(
+            grid=self.final_grid,
+            bounds=self.bounds,
+            crs=self.meta.get("crs"),
+            transform=self.meta.get("transform"),
+            name="Bedrock Elevation",
+        )
+
+    @property
+    def results(self) -> dict[str, Any]:
+        """Returns a dictionary containing all computed pipeline outputs."""
+        return {
+            "bedrock_map": self.bedrock_map,
+            "thickness_grid": self.thickness_grid,
+            "thickness_std_grid": self.thickness_std_grid,
+            "basal_shear_stress_grid": self.basal_shear_stress_grid,
+            "basal_shear_stress_std_grid": self.basal_shear_stress_std_grid,
+            "migrated_points": self.migrated_points,
+            "opt_kc": self.opt_kc,
+            "opt_wavelength": self.opt_wavelength,
+            "kriged_bedrock": self.kriged_bedrock,
+            "rf_filled_bedrock": self.rf_filled_bedrock,
+            "blended_bedrock": self.blended_bedrock,
+        }
+
+    def summary(self) -> str:
+        """Prints and returns a formatted execution summary report of the Solver state and computed results."""
+        lines = [
+            "================================================================================",
+            "                        PYSOLE SOLVER EXECUTION SUMMARY                         ",
+            "================================================================================",
+            f"  DEM Shape Grid       : {self.dem_grid.shape[0]} x {self.dem_grid.shape[1]} (dx={self.dx:.2f} m, dy={self.dy:.2f} m)",
+            f"  Spatial Bounds [m]   : minx={self.bounds[0]:.1f}, miny={self.bounds[1]:.1f}, maxx={self.bounds[2]:.1f}, maxy={self.bounds[3]:.1f}",
+            f"  CRS Metadata         : {self.meta.get('crs') or 'Not defined (Local Meters)'}",
+            f"  Execution Engine     : {self.engine_type.upper()} Dual Kriging",
+            f"  3D Ray Migration     : {'ENABLED' if self.perform_migration else 'DISABLED/SKIPPED'} ({self.survey_data_type})",
+            f"  Optimal Corner Freq  : {f'kc = {self.opt_kc:.4f} rad/m (lambda_c = {self.opt_wavelength:.1f} m)' if self.opt_kc is not None and self.opt_wavelength is not None else 'Not optimized'}",
+            f"  Pre-Migration Target : {self.pre_kriging_method.capitalize()} Kriging (Target: '{self.pre_interpolation_target}', Drifts: {self.pre_drift_terms})",
+            f"  Post-Migration Target: {self.post_kriging_method.capitalize()} Kriging (Target: '{self.post_interpolation_target}', Drifts: {self.post_drift_terms})",
+        ]
+        if self.final_thickness is not None:
+            valid_h = self.final_thickness[self.outline_mask]
+            if len(valid_h) > 0:
+                lines.append(f"  Ice Thickness Range  : min={np.nanmin(valid_h):.1f} m, mean={np.nanmean(valid_h):.1f} m, max={np.nanmax(valid_h):.1f} m")
+        if self.final_bss is not None:
+            valid_tau = self.final_bss[self.outline_mask]
+            if len(valid_tau) > 0:
+                lines.append(f"  Basal Shear Stress   : min={np.nanmin(valid_tau):.1f} kPa, mean={np.nanmean(valid_tau):.1f} kPa, max={np.nanmax(valid_tau):.1f} kPa")
+        lines.append("================================================================================")
+        summary_text = "\n".join(lines)
+        logger.info(summary_text)
+        return summary_text
+
     def _get_resolved_output_prefix(self) -> str:
         raw_prefix = self.outputs_config_obj.output_prefix or "final"
         prefix_path = Path(raw_prefix)
@@ -423,6 +489,14 @@ class Solver:
         from .config import load_config
         cfg = load_config(config_path, log_level=log_level)
         inputs = cfg.get("inputs", {})
+        
+        dem_path = inputs.get("dem_path")
+        if dem_path is None:
+            raise ValueError(
+                "Missing required 'dem_path' parameter in configuration. "
+                "Please specify a valid surface DEM file path (e.g. '.tif', '.asc', '.csv', '.npy') under the 'inputs' section."
+            )
+
         spatial = cfg.get("spatial_parameters", {})
         migration_cfg = cfg.get("migration_parameters", {})
         kriging_cfg = cfg.get("kriging_parameters", {})
@@ -838,17 +912,16 @@ class Solver:
             self._smoothed_dem_cache.update(opt_res.all_smoothed_dems)
         return self.opt_kc
 
-    def calculate_bedrock(self, *args, **kwargs):
-        """Alias for interpolate_kriging()."""
-        return self.interpolate_kriging(*args, **kwargs)
-
-    def interpolate_kriging(
+    def calculate_bedrock(
         self,
         method: str | None = None,
         variogram_model: str | None = None,
         interactive: bool = False,
         plotit: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Calculates bedrock elevation grid using Dual Kriging interpolation pass.
+        """
         pts = self.migrated_points if self.migrated_points is not None else self.survey_points
         if pts is None:
             raise ValueError("No survey or migrated points available. Run migrate_eikonal() first.")
@@ -902,10 +975,14 @@ class Solver:
 
         return self.kriged_bedrock, self.kriged_variance
 
+    def interpolate_kriging(self, *args, **kwargs):
+        """Alias for calculate_bedrock()."""
+        return self.calculate_bedrock(*args, **kwargs)
+
     def fill_holes_rf(self) -> np.ndarray:
         """Trains Random Forest ML model to fill remaining bedrock holes."""
         if self.kriged_bedrock is None:
-            self.interpolate_kriging()
+            self.calculate_bedrock()
 
         self.rf_filled_bedrock = self.finalizer.fill_holes(self.kriged_bedrock, n_cores=self.n_cores, show_progress=self.show_progress)
         return self.rf_filled_bedrock
@@ -966,11 +1043,7 @@ class Solver:
 
         return out_grid
 
-    def finalize_bedrock(self, *args, **kwargs) -> BedrockMap:
-        """Alias for finalize_topography()."""
-        return self.finalize_topography(*args, **kwargs)
-
-    def finalize_topography(
+    def finalize_bedrock(
         self,
         interactive: bool = True,
         plotit: bool = True,
@@ -983,6 +1056,10 @@ class Solver:
         smoothing_kernel_size: int = 3,
         smoothing_kc_cutoff: float | None = None,
     ) -> BedrockMap:
+        """
+        Finalizes bedrock topography by executing optional Random Forest gap filling,
+        margin blending, and spatial DEM smoothing. Returns completed BedrockMap.
+        """
         """
         Executes full final sequence towards continuous bedrock topography result.
 
@@ -1196,6 +1273,10 @@ class Solver:
             name="final_bedrock",
         )
 
+    def finalize_topography(self, *args, **kwargs) -> BedrockMap:
+        """Alias for finalize_bedrock()."""
+        return self.finalize_bedrock(*args, **kwargs)
+
     def recommend_drift_model(
         self,
         stage: str = "post_migration",
@@ -1309,7 +1390,7 @@ class Solver:
         if not survey_data_path:
             logger.info("[INFO] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
             res = self.plan_survey()
-            return BedrockMap(grid=res["d_sia"], bounds=self.bounds, crs=self.meta.get("crs"), transform=self.meta.get("transform"), name="sia_modelled_depth")
+            return BedrockMap(grid=res["sia_modelled_depth"], bounds=self.bounds, crs=self.meta.get("crs"), transform=self.meta.get("transform"), name="sia_modelled_depth")
 
         cfg_name = getattr(self, "config_path", "pysole.json")
         logger.info("================================================================================")

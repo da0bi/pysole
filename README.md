@@ -59,7 +59,7 @@
 * **Interactive Drift Analyzer:** A fully automated diagnostic engine to identify the optimal Universal Kriging drift model for each individual survey dataset. Evaluates and ranks the available `PySole` drift models by a suite of statistical metrics. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md).
 * **ML Hole Filling & Geomorphological Margin Blending:** Employs the parallelized [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
 * **Final DEMs Spatial Smoothing:** As a post-processing step, spatial smoothing options are available for the calculated DEMs.
-* **Survey Planner:** While Kriging uncertainty fields clearly reveal target regions for additional surveys, the `Survey Planner` automatically designs an optimal survey layout for future campaigns on unprobed glaciers. Longitudinal flowline and transverse cross-profile survey tracks are computed based on a SIA ice thickness model. Exports tracks to field-ready GPX and GeoJSON vector formats along with the SIA model thickness map. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md).
+* **Survey Planner:** While Kriging uncertainty fields clearly reveal target regions for additional surveys, the `Survey Planner` automatically designs an optimal survey layout for future campaigns on unprobed objects. Longitudinal flowline and transverse cross-profile survey tracks are computed based on a SIA thickness model. Exports tracks to field-ready GPX and GeoJSON vector formats along with the SIA modeled thickness map. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md).
 
 ---
 
@@ -150,8 +150,8 @@ All execution options can be fully defined in a single JSON configuration file, 
         "show_progress": true
     },
     "spatial_parameters": {
-        "dx": 5.0,
-        "dy": 5.0,
+        "dx": null,
+        "dy": null,
         "bounds": null,
         "origin": null,
         "crs": null

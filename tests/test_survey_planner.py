@@ -51,7 +51,7 @@ class TestSurveyPlanner(unittest.TestCase):
             )
 
             self.assertIn("tracks", res)
-            self.assertIn("sia_grid", res)
+            self.assertIn("sia_modelled_depth", res)
 
             # Check exported files match exact specified output paths
             expected_tif = f"{output_prefix}_sia_modelled_depth.tif"

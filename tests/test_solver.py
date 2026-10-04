@@ -110,6 +110,20 @@ class TestSolverWuk(unittest.TestCase):
         self.assertEqual(model.kriged_bedrock.shape, (179, 213))
         self.assertTrue(np.all(np.isfinite(model.kriged_bedrock)))
 
+    def test_solver_summary_and_results(self):
+        model = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline)
+        summary_txt = model.summary()
+        self.assertIn("PYSOLE SOLVER EXECUTION SUMMARY", summary_txt)
+        res_dict = model.results
+        self.assertIsInstance(res_dict, dict)
+        self.assertIn("bedrock_map", res_dict)
+        self.assertIn("thickness_grid", res_dict)
+
+    def test_missing_dem_path_raises_value_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            pysole.Solver.from_config({"inputs": {"dem_path": None}})
+        self.assertIn("Missing required 'dem_path'", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

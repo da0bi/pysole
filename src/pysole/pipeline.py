@@ -190,53 +190,57 @@ def run_from_config(
 
     setup_logging(log_file=log_file, log_level=log_lvl)
 
-    survey_data_path = inputs_cfg.get("survey_data_path")
-    if survey_data_path is None:
-        logger.info("   [INFO] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
+    try:
+        survey_data_path = inputs_cfg.get("survey_data_path")
+        if survey_data_path is None:
+            logger.info("   [INFO] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
+
+            solver = Solver.from_config(config_file)
+            if is_batch:
+                solver.show_progress = False
+
+            plan_res = solver.plan_survey()
+
+            sia_grid = plan_res["sia_modelled_depth"]
+            final_raster = BedrockMap(
+                grid=sia_grid,
+                bounds=solver.bounds,
+                crs=solver.meta.get("crs"),
+                transform=solver.meta.get("transform"),
+                name="SIA Modelled Ice Thickness",
+            )
+            return final_raster
+
+        logger.info("=" * 80)
+        logger.info(f"        STARTING NEW PYSOLE BEDROCK TOPOGRAPHY CALCULATION ({config_file.resolve()})")
+        logger.info("=" * 80)
 
         solver = Solver.from_config(config_file)
         if is_batch:
             solver.show_progress = False
 
-        plan_res = solver.plan_survey()
+        interactive_flag = not is_batch and sys.stdin.isatty()
 
-        sia_grid = plan_res.get("sia_modelled_depth") or plan_res.get("sia_grid") or plan_res.get("d_sia")
-        final_raster = BedrockMap(
-            grid=sia_grid,
-            bounds=solver.bounds,
-            crs=solver.meta.get("crs"),
-            transform=solver.meta.get("transform"),
-            name="SIA Modelled Ice Thickness",
-        )
+        solver.migrate_eikonal(interactive=interactive_flag)
+        solver.optimize_bss(interactive=interactive_flag)
+        solver.calculate_bedrock(interactive=interactive_flag)
+        final_raster = solver.finalize_bedrock(interactive=interactive_flag)
+
+        exporter = PipelineExporter(solver)
+        exporter.export_all()
+
+        output_bedrock_file = outputs_cfg.get("output_bedrock_map")
+        if output_bedrock_file:
+            full_out_path = resolve_path(output_bedrock_file, config_file, solver.output_dir)
+            fmt = outputs_cfg.get("output_format", "geotiff")
+            saved_paths = final_raster.save(full_out_path, formats=fmt)
+            if isinstance(saved_paths, list):
+                for sp in saved_paths:
+                    logger.info(f" 5. Saved predicted bedrock map to: {sp}")
+            else:
+                logger.info(f" 5. Saved predicted bedrock map to: {saved_paths}")
+
         return final_raster
-
-    logger.info("=" * 80)
-    logger.info(f"        STARTING NEW PYSOLE BEDROCK TOPOGRAPHY CALCULATION ({config_file.resolve()})")
-    logger.info("=" * 80)
-
-    solver = Solver.from_config(config_file)
-    if is_batch:
-        solver.show_progress = False
-
-    interactive_flag = not is_batch and sys.stdin.isatty()
-
-    solver.migrate_eikonal(interactive=interactive_flag)
-    solver.optimize_bss(interactive=interactive_flag)
-    solver.calculate_bedrock(interactive=interactive_flag)
-    final_raster = solver.finalize_bedrock(interactive=interactive_flag)
-
-    exporter = PipelineExporter(solver)
-    exporter.export_all()
-
-    output_bedrock_file = outputs_cfg.get("output_bedrock_map")
-    if output_bedrock_file:
-        full_out_path = resolve_path(output_bedrock_file, config_file, solver.output_dir)
-        fmt = outputs_cfg.get("output_format", "geotiff")
-        saved_paths = final_raster.save(full_out_path, formats=fmt)
-        if isinstance(saved_paths, list):
-            for sp in saved_paths:
-                logger.info(f" 5. Saved predicted bedrock map to: {sp}")
-        else:
-            logger.info(f" 5. Saved predicted bedrock map to: {saved_paths}")
-
-    return final_raster
+    except Exception as e:
+        logger.error(f"Execution failed: {e}", exc_info=True)
+        raise
