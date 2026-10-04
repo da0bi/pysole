@@ -1237,9 +1237,9 @@ class Solver:
 
     def plan_survey(
         self,
-        kc: float = 3.0,
+        kc: float = 0.5,
         tau_0: float = 100e3,
-        max_length_km: float = 10.0,
+        max_length_km: float = 5.0,
         output_prefix: str | None = None,
         output_dir: str | Path | None = None,
         plots_dir: str | Path | None = None,

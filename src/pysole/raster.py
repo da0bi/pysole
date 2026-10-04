@@ -645,7 +645,20 @@ def load_outline(
     to the outer boundary shell for processing. Performs strict CRS alignment check against DEM.
     """
     if outline_input is None:
-        return ~np.isnan(dem_grid)
+        nan_mask = np.isnan(dem_grid)
+        nan_count = int(np.count_nonzero(nan_mask))
+        if nan_count > 0:
+            valid_count = dem_grid.size - nan_count
+            logger.info(
+                f"No boundary outline provided. Delineated active body boundary and rock outcrops "
+                f"from DEM NaN values ({nan_count:,} NaN pixels, {valid_count:,} valid domain pixels)."
+            )
+        else:
+            logger.warning(
+                "No boundary outline provided and no NaN values found in DEM. "
+                "Entire DEM grid rectangle will be treated as the active domain without boundary constraints."
+            )
+        return ~nan_mask
 
     if isinstance(outline_input, np.ndarray):
         if outline_input.dtype == bool:
@@ -656,41 +669,40 @@ def load_outline(
     height, width = dem_grid.shape
     bounds = meta.get("bounds", (0.0, 0.0, float(width), float(height)))
 
-    if outline_input is not None and not isinstance(outline_input, np.ndarray):
-        ext = Path(outline_input).suffix.lower()
+    ext = Path(outline_input).suffix.lower()
 
-        # 1. Shapefile / GeoJSON / GeoPackage vector polygons with interior holes (nunataks)
-        if ext in [".shp", ".geojson", ".gpkg"]:
-            try:
-                import geopandas as gpd
-                from rasterio import features
-                from rasterio.transform import from_bounds
+    # 1. Shapefile / GeoJSON / GeoPackage vector polygons with interior holes (nunataks)
+    if ext in [".shp", ".geojson", ".gpkg"]:
+        try:
+            import geopandas as gpd
+            from rasterio import features
+            from rasterio.transform import from_bounds
 
-                gdf = gpd.read_file(outline_input)
+            gdf = gpd.read_file(outline_input)
 
-                # Check CRS alignment against DEM
-                dem_crs = meta.get("crs")
-                if dem_crs is not None and gdf.crs is not None:
-                    check_crs_alignment(dem_crs, gdf.crs)
+            # Check CRS alignment against DEM
+            dem_crs = meta.get("crs")
+            if dem_crs is not None and gdf.crs is not None:
+                check_crs_alignment(dem_crs, gdf.crs)
 
-                transform = meta.get("transform")
-                if transform is None:
-                    transform = from_bounds(*bounds, width, height)
+            transform = meta.get("transform")
+            if transform is None:
+                transform = from_bounds(*bounds, width, height)
 
-                geoms = validate_and_extract_polygons(gdf)
-                shapes = [(geom, 1) for geom in geoms]
-                mask = features.rasterize(
-                    shapes=shapes,
-                    out_shape=(height, width),
-                    transform=transform,
-                    fill=0,
-                    dtype=np.uint8,
-                )
-                return mask.astype(bool)
-            except ValueError:
-                raise
-            except Exception:
-                pass
+            geoms = validate_and_extract_polygons(gdf)
+            shapes = [(geom, 1) for geom in geoms]
+            mask = features.rasterize(
+                shapes=shapes,
+                out_shape=(height, width),
+                transform=transform,
+                fill=0,
+                dtype=np.uint8,
+            )
+            return mask.astype(bool)
+        except ValueError:
+            raise
+        except Exception:
+            pass
 
         # 2. Text / CSV polygon coordinates (supports NaN-separated exterior and interior hole rings & text headers)
         try:

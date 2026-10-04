@@ -200,8 +200,9 @@ def run_from_config(
 
         plan_res = solver.plan_survey()
 
+        sia_grid = plan_res.get("sia_modelled_depth") or plan_res.get("sia_grid") or plan_res.get("d_sia")
         final_raster = BedrockMap(
-            grid=plan_res["sia_modelled_depth"],
+            grid=sia_grid,
             bounds=solver.bounds,
             crs=solver.meta.get("crs"),
             transform=solver.meta.get("transform"),

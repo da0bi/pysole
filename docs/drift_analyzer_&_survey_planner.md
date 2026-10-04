@@ -1,4 +1,4 @@
-# PySole Drift Analyzer & Unprobed Glacier Survey Planner Methodological Guide
+# PySole Drift Analyzer & Survey Planner Methodological Guide
 
 This document provides a comprehensive methodological and mathematical reference for two key modules in `PySole`:
 1. **Universal Kriging Drift Analyzer (`DriftAnalyzer`)**: An automated diagnostic and model selection engine for evaluating and ranking spatial drift models.
@@ -166,9 +166,9 @@ The `DriftAnalyzer` incorporates domain-specific glaciological safeguards:
 
 ---
 
-## 2. Unprobed Glacier Survey Planner (`SurveyPlanner`)
+## 2. Survey Planner (`SurveyPlanner`)
 
-When a user provides a surface DEM (`dem_path`) and glacier outline (`outline_path`), but **no survey dataset** (`survey_data_path = null`), `PySole` automatically dispatches the **Unprobed Glacier Survey Planner**.
+When a user provides a surface DEM (`dem_path`) and glacier outline (`outline_path`), but **no survey dataset** (`survey_data_path = null`), `PySole` automatically dispatches the **Survey Planner**.
 
 ```
 [ Surface DEM & Glacier Outline ]
@@ -196,10 +196,34 @@ When a user provides a surface DEM (`dem_path`) and glacier outline (`outline_pa
 
 ---
 
-### 2.1 Synthetic SIA Ice Thickness Modeling
+### 2.1 Required User Input Data & Default Parameters
+
+To execute forward campaign survey planning on unprobed glaciers, `SurveyPlanner` requires two core spatial input files:
+
+1. **Surface DEM (`dem` / `dem_path`)**: High-resolution Digital Elevation Model raster (GeoTIFF `.tif`, ESRI ASCII `.asc`, or NumPy `ndarray`) containing surface elevation values $Z_{\text{dem}}(x,y)$ [m].
+2. **Glacier Boundary Outline (`outline` / `outline_path`, Optional)**: Vector boundary polygon (Shapefile `.shp`, GeoJSON `.geojson`, or 2D boolean mask) delineating the active extent of the creeping body. If `outline_path` is `null` (or omitted), `PySole` automatically detects `NaN` entries in the DEM raster to construct the active domain mask:
+   - **Outer Perimeter Margins**: Exterior `NaN` padding surrounding the creeping body defines the outer boundary shell.
+   - **Interior Rock Outcrops (Nunataks)**: Interior `NaN` entries within the glacier domain are automatically delineated as rock outcrop holes where SIA ice thickness is masked to zero ($D_{\text{SIA}} = 0\text{ m}$).
+   - **Automated Logging**: Emits an `INFO` log detailing the count of `NaN` pixels and valid domain pixels. If no `NaN` values exist in the DEM and no outline is provided, emits a `WARNING` indicating that the full rectangular grid will be treated as active domain without boundary constraints.
+
+#### Default Engine Parameters
+When optional parameters are omitted, `SurveyPlanner` enforces the following default values:
+
+| Parameter | Identifier / Argument | Default Value | Physical / Technical Description |
+| :--- | :--- | :--- | :--- |
+| **FFT DEM Cutoff Wavelength** | `kc` / `--kc` | **`0.5`** rad/m | Corner wavenumber frequency cutoff ($k_c = 0.5\text{ rad/m}$, corresponding to cutoff wavelength $\lambda_c = 2\pi / k_c \approx 12.57\text{ m}$) applied during frequency-domain Gaussian DEM surface smoothing. |
+| **Nominal Basal Shear Stress** | `tau_0` / `tau_p` / `--tau` | **`100`** kPa ($100,000\text{ Pa}$) | Target nominal basal shear stress ($\tau_0 = 100\text{ kPa}$) used in Shallow Ice Approximation (SIA) ice thickness depth modeling $D_{\text{SIA}}(x,y) = \frac{\tau_0}{\rho g \sin \alpha}$. |
+| **Total Survey Track Budget** | `max_length_km` / `max_km` / `--max-km` | **`5.0`** km ($5,000\text{ m}$) | Maximum total survey length budget ($L_{\text{max}} = 5.0\text{ km}$) allocated across longitudinal flowlines and transverse cross-profiles. |
+| **Minimum Surface Slope Floor** | `slope_floor_deg` | `5.0`° | Minimum surface slope angle threshold ($\alpha_{\text{floor}} = 5^\circ$) to prevent numerical division singularities in low-gradient accumulation basins. |
+| **Ice Density** | `ice_density` | `900.0` kg/m³ | Bulk ice density ($\rho_{\text{ice}} = 900\text{ kg/m}^3$). |
+| **Gravitational Acceleration** | `g` | `9.81` m/s² | Standard gravitational acceleration ($g = 9.81\text{ m/s}^2$). |
+
+---
+
+### 2.2 Synthetic SIA Ice Thickness Modeling
 
 #### 1. Frequency-Domain Surface DEM Smoothing
-Raw DEM elevations $Z_{\text{dem}}(x,y)$ contain high-frequency micro-topography. `PySole` applies a 2D Gaussian low-pass filter in the frequency domain using spatial corner wavenumber $k_c$:
+Raw DEM elevations $Z_{\text{dem}}(x,y)$ contain high-frequency micro-topography. `PySole` applies a 2D Gaussian low-pass filter in the frequency domain using spatial corner wavenumber $k_c$ (default $k_c = 0.5\text{ rad/m}$):
 
 $$Z_{\text{smooth}, k_c}(x,y) = \text{Re}\left[ \mathcal{F}^{-1} \left( \mathcal{F}\left[ Z_{\text{dem}}(x,y) \right] \cdot \exp\left( -\frac{k_x^2 + k_y^2}{2 k_c^2} \right) \right) \right]$$
 
@@ -227,9 +251,9 @@ $$D_{\text{SIA}}(x,y) = 0 \quad \forall (x,y) \notin O(x,y)$$
 
 ---
 
-### 2.2 Survey Profile Track Layout Algorithm
+### 2.3 Survey Profile Track Layout Algorithm
 
-The survey planner automatically designs field campaign GPR/seismic tracks subject to a total track length budget $L_{\text{max}}$ (e.g., 10.0 km).
+The survey planner automatically designs field campaign GPR/seismic tracks subject to a total track length budget $L_{\text{max}}$ (default $L_{\text{max}} = 5.0\text{ km}$).
 
 #### 1. Central Longitudinal Flowline ($L_1$)
 - **Maximum Thickness Axis**: The planner identifies the primary ice flow column $j_{\text{center}}$ corresponding to maximum integrated synthetic ice volume:
@@ -252,7 +276,7 @@ The survey planner automatically designs field campaign GPR/seismic tracks subje
 
 ---
 
-### 2.3 Output Formats & Field Exports
+### 2.4 Output Formats & Field Exports
 
 The `SurveyPlanner` generates four field-ready deliverables:
 
@@ -302,6 +326,6 @@ pysole pysole.json --drift-analyzer --profile-col line_id
 # Force non-interactive batch mode
 pysole pysole.json --batch
 
-# Standalone Unprobed Glacier Survey Planning
-pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 3.0 --tau 100 --max-km 10.0 --output proposed_survey
+# Standalone Survey Planning (defaults: k_c=0.5, tau=100 kPa, max-km=5.0 km)
+pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 0.5 --tau 100 --max-km 5.0 --output proposed_survey
 ```

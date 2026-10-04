@@ -146,6 +146,30 @@ class TestRasterWuk(unittest.TestCase):
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
+    def test_load_outline_none_with_nans(self):
+        dem = np.array([
+            [np.nan, 100.0, 105.0, np.nan],
+            [110.0, np.nan, 115.0, 120.0],
+            [np.nan, 125.0, 130.0, np.nan],
+        ], dtype=np.float64)
+        meta = {"dx": 10.0, "dy": 10.0, "bounds": (0.0, 0.0, 40.0, 30.0)}
+        mask = load_outline(None, dem, meta)
+        self.assertEqual(mask.shape, dem.shape)
+        self.assertEqual(np.sum(mask), 7)
+        self.assertFalse(mask[0, 0])
+        self.assertFalse(mask[1, 1])
+        self.assertTrue(mask[0, 1])
+
+    def test_load_outline_none_without_nans(self):
+        dem = np.array([
+            [100.0, 105.0],
+            [110.0, 115.0],
+        ], dtype=np.float64)
+        meta = {"dx": 10.0, "dy": 10.0, "bounds": (0.0, 0.0, 20.0, 20.0)}
+        mask = load_outline(None, dem, meta)
+        self.assertEqual(mask.shape, dem.shape)
+        self.assertTrue(np.all(mask))
+
 
 if __name__ == "__main__":
     unittest.main()

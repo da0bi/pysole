@@ -13,7 +13,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from .logging import logger
-from .raster import BedrockMap, GridGeometry
+from .plotting import _save_figure
+from .raster import BedrockMap, GridGeometry, load_dem, load_outline
 from .smoothing import compute_gradients, fft_gaussian_smooth
 
 
@@ -43,18 +44,27 @@ class SurveyPlanner:
         ice_density: float = 900.0,
         g: float = 9.81,
     ):
-        self.dem = dem if isinstance(dem, np.ndarray) else np.asarray(dem)
+        if isinstance(dem, (str, Path)):
+            self.dem, self.meta = load_dem(dem, dx=dx, dy=dy, bounds=bounds, crs=crs)
+        else:
+            self.dem = np.asarray(dem)
+            ny, nx = self.dem.shape
+            computed_bounds = bounds or (0.0, 0.0, float(nx * dx), float(ny * dy))
+            self.meta = {"dx": dx, "dy": dy, "bounds": computed_bounds, "crs": crs}
+
+        self.dx = float(self.meta.get("dx", dx))
+        self.dy = float(self.meta.get("dy", dy))
+        self.bounds = self.meta.get("bounds", bounds or (0.0, 0.0, float(self.dem.shape[1] * self.dx), float(self.dem.shape[0] * self.dy)))
+        self.crs = self.meta.get("crs", crs)
+
         self.outline = outline
-        self.dx = dx
-        self.dy = dy
-        self.bounds = bounds or (0.0, 0.0, float(dem.shape[1] * dx), float(dem.shape[0] * dy))
-        self.crs = crs
+        self.outline_mask = load_outline(outline, self.dem, self.meta)
         self.ice_density = ice_density
         self.g = g
 
     def compute_synthetic_sia_depth(
         self,
-        kc: float = 3.0,
+        kc: float = 0.5,
         tau_0: float = 100e3,
         slope_floor_deg: float = 5.0,
     ) -> np.ndarray:
@@ -71,17 +81,16 @@ class SurveyPlanner:
         # SIA ice thickness equation: D = tau_0 / (rho * g * sin(alpha))
         d_sia = tau_0 / (self.ice_density * self.g * np.sin(slope_clamped))
 
-        # Apply outline mask if available
-        if self.outline is not None:
-            if isinstance(self.outline, np.ndarray) and self.outline.shape == self.dem.shape:
-                d_sia[~self.outline.astype(bool)] = 0.0
+        # Apply outline mask and NaN DEM terrain masking
+        d_sia[~self.outline_mask] = 0.0
+        d_sia[np.isnan(self.dem)] = 0.0
 
         return np.maximum(d_sia, 0.0)
 
     def generate_survey_tracks(
         self,
         d_sia: np.ndarray,
-        max_length_km: float = 10.0,
+        max_length_km: float = 5.0,
     ) -> list[PlannedProfileTrack]:
         """
         Generates central longitudinal flowline and transverse cross-profiles.
@@ -189,9 +198,9 @@ class SurveyPlanner:
 
     def plan_survey(
         self,
-        kc: float = 3.0,
+        kc: float = 0.5,
         tau_0: float = 100e3,
-        max_length_km: float = 10.0,
+        max_length_km: float = 5.0,
         output_prefix: str = "final",
         output_dir: str | Path | None = None,
         plots_dir: str | Path | None = None,
@@ -256,13 +265,13 @@ class SurveyPlanner:
         ax.set_xlabel("X [m]")
         ax.set_ylabel("Y [m]")
         ax.legend(loc="upper right")
-        from .plotting import _save_figure
         _save_figure(plt, fig_dir, f"{file_prefix}_survey_plan_map.png")
         plt.close()
 
         return {
             "d_sia": d_sia,
             "sia_grid": d_sia,
+            "sia_modelled_depth": d_sia,
             "tracks": tracks,
             "saved_raster": saved_raster,
             "saved_geojson": saved_geojson,
