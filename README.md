@@ -723,6 +723,7 @@ from pysole import (
     BSSOptimizer,
     KrigingEngine,
     BedrockFinalizer,
+    PipelineExporter,
 )
 
 # 1. Load raster inputs and construct spatial GridGeometry container
@@ -749,6 +750,10 @@ krig_res = krig_engine.interpolate(sample_points=survey_pts, method="universal",
 finalizer = BedrockFinalizer(dem=dem_grid, geometry=geometry, outline_mask=outline_mask)
 rf_filled = finalizer.fill_holes(krig_res.bedrock_grid)
 blended_bedrock = finalizer.blend_margin(rf_filled, min_gap_dist=50.0)
+
+# 6. Standalone Disk Exporter Sub-Engine (pysole.pipeline.PipelineExporter)
+# exporter = PipelineExporter(model)
+# exporter.export_raster(blended_bedrock, suffix="final_bedrock", name="Bedrock Elevation")
 ```
 
 ---
