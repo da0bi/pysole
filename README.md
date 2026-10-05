@@ -398,7 +398,7 @@ While users can combine any available interpolation options and deploy the `Drif
    <i>This captures regional spatial bends, ice cap domes, or radial thickness distributions across the entire map space.</i>
 
 - **Empty Drift Model (`[]`)**:
-   <i>An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.</i>
+   An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.
 
 <br>`PySole` natively supports combining external raster drift models (`["z_dem"]`, `["curvature_dem"]`, or `["sia"]`) with polynomial spatial coordinate trends (`["quadratic_xy"]` or `["linear_xy"]`) into an augmented multi-drift Universal Kriging system.<br>
 <br>`PySole` provides the following **Multi Drift Models**:
