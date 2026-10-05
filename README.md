@@ -54,7 +54,7 @@
 
   where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. Surface DEM smoothing is performed in the frequency domain using a <i>Fast Fourier Transform</i> (FFT) Gaussian low-pass filter defined by the spatial cutoff wavenumber (<i>k</i><sub>c</sub>), from which the smoothed surface slope field is then derived. The spatial variance of <i>τ</i><sub>b</sub> is then quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across wavenumber cutoffs and refine the variogram parameters. This surface slope optimization methodology is an integral component for interpolating both pre-migration wavefront traveltimes and post-migration depths. To accelerate the optimization process, both the FFT low-pass filtering and the corresponding product variogram evaluations are executed via multi-threaded CPU parallelization.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration—introduced by Binder et al. (2009) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage. The optimally smoothed surface slope field is also applied during the 3D migration to ensure numerically stable ray displacement vectors.
-* **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging. Two interpolation strategies are recommended as a **robust starting baseline**: <i>Ordinary Kriging</i> is initially recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift), while <i>Universal Kriging</i> using the Shallow Ice Approximation (`"sia"`) physical drift model is intially recommended for direct interpolation of signal traveltimes or (migrated) depths. Corresponding Kriging estimation uncertainty fields are calculated alongside all predicted grids.
+* **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging. Two interpolation strategies are recommended as a **robust starting baseline**: <i>Ordinary Kriging</i> is initially recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift). <i>Universal Kriging</i> using the Shallow Ice Approximation (`"sia"`) physical drift model is intially recommended for direct interpolation of signal traveltimes or (migrated) depths. Corresponding Kriging estimation uncertainty fields are calculated alongside all predicted grids.
 * **Boundary Conditions:** Perimeter and rock outcrop margin boundary conditions (zero traveltime <i>T</i> = 0 s and zero thickness <i>D</i> = 0 m) are enforced by default (and can optionally be toggled off). Interior rock outcrops, or vector polygon holes, are natively parsed.
 * **Interactive Drift Analyzer:** A fully automated diagnostic engine to identify the optimal Universal Kriging drift model for each individual survey dataset. Evaluates and ranks the available `PySole` drift models by a suite of statistical metrics. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md).
 * **ML Hole Filling & Geomorphological Margin Blending:** Employs the parallelized [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
@@ -288,8 +288,8 @@ All execution options can be fully defined in a single JSON configuration file, 
 `PySole` supports 5 distinct DEM formats:
 
 - **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, CRS, pixel resolution, and `nodata` values using [`rasterio`](https://rasterio.readthedocs.io).
-- **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `nodata_value`.
-- **CSV Grid (`.csv`)**: Supports both **2D elevation matrices** ([Z<sub>nx</sub> × Z<sub>ny</sub>]) and **3-column XYZ grid tables** ([X, Y, Z]). For 3-column tables, cell spacing (`dx`, `dy`) and bounds are automatically inferred; for 2D matrices, metadata is built from `spatial_parameters`.
+- **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `nodata_value`. It is recommended to explicitly define the coordinate reference system using the `crs` parameter inside `spatial_parameters`.
+- **CSV Grid (`.csv`)**: Supports both **2D elevation matrices** ([Z<sub>nx</sub> × Z<sub>ny</sub>]) and **3-column XYZ grid tables** ([X, Y, Z]). For 3-column tables, cell spacing (`dx`, `dy`) and bounds are automatically inferred. However, it is recommended to explicitly define the coordinate reference system using the `crs` parameter. For 2D matrices, metadata is built from `spatial_parameters`.
 - **NumPy Binary Array (`.npy`)**: Fast 2D binary array format. Spatial metadata (`origin`, `crs`, `dx`, `dy`) is defined via `spatial_parameters`.
 - **NumPy 2D Array (`np.ndarray`)**: In-memory array passed directly into the `Solver` constructor (`dem=dem_grid`). Spatial metadata is defined via `spatial_parameters`.
 
@@ -477,7 +477,7 @@ While users can combine any available interpolation options and deploy the `Drif
 
 <a id="depth-uncertainty-derivation"></a>
 #### 7. Depth Uncertainty Derivation in Meters
-Kriging interpolation provides uncertainty estimates by variance of the product field $\sigma_{\text{P}}^2(x,y)$ [m$^2$]. The 2D depth estimation variance field $\sigma_{\text{D}}^2(x,y)$ [m$^2$] is obtained via linear error propagation:
+Kriging interpolation provides uncertainty estimates by variance of the product field $\sigma_{\text{P}}^2(x,y)$ [$m^2$]. The 2D depth estimation variance field $\sigma_{\text{D}}^2(x,y)$ [$m^2$] is obtained via linear error propagation:
 
 <p align="center">
 $$\sigma_{\text{D}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m}^2]$$
@@ -489,7 +489,7 @@ Taking the square root converts the variance field into the **Kriging Standard E
 $$\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}]$$
 </p>
 
-Under Gaussian linear estimation theory, $\pm 1.00 \sigma_{\text{D}}(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96 \sigma_{\text{D}}(x,y)$ represents the 95% confidence margin of error.
+Under Gaussian linear estimation theory, $\pm 1.00$ $\sigma_{\text{D}}(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96$ $\sigma_{\text{D}}(x,y)$ represents the 95% confidence margin of error.
 
 <a id="dem-spatial-smoothing"></a>
 #### 8. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
