@@ -477,7 +477,7 @@ While users can combine any available interpolation options and deploy the `Drif
 
 <a id="depth-uncertainty-derivation"></a>
 #### 7. Depth Uncertainty Derivation in Meters
-Kriging interpolation provides uncertainty estimates by variance of the product field $\sigma_{\text{P}}^2(x,y)$ [m^2]. The 2D depth estimation variance field $\sigma_{\text{D}}^2(x,y)$ [$m^2$] is obtained via linear error propagation:
+Kriging interpolation provides uncertainty estimates by variance of the product field $\sigma_{\text{P}}^2(x,y)$ $[m²]$. The 2D depth estimation variance field $\sigma_{\text{D}}^2(x,y)$ [$m^2$] is obtained via linear error propagation:
 
 <p align="center">
 $$\sigma_{\text{D}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m}^2]$$
