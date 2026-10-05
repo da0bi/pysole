@@ -102,11 +102,27 @@ def compute_gradients(
     }
 
 
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass
+class FFTSpectrum:
+    """Encapsulates pre-computed 2D FFT spectra with boundary padding and mask metadata."""
+    data_fft: np.ndarray
+    mask_fft: np.ndarray | None
+    pad_m: int
+    pad_n: int
+    orig_shape: tuple[int, int]
+    has_nans: bool
+    nan_mask: np.ndarray | None
+
+
 def precompute_fft_grid(
     grid: np.ndarray, dx: float = 1.0, dy: float = 1.0
-) -> tuple[np.ndarray, np.ndarray, float]:
+) -> tuple[FFTSpectrum, np.ndarray, float]:
     """
-    [OPTIMIZATION RANK 1 & 5]: Pre-computes 2D Forward FFT and spatial wavenumber mesh grid.
+    Pre-computes 2D Forward FFT spectra with reflect boundary padding and spatial wavenumber grid.
     Calling this ONCE before an optimization loop (e.g., kc frequency sweeps) eliminates
     redundant N-D Fourier Transforms inside the loop, accelerating execution by 10x-50x.
 
@@ -121,39 +137,65 @@ def precompute_fft_grid(
 
     Returns
     -------
-    A_shift : 2D np.ndarray (complex128)
-        Shifted 2D Forward FFT of the surface grid.
+    spectrum : FFTSpectrum
+        Encapsulated shifted 2D Forward FFT spectra and padding metadata.
     k_grid : 2D np.ndarray
-        2D spatial wavenumber magnitude grid [rad/m].
+        2D spatial wavenumber magnitude grid [rad/m] for the padded spectrum.
     k_max : float
         Maximum grid wavenumber.
     """
-    grid_clean = np.nan_to_num(grid, nan=np.nanmean(grid))
-    M, N = grid_clean.shape
+    M, N = grid.shape
+    nan_mask = np.isnan(grid)
+    has_nans = bool(np.any(nan_mask))
 
-    kx = fftshift(fftfreq(N)) * (2.0 * np.pi * abs(dx))
-    ky = fftshift(fftfreq(M)) * (2.0 * np.pi * abs(dy))
+    nan_mean = float(np.nanmean(grid)) if not np.all(nan_mask) else 0.0
+    grid_clean = np.nan_to_num(grid, nan=nan_mean)
+
+    pad_m = min(M // 4, 32)
+    pad_n = min(N // 4, 32)
+
+    if pad_m > 0 or pad_n > 0:
+        grid_padded = np.pad(grid_clean, ((pad_m, pad_m), (pad_n, pad_n)), mode="reflect")
+        mask_padded = np.pad((~nan_mask).astype(np.float64), ((pad_m, pad_m), (pad_n, pad_n)), mode="reflect") if has_nans else None
+    else:
+        grid_padded = grid_clean
+        mask_padded = (~nan_mask).astype(np.float64) if has_nans else None
+
+    M_pad, N_pad = grid_padded.shape
+
+    kx = fftshift(fftfreq(N_pad)) * (2.0 * np.pi * abs(dx))
+    ky = fftshift(fftfreq(M_pad)) * (2.0 * np.pi * abs(dy))
 
     kx_grid, ky_grid = np.meshgrid(kx, ky)
     k_grid = np.sqrt(kx_grid**2 + ky_grid**2)
     k_max = float(np.ceil(np.max(k_grid)))
 
-    # Compute 2D Forward FFT once
-    A_shift = fftshift(fft2(grid_clean))
-    return A_shift, k_grid, k_max
+    data_fft = fftshift(fft2(grid_padded))
+    mask_fft = fftshift(fft2(mask_padded)) if mask_padded is not None else None
+
+    spectrum = FFTSpectrum(
+        data_fft=data_fft,
+        mask_fft=mask_fft,
+        pad_m=pad_m,
+        pad_n=pad_n,
+        orig_shape=(M, N),
+        has_nans=has_nans,
+        nan_mask=nan_mask if has_nans else None,
+    )
+    return spectrum, k_grid, k_max
 
 
 def fft_gaussian_smooth_precomputed(
-    A_shift: np.ndarray, k_grid: np.ndarray, kc: float = 0.05
+    spectrum: FFTSpectrum | np.ndarray, k_grid: np.ndarray, kc: float = 0.05
 ) -> np.ndarray:
     """
-    [OPTIMIZATION RANK 1]: Fast Gaussian low-pass filtering using pre-computed FFT grids.
-    Only computes element-wise transfer function multiplication and inverse FFT.
+    Fast Gaussian low-pass filtering using pre-computed FFT spectra.
+    Applies Gaussian low-pass transfer function in frequency domain and unpads back to original grid shape.
 
     Parameters
     ----------
-    A_shift : 2D np.ndarray
-        Pre-computed 2D FFT shifted spectrum.
+    spectrum : FFTSpectrum or 2D np.ndarray
+        Pre-computed 2D FFT spectrum or FFTSpectrum object.
     k_grid : 2D np.ndarray
         Pre-computed 2D wavenumber magnitude grid.
     kc : float
@@ -162,16 +204,43 @@ def fft_gaussian_smooth_precomputed(
     Returns
     -------
     grid_filtered : 2D np.ndarray
-        Smoothed surface grid.
+        Smoothed surface grid in original spatial dimensions.
     """
-    M, N = A_shift.shape
+    if isinstance(spectrum, FFTSpectrum):
+        data_fft = spectrum.data_fft
+        mask_fft = spectrum.mask_fft
+        pad_m, pad_n = spectrum.pad_m, spectrum.pad_n
+        M, N = spectrum.orig_shape
+        has_nans = spectrum.has_nans
+    else:
+        data_fft = spectrum
+        mask_fft = None
+        pad_m, pad_n = 0, 0
+        M, N = spectrum.shape
+        has_nans = False
+
     if kc <= 0:
-        filt = np.ones((M, N), dtype=np.float64)
+        filt = np.ones_like(k_grid, dtype=np.float64)
     else:
         filt = np.exp(-(k_grid**2) / (2.0 * (kc**2)))
 
-    A_filtered = A_shift * filt
-    grid_filtered = np.real(ifft2(ifftshift(A_filtered)))
+    data_filtered_padded = np.real(ifft2(ifftshift(data_fft * filt)))
+
+    if pad_m > 0 or pad_n > 0:
+        data_filtered = data_filtered_padded[pad_m : pad_m + M, pad_n : pad_n + N]
+    else:
+        data_filtered = data_filtered_padded
+
+    if has_nans and mask_fft is not None:
+        mask_filtered_padded = np.real(ifft2(ifftshift(mask_fft * filt)))
+        if pad_m > 0 or pad_n > 0:
+            mask_filtered = mask_filtered_padded[pad_m : pad_m + M, pad_n : pad_n + N]
+        else:
+            mask_filtered = mask_filtered_padded
+        grid_filtered = data_filtered / np.maximum(mask_filtered, 1e-6)
+    else:
+        grid_filtered = data_filtered
+
     return grid_filtered
 
 

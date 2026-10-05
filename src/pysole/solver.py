@@ -54,6 +54,7 @@ class Solver:
         g: float = 9.81,
         output_dir: str | Path | None = None,
         survey_data_path: str | Path | None = None,
+        survey_profile_column: str | None = None,
         config_path: str | Path | None = None,
         show_progress: bool = True,
     ):
@@ -103,6 +104,8 @@ class Solver:
             Kriging solver engine: 'native' (default, high-performance solver) or 'pykrige'.
         output_dir : str or Path, optional
             General workspace directory for all output files. If None, defaults to parent directory of survey_data_path.
+        survey_profile_column : str, optional
+            Column name identifying individual survey profiles in survey CSV data for LOPO spatial CV.
         config_path : str or Path, optional
             Path to configuration file used for resolving relative paths.
         show_progress : bool
@@ -110,6 +113,7 @@ class Solver:
         """
         self.output_dir = output_dir
         self.survey_data_path = survey_data_path
+        self.survey_profile_column = survey_profile_column
         self.config_path = str(config_path) if config_path else None
         self._raw_plots_dir = plots_dir
 
@@ -556,6 +560,7 @@ class Solver:
             g=g_val,
             output_dir=outputs.get("output_dir"),
             survey_data_path=inputs.get("survey_data_path"),
+            survey_profile_column=inputs.get("survey_profile_column"),
             config_path=config_path if not isinstance(config_path, dict) else None,
             show_progress=show_progress_val,
         )

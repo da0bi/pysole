@@ -28,6 +28,21 @@ class PlannedProfileTrack:
     max_depth_m: float
 
 
+def _transform_coords_to_wgs84(coords: np.ndarray, crs: Any) -> np.ndarray:
+    """Converts projected [X, Y] coordinates to WGS84 [lon, lat]."""
+    if crs is None:
+        logger.warning("No CRS metadata provided for survey tracks. Exporting projected metric coordinates.")
+        return coords
+    try:
+        from pyproj import Transformer
+        transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+        lon, lat = transformer.transform(coords[:, 0], coords[:, 1])
+        return np.column_stack([lon, lat])
+    except Exception as e:
+        logger.warning(f"Failed to transform coordinates to WGS84 (EPSG:4326): {e}. Exporting raw coordinates.")
+        return coords
+
+
 class SurveyPlanner:
     """
     Forward campaign survey planning engine for unprobed glaciers.
@@ -93,29 +108,37 @@ class SurveyPlanner:
         max_length_km: float = 5.0,
     ) -> list[PlannedProfileTrack]:
         """
-        Generates central longitudinal flowline and transverse cross-profiles.
+        Generates central longitudinal flowline and transverse cross-profiles subject to total length budget max_length_km.
         """
         max_length_m = max_length_km * 1000.0
         ny, nx = d_sia.shape
         minx, miny, maxx, maxy = self.bounds
 
-        x_coords = np.linspace(minx, maxx, nx)
-        y_coords = np.linspace(maxy, miny, ny)
+        # Cell center spatial coordinates in bottom-up grid (row 0 = miny)
+        x_coords = minx + (np.arange(nx) + 0.5) * self.dx
+        y_coords = miny + (np.arange(ny) + 0.5) * self.dy
 
         # 1. Longitudinal central flowline along maximum thickness ridge
-        # Sample points along max D_SIA profile
         center_col = np.argmax(np.sum(d_sia, axis=0))
-        y_pts = y_coords[d_sia[:, center_col] > 0]
-        x_pts = np.full_like(y_pts, x_coords[center_col])
-
-        if len(y_pts) < 2:
-            # Fallback across mid grid
+        valid_rows = np.where(d_sia[:, center_col] > 0)[0]
+        if len(valid_rows) >= 2:
+            y_pts = y_coords[valid_rows]
+            x_pts = np.full_like(y_pts, x_coords[center_col])
+        else:
             y_pts = y_coords
             x_pts = np.full_like(y_pts, (minx + maxx) / 2.0)
 
         long_coords = np.column_stack([x_pts, y_pts])
-        long_len = float(np.sum(np.hypot(np.diff(long_coords[:, 0]), np.diff(long_coords[:, 1]))))
-        long_len = min(long_len, max_length_m * 0.4)
+        seg_lengths = np.hypot(np.diff(long_coords[:, 0]), np.diff(long_coords[:, 1]))
+        cum_length = np.insert(np.cumsum(seg_lengths), 0, 0.0)
+        long_len = float(cum_length[-1])
+
+        target_long_len = min(long_len, max_length_m * 0.4)
+        if long_len > target_long_len and long_len > 0:
+            valid_k = np.where(cum_length <= target_long_len)[0]
+            if len(valid_k) >= 2:
+                long_coords = long_coords[:valid_k[-1] + 1]
+                long_len = float(cum_length[valid_k[-1]])
 
         tracks: list[PlannedProfileTrack] = []
         tracks.append(PlannedProfileTrack(
@@ -126,40 +149,48 @@ class SurveyPlanner:
             max_depth_m=float(np.max(d_sia)),
         ))
 
-        # 2. Transverse cross-profiles
+        # 2. Transverse cross-profiles subject to remaining length budget
         remaining_budget = max_length_m - long_len
-        n_cross = max(2, int(remaining_budget / (0.2 * max_length_m)))
-        row_indices = np.linspace(ny * 0.15, ny * 0.85, n_cross, dtype=int)
+        if remaining_budget > 0:
+            n_cross = max(2, int(remaining_budget / (0.2 * max_length_m)))
+            row_indices = np.linspace(ny * 0.15, ny * 0.85, n_cross, dtype=int)
 
-        for i, row in enumerate(row_indices, 1):
-            mask_row = d_sia[row, :] > 0
-            if not np.any(mask_row):
-                continue
-            cols = np.where(mask_row)[0]
-            x_cross = x_coords[cols]
-            y_cross = np.full_like(x_cross, y_coords[row])
-            cross_coords = np.column_stack([x_cross, y_cross])
-            c_len = float(np.sum(np.hypot(np.diff(cross_coords[:, 0]), np.diff(cross_coords[:, 1]))))
+            for i, row in enumerate(row_indices, 1):
+                if remaining_budget <= 0:
+                    break
+                mask_row = d_sia[row, :] > 0
+                if not np.any(mask_row):
+                    continue
+                cols = np.where(mask_row)[0]
+                x_cross = x_coords[cols]
+                y_cross = np.full_like(x_cross, y_coords[row])
+                cross_coords = np.column_stack([x_cross, y_cross])
+                c_len = float(np.sum(np.hypot(np.diff(cross_coords[:, 0]), np.diff(cross_coords[:, 1]))))
 
-            tracks.append(PlannedProfileTrack(
-                track_id=f"T{i}_transverse",
-                track_type="transverse",
-                length_m=c_len,
-                coordinates=cross_coords,
-                max_depth_m=float(np.max(d_sia[row, cols])),
-            ))
+                if c_len > remaining_budget:
+                    continue  # Skip profile if it exceeds remaining budget
+
+                remaining_budget -= c_len
+                tracks.append(PlannedProfileTrack(
+                    track_id=f"T{i}_transverse",
+                    track_type="transverse",
+                    length_m=c_len,
+                    coordinates=cross_coords,
+                    max_depth_m=float(np.max(d_sia[row, cols])),
+                ))
 
         return tracks
 
     def export_geojson(self, tracks: list[PlannedProfileTrack], filepath: str | Path) -> str:
-        """Exports planned tracks to GeoJSON format."""
+        """Exports planned tracks to GeoJSON format in WGS84 (EPSG:4326)."""
         features = []
         for trk in tracks:
+            wgs_coords = _transform_coords_to_wgs84(trk.coordinates, self.crs)
             features.append({
                 "type": "Feature",
                 "geometry": {
                     "type": "LineString",
-                    "coordinates": trk.coordinates.tolist(),
+                    "coordinates": wgs_coords.tolist(),
                 },
                 "properties": {
                     "track_id": trk.track_id,
@@ -176,7 +207,7 @@ class SurveyPlanner:
         return str(out_p)
 
     def export_gpx(self, tracks: list[PlannedProfileTrack], filepath: str | Path) -> str:
-        """Exports planned tracks to GPX format."""
+        """Exports planned tracks to GPX format in WGS84 (EPSG:4326)."""
         out_p = Path(filepath)
         out_p.parent.mkdir(parents=True, exist_ok=True)
 
@@ -185,10 +216,10 @@ class SurveyPlanner:
             '<gpx version="1.1" creator="PySole SurveyPlanner" xmlns="http://www.topografix.com/GPX/1/1">',
         ]
         for trk in tracks:
+            wgs_coords = _transform_coords_to_wgs84(trk.coordinates, self.crs)
             lines.append(f'  <trk><name>{trk.track_id}</name><trkseg>')
-            for pt in trk.coordinates:
-                # GPX expects lat/lon or X/Y
-                lines.append(f'    <trkpt lat="{pt[1]}" lon="{pt[0]}"></trkpt>')
+            for pt in wgs_coords:
+                lines.append(f'    <trkpt lat="{pt[1]:.6f}" lon="{pt[0]:.6f}"></trkpt>')
             lines.append('  </trkseg></trk>')
         lines.append('</gpx>')
 

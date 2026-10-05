@@ -15,7 +15,7 @@ from scipy.linalg import LinAlgError
 from sklearn.ensemble import RandomForestRegressor
 
 from .logging import logger
-from .interpolation import DualKrigingSolver, get_drift_functions
+from .interpolation import DriftBasis, DualKrigingSolver, get_drift_functions
 
 
 @dataclass
@@ -83,8 +83,10 @@ class DriftAnalyzer:
         vifs: list[float] = []
         for i in range(n_features):
             y_i = X_drift[:, i]
+            if np.std(y_i) <= 1e-12:
+                vifs.append(1.0)
+                continue
             X_others = np.delete(X_drift, i, axis=1)
-            # Add intercept column for exact multi-variable linear regression
             A = np.column_stack([np.ones(n_samples), X_others])
             try:
                 coef, residuals, rank, s = np.linalg.lstsq(A, y_i, rcond=None)
@@ -112,7 +114,7 @@ class DriftAnalyzer:
         target_values: np.ndarray,
     ) -> pd.DataFrame:
         """
-        Computes linear Partial Correlations and Random Forest Permutation Importances.
+        Computes linear Partial Correlations (Pearson & Spearman) and Random Forest Permutation Importances.
         """
         feature_cols = [c for c in covariates_df.columns if c not in ["X", "Y"]]
         if not feature_cols:
@@ -120,25 +122,40 @@ class DriftAnalyzer:
 
         results = []
         X_mat = covariates_df[feature_cols].values
-        
-        # Fit Random Forest Regressor
-        rf = RandomForestRegressor(n_estimators=100, random_state=42)
-        try:
-            rf.fit(X_mat, target_values)
-            rf_importances = rf.feature_importances_
-        except Exception:
-            rf_importances = np.zeros(len(feature_cols))
+
+        # Clean NaNs in features or target for Random Forest fitting
+        valid_rows = ~(np.isnan(X_mat).any(axis=1) | np.isnan(target_values))
+        X_clean = X_mat[valid_rows]
+        y_clean = target_values[valid_rows]
+
+        rf_importances = np.zeros(len(feature_cols))
+        if len(y_clean) >= 5:
+            rf = RandomForestRegressor(n_estimators=100, random_state=42)
+            try:
+                rf.fit(X_clean, y_clean)
+                try:
+                    from sklearn.inspection import permutation_importance
+                    perm_res = permutation_importance(rf, X_clean, y_clean, n_repeats=5, random_state=42)
+                    rf_importances = np.maximum(perm_res.importances_mean, 0.0)
+                except Exception:
+                    rf_importances = getattr(rf, "feature_importances_", np.zeros(len(feature_cols)))
+            except Exception:
+                pass
 
         for idx, col in enumerate(feature_cols):
-            # Compute Pearson linear correlation
-            p_corr, _ = stats.pearsonr(covariates_df[col].values, target_values)
-            # Compute Spearman rank correlation
-            s_rho, _ = stats.spearmanr(covariates_df[col].values, target_values)
+            x_v = covariates_df[col].values
+            valid_p = ~(np.isnan(x_v) | np.isnan(target_values))
+            if np.sum(valid_p) >= 3 and np.std(x_v[valid_p]) > 1e-12 and np.std(target_values[valid_p]) > 1e-12:
+                p_corr, _ = stats.pearsonr(x_v[valid_p], target_values[valid_p])
+                s_rho, _ = stats.spearmanr(x_v[valid_p], target_values[valid_p])
+            else:
+                p_corr, s_rho = 0.0, 0.0
+
             results.append({
                 "feature": col,
-                "pearson_corr": p_corr if not np.isnan(p_corr) else 0.0,
-                "spearman_rho": s_rho if not np.isnan(s_rho) else 0.0,
-                "rf_importance": rf_importances[idx] if idx < len(rf_importances) else 0.0,
+                "pearson_corr": float(p_corr) if not np.isnan(p_corr) else 0.0,
+                "spearman_rho": float(s_rho) if not np.isnan(s_rho) else 0.0,
+                "rf_importance": float(rf_importances[idx]) if idx < len(rf_importances) and not np.isnan(rf_importances[idx]) else 0.0,
             })
 
         return pd.DataFrame(results).sort_values(by="rf_importance", ascending=False)
@@ -160,44 +177,54 @@ class DriftAnalyzer:
         profile_ids: np.ndarray | None = None,
     ) -> list[CandidateDriftResult]:
         """
-        Runs fast Dual Kriging Spatial Cross-Validation across all candidate single/multi-drift models.
+        Runs fast Dual Kriging Spatial Cross-Validation across candidate single/multi-drift models.
         """
         n_points = len(z_values)
-        results: list[CandidateDriftResult] = []
-
-        # Variogram params
         c0 = variogram_params.get("nugget", 0.0)
         c = variogram_params.get("sill", 1.0)
         a = variogram_params.get("range", 100.0)
+
+        model_candidates_data = []
+
+        # Determine spatial CV evaluation indices
+        if cv_mode == "lopo" and profile_ids is not None:
+            eval_indices = np.arange(n_points)
+        else:
+            if n_points > 100:
+                rng = np.random.default_rng(42)
+                eval_indices = rng.choice(n_points, size=100, replace=False)
+            else:
+                eval_indices = np.arange(n_points)
 
         for model_cfg in CANDIDATE_DRIFT_MODELS:
             name = model_cfg["name"]
             drift_terms = model_cfg["terms"]
 
-            # Glaciological safeguard check: SIA drift on Product P target
             is_sia_slope = any("sia" in t for t in drift_terms)
             warning_msg = None
             if self.interpolation_target == "P" and is_sia_slope:
                 warning_msg = "SIA slope drift on Product P target causes 1/sin^2(alpha) double-scaling margin artifacts."
 
-            # Construct drift functions
             try:
-                drift_funcs = get_drift_functions(drift_terms)
-                n_drift = len(drift_funcs)
+                drift_basis = DriftBasis(
+                    drift_terms=drift_terms,
+                    x_ref=x_pts,
+                    y_ref=y_pts,
+                    dem_grid=dem_grid,
+                    dx=dx,
+                    dy=dy,
+                    bounds=bounds,
+                    alpha_opt_deg=alpha_opt_deg,
+                )
+                n_drift = len(drift_basis.evaluators)
             except Exception as e:
                 logger.warning(f"   Skipping drift model '{name}': {e}")
                 continue
 
-            # Check VIF
-            # Build global drift basis
-            X_drift = np.zeros((n_points, n_drift))
-            for k_idx, fn in enumerate(drift_funcs):
-                X_drift[:, k_idx] = fn(x_pts, y_pts, dem_grid, dx, dy, bounds, alpha_opt_deg)
-
+            X_drift = drift_basis.evaluate(x_pts, y_pts)
             vif_max, vifs = self.calculate_vif(X_drift)
             is_multicollinear = vif_max > self.vif_threshold
 
-            # Perform Spatial CV predictions
             preds = np.full(n_points, np.nan)
 
             if cv_mode == "lopo" and profile_ids is not None:
@@ -217,29 +244,12 @@ class DriftAnalyzer:
                             sill=c,
                             range_param=a,
                             drift_terms=drift_terms,
+                            drift_basis=drift_basis,
                         )
-                        p_val = solver.predict(
-                            x_pts[val_mask],
-                            y_pts[val_mask],
-                            dem_grid=dem_grid,
-                            dx=dx,
-                            dy=dy,
-                            bounds=bounds,
-                            alpha_opt_deg=alpha_opt_deg,
-                        )
-                        preds[val_mask] = p_val
-                    except LinAlgError:
-                        pass
+                        preds[val_mask] = solver.predict(x_pts[val_mask], y_pts[val_mask])
                     except Exception:
                         pass
             else:
-                # Spatial Buffer LOOCV (Subsampled for speed when N > 100)
-                if n_points > 100:
-                    rng = np.random.default_rng(42)
-                    eval_indices = rng.choice(n_points, size=100, replace=False)
-                else:
-                    eval_indices = np.arange(n_points)
-
                 for i in eval_indices:
                     dist = np.hypot(x_pts - x_pts[i], y_pts - y_pts[i])
                     train_mask = dist > buffer_radius_m
@@ -255,27 +265,49 @@ class DriftAnalyzer:
                             sill=c,
                             range_param=a,
                             drift_terms=drift_terms,
+                            drift_basis=drift_basis,
                         )
-                        p_val = solver.predict(
-                            np.array([x_pts[i]]),
-                            np.array([y_pts[i]]),
-                            dem_grid=dem_grid,
-                            dx=dx,
-                            dy=dy,
-                            bounds=bounds,
-                            alpha_opt_deg=alpha_opt_deg,
-                        )
+                        p_val = solver.predict(np.array([x_pts[i]]), np.array([y_pts[i]]))
                         preds[i] = p_val[0]
-                    except LinAlgError:
-                        pass
                     except Exception:
                         pass
 
-            # Calculate residual metrics
-            valid_mask = ~np.isnan(preds)
-            n_valid = np.sum(valid_mask)
+            model_candidates_data.append({
+                "name": name,
+                "drift_terms": drift_terms,
+                "n_drift": n_drift,
+                "vif_max": vif_max,
+                "is_multicollinear": is_multicollinear,
+                "warning_msg": warning_msg,
+                "preds": preds,
+            })
+
+        if not model_candidates_data:
+            return []
+
+        # Find common non-NaN evaluation mask across valid candidate predictions for comparable AICc
+        valid_masks = [~np.isnan(item["preds"][eval_indices]) for item in model_candidates_data]
+        common_eval_mask_sub = np.all(valid_masks, axis=0) if valid_masks else np.array([])
+        if np.sum(common_eval_mask_sub) < 5:
+            # Fall back to per-candidate valid mask if common mask is too small
+            common_eval_indices = eval_indices
+        else:
+            common_eval_indices = eval_indices[common_eval_mask_sub]
+
+        results: list[CandidateDriftResult] = []
+        for item in model_candidates_data:
+            name = item["name"]
+            drift_terms = item["drift_terms"]
+            n_drift = item["n_drift"]
+            vif_max = item["vif_max"]
+            is_multicollinear = item["is_multicollinear"]
+            warning_msg = item["warning_msg"]
+            preds = item["preds"]
+
+            valid_mask = common_eval_indices[~np.isnan(preds[common_eval_indices])]
+            n_valid = len(valid_mask)
+
             if n_valid < n_drift + 3:
-                # Penalized candidate
                 results.append(CandidateDriftResult(
                     name=name,
                     terms=drift_terms,
@@ -287,7 +319,7 @@ class DriftAnalyzer:
                     cv_r2=-1.0,
                     aicc=99999.0,
                     is_penalized=True,
-                    warning_msg=warning_msg or "Matrix ill-conditioned / numerical singularity during LOOCV.",
+                    warning_msg=warning_msg or "Numerical singularity during CV.",
                 ))
                 continue
 
@@ -299,7 +331,7 @@ class DriftAnalyzer:
             r2 = float(1.0 - (ss_res / ss_tot)) if ss_tot > 0 else 0.0
 
             # Akaike Information Criterion corrected (AICc)
-            k_param = n_drift + 1  # drift terms + variance
+            k_param = n_drift + 1
             if n_valid - k_param - 1 > 0 and ss_res > 0:
                 aicc = float(n_valid * np.log(ss_res / n_valid) + 2 * k_param + (2 * k_param * (k_param + 1)) / (n_valid - k_param - 1))
             else:
@@ -321,7 +353,6 @@ class DriftAnalyzer:
                 warning_msg=warning_msg,
             ))
 
-        # Sort results by AICc ascending
         results.sort(key=lambda r: (r.is_penalized, r.aicc, r.cv_rmse))
         return results
 

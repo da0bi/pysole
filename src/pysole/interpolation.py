@@ -168,7 +168,7 @@ def blend_margin_topography(
 
         tapered_thickness = thickness * weight
         smoothed_thickness = gaussian_filter(tapered_thickness, sigma=1.0)
-        final_thickness = np.where(weight > 0.8, thickness, smoothed_thickness)
+        final_thickness = weight * thickness + (1.0 - weight) * smoothed_thickness
         final_thickness[~boundary_mask] = 0.0
 
         return dem - final_thickness
@@ -199,7 +199,7 @@ def blend_margin_topography(
 
     tapered_thickness = thickness_grid * weight
     smoothed_thickness = gaussian_filter(tapered_thickness, sigma=1.0)
-    final_thickness = np.where(weight > 0.8, thickness_grid, smoothed_thickness)
+    final_thickness = weight * thickness_grid + (1.0 - weight) * smoothed_thickness
     final_thickness[~boundary_mask] = 0.0
 
     return dem - final_thickness
@@ -213,6 +213,7 @@ def built_in_kriging_interpolation(
     variogram_model: str = "spherical",
     external_drift_grid: np.ndarray | dict[str, np.ndarray] | None = None,
     drift_terms: list[str] | None = None,
+    variogram_params: tuple[float, float, float] | None = None,
     n_cores: int = -1,
     show_progress: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -243,24 +244,20 @@ def built_in_kriging_interpolation(
 
     sample_dists = cdist(pts[:, :2], pts[:, :2])
     max_d = float(np.max(sample_dists)) if N_pts > 1 else 100.0
-    range_a = max(max_d * 0.6, 1.0)
-    sill = float(np.var(pts[:, 2])) if N_pts > 1 else 1.0
-    if sill == 0:
-        sill = 1.0
-    nugget = 0.0
+
+    if variogram_params is not None:
+        range_a, sill, nugget = variogram_params
+    else:
+        range_a = max(max_d * 0.6, 1.0)
+        sill = float(np.var(pts[:, 2])) if N_pts > 1 else 1.0
+        if sill == 0:
+            sill = 1.0
+        nugget = 0.0
+
+    from .variogram import evaluate_variogram_model
 
     def variogram_func(h: np.ndarray) -> np.ndarray:
-        h_ratio = np.clip(h / max(range_a, 1e-6), 0.0, 1.0)
-        v_model = variogram_model.lower()
-        if "exp" in v_model:
-            gamma = nugget + sill * (1.0 - np.exp(-3.0 * h / max(range_a, 1e-6)))
-        elif "gauss" in v_model:
-            gamma = nugget + sill * (1.0 - np.exp(-3.0 * (h / max(range_a, 1e-6))**2))
-        elif "lin" in v_model:
-            gamma = nugget + sill * np.clip(h / max(range_a, 1e-6), 0.0, 1.0)
-        else:  # spherical
-            gamma = nugget + sill * (1.5 * h_ratio - 0.5 * (h_ratio**3))
-            gamma = np.where(h > range_a, nugget + sill, gamma)
+        gamma = evaluate_variogram_model(h, variogram_model, range_a, sill, nugget)
         gamma = np.where(h == 0, 0.0, gamma)
         return gamma
 
@@ -611,7 +608,7 @@ def kriging_interpolation(
     if include_zero_boundary_condition and outline_mask is not None and np.any(outline_mask):
         from scipy.ndimage import binary_erosion
 
-        eroded = binary_erosion(outline_mask)
+        eroded = binary_erosion(outline_mask, border_value=1)
         boundary_mask = outline_mask & ~eroded
 
         b_indices = np.argwhere(boundary_mask)  # (row, col)
@@ -784,67 +781,153 @@ def random_forest_hole_filling(
     return filled_bedrock
 
 
+class DriftBasis:
+    """
+    Unified spatial drift basis evaluator and pre-calculated feature cache.
+    Computes drift covariates across spatial coordinates or whole DEM grids,
+    maintaining fixed global standardization statistics (mean, scale) per feature column.
+    """
+    SUPPORTED_TERMS = {
+        "linear_xy", "quadratic_xy", "z_dem", "sia", "curvature_dem",
+        "sia_space", "sia_z_dem", "sia_curvature_dem", "z_dem_curvature_dem",
+        "sia_z_dem_curvature_dem", "full_physical", "full_spatial_physical"
+    }
+
+    def __init__(
+        self,
+        drift_terms: list[str],
+        x_ref: np.ndarray,
+        y_ref: np.ndarray,
+        dem_grid: np.ndarray | None = None,
+        dx: float = 10.0,
+        dy: float = 10.0,
+        bounds: tuple[float, float, float, float] | None = None,
+        alpha_opt_deg: np.ndarray | None = None,
+        slope_floor_deg: float = 5.0,
+    ):
+        self.drift_terms = drift_terms or []
+        self.dx = dx
+        self.dy = dy
+        self.bounds = bounds
+        self.slope_floor_deg = slope_floor_deg
+
+        primitives: set[str] = set()
+        for term in self.drift_terms:
+            if term not in self.SUPPORTED_TERMS:
+                raise ValueError(f"Unknown drift term '{term}'. Supported terms: {sorted(self.SUPPORTED_TERMS)}")
+            if term == "sia_space":
+                primitives.update(["sia", "linear_xy"])
+            elif term == "sia_z_dem":
+                primitives.update(["sia", "z_dem"])
+            elif term == "sia_curvature_dem":
+                primitives.update(["sia", "curvature_dem"])
+            elif term == "z_dem_curvature_dem":
+                primitives.update(["z_dem", "curvature_dem"])
+            elif term in ["sia_z_dem_curvature_dem", "full_physical"]:
+                primitives.update(["sia", "z_dem", "curvature_dem"])
+            elif term == "full_spatial_physical":
+                primitives.update(["sia", "z_dem", "curvature_dem", "linear_xy"])
+            else:
+                primitives.add(term)
+
+        self.primitives = primitives
+
+        # Precompute DEM curvature & SIA grids ONCE if dem_grid is provided
+        self.curvature_grid = None
+        self.sia_grid = None
+        if dem_grid is not None:
+            if "curvature_dem" in primitives:
+                from .smoothing import compute_surface_curvature
+                self.curvature_grid = compute_surface_curvature(dem_grid, dx=dx, dy=dy)
+            if "sia" in primitives and alpha_opt_deg is not None:
+                sin_a = np.sin(np.radians(np.maximum(alpha_opt_deg, slope_floor_deg)))
+                self.sia_grid = 1.0 / np.maximum(sin_a, 1e-3)
+
+        x_ref = np.asarray(x_ref, dtype=np.float64)
+        y_ref = np.asarray(y_ref, dtype=np.float64)
+
+        self.means: list[float] = []
+        self.scales: list[float] = []
+        self.evaluators: list[Any] = []
+
+        if "linear_xy" in primitives:
+            m_x, s_x = float(np.mean(x_ref)), max(float(np.ptp(x_ref)), 1.0)
+            m_y, s_y = float(np.mean(y_ref)), max(float(np.ptp(y_ref)), 1.0)
+            self.means.extend([m_x, m_y])
+            self.scales.extend([s_x, s_y])
+            self.evaluators.extend([
+                lambda x, y: x,
+                lambda x, y: y,
+            ])
+
+        if "quadratic_xy" in primitives:
+            m_x, s_x = float(np.mean(x_ref)), max(float(np.ptp(x_ref)), 1.0)
+            m_y, s_y = float(np.mean(y_ref)), max(float(np.ptp(y_ref)), 1.0)
+            self.means.extend([m_x, m_y, m_x * m_y])
+            self.scales.extend([s_x**2, s_y**2, s_x * s_y])
+            self.evaluators.extend([
+                lambda x, y: x**2,
+                lambda x, y: y**2,
+                lambda x, y: x * y,
+            ])
+
+        if "z_dem" in primitives and dem_grid is not None and bounds is not None:
+            geom = GridGeometry.create(dem_grid.shape, dx=dx, dy=dy, bounds=bounds)
+            r, c = geom.coords_to_grid_indices(x_ref, y_ref)
+            z_vals = dem_grid[r, c]
+            m_z, s_z = float(np.nanmean(z_vals)), max(float(np.nanstd(z_vals)), 1e-6)
+            self.means.append(m_z)
+            self.scales.append(s_z)
+            self.evaluators.append(lambda x, y: dem_grid[geom.coords_to_grid_indices(x, y)])
+
+        if "sia" in primitives and self.sia_grid is not None and bounds is not None:
+            geom = GridGeometry.create(dem_grid.shape, dx=dx, dy=dy, bounds=bounds)
+            r, c = geom.coords_to_grid_indices(x_ref, y_ref)
+            sia_vals = self.sia_grid[r, c]
+            m_sia, s_sia = float(np.nanmean(sia_vals)), max(float(np.nanstd(sia_vals)), 1e-6)
+            self.means.append(m_sia)
+            self.scales.append(s_sia)
+            self.evaluators.append(lambda x, y: self.sia_grid[geom.coords_to_grid_indices(x, y)])
+
+        if "curvature_dem" in primitives and self.curvature_grid is not None and bounds is not None:
+            geom = GridGeometry.create(dem_grid.shape, dx=dx, dy=dy, bounds=bounds)
+            r, c = geom.coords_to_grid_indices(x_ref, y_ref)
+            curv_vals = self.curvature_grid[r, c]
+            m_curv, s_curv = float(np.nanmean(curv_vals)), max(float(np.nanstd(curv_vals)), 1e-6)
+            self.means.append(m_curv)
+            self.scales.append(s_curv)
+            self.evaluators.append(lambda x, y: self.curvature_grid[geom.coords_to_grid_indices(x, y)])
+
+    def evaluate(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """Evaluates and standardizes drift basis matrix for query coordinates (x, y)."""
+        x = np.asarray(x, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64)
+        n_pts = len(x)
+        if not self.evaluators:
+            return np.zeros((n_pts, 0))
+
+        cols = []
+        for fn, mean_val, scale_val in zip(self.evaluators, self.means, self.scales):
+            raw_v = fn(x, y)
+            cols.append((raw_v - mean_val) / scale_val)
+        return np.column_stack(cols)
+
+
 def get_drift_functions(drift_terms: list[str]) -> list[Any]:
     """
     Returns spatial drift basis functions for given drift term keywords.
     Each function has signature fn(x_pts, y_pts, dem_grid, dx, dy, bounds, alpha_opt_deg).
     """
+    basis_temp = DriftBasis(
+        drift_terms=drift_terms,
+        x_ref=np.array([0.0, 100.0]),
+        y_ref=np.array([0.0, 100.0]),
+    )
     funcs = []
-    primitives: set[str] = set()
-    for term in drift_terms:
-        if term == "sia_space":
-            primitives.update(["sia", "linear_xy"])
-        elif term == "sia_z_dem":
-            primitives.update(["sia", "z_dem"])
-        elif term == "sia_curvature_dem":
-            primitives.update(["sia", "curvature_dem"])
-        elif term == "z_dem_curvature_dem":
-            primitives.update(["z_dem", "curvature_dem"])
-        elif term in ["sia_z_dem_curvature_dem", "full_physical"]:
-            primitives.update(["sia", "z_dem", "curvature_dem"])
-        elif term == "full_spatial_physical":
-            primitives.update(["sia", "z_dem", "curvature_dem", "linear_xy"])
-        else:
-            primitives.add(term)
-
-    if "linear_xy" in primitives:
-        funcs.append(lambda x, y, dem, dx, dy, b, a: (x - np.mean(x)) / max(np.ptp(x), 1.0))
-        funcs.append(lambda x, y, dem, dx, dy, b, a: (y - np.mean(y)) / max(np.ptp(y), 1.0))
-    if "quadratic_xy" in primitives:
-        funcs.append(lambda x, y, dem, dx, dy, b, a: ((x - np.mean(x)) / max(np.ptp(x), 1.0))**2)
-        funcs.append(lambda x, y, dem, dx, dy, b, a: ((y - np.mean(y)) / max(np.ptp(y), 1.0))**2)
-        funcs.append(lambda x, y, dem, dx, dy, b, a: ((x - np.mean(x)) / max(np.ptp(x), 1.0)) * ((y - np.mean(y)) / max(np.ptp(y), 1.0)))
-    if "z_dem" in primitives:
-        def eval_z_dem(x, y, dem, dx, dy, b, a):
-            if dem is None or b is None:
-                return np.zeros_like(x)
-            geom = GridGeometry.create(dem.shape, dx=dx, dy=dy, bounds=b)
-            rows, cols = geom.coords_to_grid_indices(x, y)
-            vals = dem[rows, cols]
-            return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
-        funcs.append(eval_z_dem)
-    if "sia" in primitives:
-        def eval_sia(x, y, dem, dx, dy, b, a):
-            if a is None or dem is None or b is None:
-                return np.zeros_like(x)
-            geom = GridGeometry.create(dem.shape, dx=dx, dy=dy, bounds=b)
-            rows, cols = geom.coords_to_grid_indices(x, y)
-            a_pts = a[rows, cols]
-            sin_a = np.sin(np.radians(np.maximum(a_pts, 1.0)))
-            vals = 1.0 / np.maximum(sin_a, 1e-3)
-            return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
-        funcs.append(eval_sia)
-    if "curvature_dem" in primitives:
-        def eval_curvature_dem(x, y, dem, dx, dy, b, a):
-            if dem is None or b is None:
-                return np.zeros_like(x)
-            from .smoothing import compute_surface_curvature
-            curvature = compute_surface_curvature(dem, dx=dx, dy=dy)
-            geom = GridGeometry.create(dem.shape, dx=dx, dy=dy, bounds=b)
-            rows, cols = geom.coords_to_grid_indices(x, y)
-            vals = curvature[rows, cols]
-            return (vals - np.nanmean(vals)) / max(np.nanstd(vals), 1e-6)
-        funcs.append(eval_curvature_dem)
+    for idx, fn in enumerate(basis_temp.evaluators):
+        def _make_eval(i):
+            return lambda x, y, dem, dx, dy, b, a: fn(x, y)
+        funcs.append(_make_eval(idx))
 
     if not funcs:
         funcs.append(lambda x, y, dem, dx, dy, b, a: (x - np.mean(x)) / max(np.ptp(x), 1.0))
@@ -866,6 +949,7 @@ class DualKrigingSolver:
         sill: float = 1.0,
         range_param: float = 100.0,
         drift_terms: list[str] | None = None,
+        drift_basis: DriftBasis | None = None,
         dem_grid: np.ndarray | None = None,
         dx: float = 5.0,
         dy: float = 5.0,
@@ -880,6 +964,22 @@ class DualKrigingSolver:
         self.sill = float(sill) if sill > 0 else 1.0
         self.range_param = float(range_param) if range_param > 0 else 100.0
         self.drift_terms = drift_terms or []
+
+        if drift_basis is not None:
+            self.drift_basis = drift_basis
+        elif self.drift_terms:
+            self.drift_basis = DriftBasis(
+                drift_terms=self.drift_terms,
+                x_ref=self.x_pts,
+                y_ref=self.y_pts,
+                dem_grid=dem_grid,
+                dx=dx,
+                dy=dy,
+                bounds=bounds,
+                alpha_opt_deg=alpha_opt_deg,
+            )
+        else:
+            self.drift_basis = None
 
         N = len(self.x_pts)
         pts_xy = np.column_stack((self.x_pts, self.y_pts))
@@ -899,11 +999,11 @@ class DualKrigingSolver:
 
         np.fill_diagonal(K, 0.0)
 
-        drift_funcs = get_drift_functions(self.drift_terms)
         F_list = [np.ones((N, 1))]
-        for fn in drift_funcs:
-            f_col = fn(self.x_pts, self.y_pts, dem_grid, dx, dy, bounds, alpha_opt_deg).reshape(-1, 1)
-            F_list.append(f_col)
+        if self.drift_basis is not None:
+            F_drift = self.drift_basis.evaluate(self.x_pts, self.y_pts)
+            if F_drift.shape[1] > 0:
+                F_list.append(F_drift)
 
         F = np.hstack(F_list)
         n_drift = F.shape[1]
@@ -957,11 +1057,11 @@ class DualKrigingSolver:
             gamma[dists > self.range_param] = self.sill
             K_val = self.nugget + gamma
 
-        drift_funcs = get_drift_functions(self.drift_terms)
         F_list = [np.ones((N_val, 1))]
-        for fn in drift_funcs:
-            f_col = fn(x_val, y_val, dem_grid, dx, dy, bounds, alpha_opt_deg).reshape(-1, 1)
-            F_list.append(f_col)
+        if self.drift_basis is not None:
+            F_drift = self.drift_basis.evaluate(x_val, y_val)
+            if F_drift.shape[1] > 0:
+                F_list.append(F_drift)
 
         F_val = np.hstack(F_list)
         return K_val @ self.b + F_val @ self.a

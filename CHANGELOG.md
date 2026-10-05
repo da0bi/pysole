@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1).
 
 ### Refactored
+- **Codebase Streamlining & Audit**: Audited codebase to eliminate redundant backward-compatibility layers and obsolete code. Consolidated spatial coordinate index calculations (`coords_to_grid_indices`) in `GridGeometry`, standardized `from_config` survey profile column parsing, and streamlined `DualKrigingSolver` candidate drift function lookups.
 - **`Solver` Engine & Method Canonicalization (`src/pysole/solver.py`)**:
   - Consolidated `calculate_bedrock()` and `finalize_bedrock()` as the primary canonical methods on `Solver`, keeping `interpolate_kriging()` and `finalize_topography()` as transparent aliases.
   - Purged obsolete legacy aliases (`compute_eikonal_migration()`, `calculate_topography()`, `solve_kriging()`).

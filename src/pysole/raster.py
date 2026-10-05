@@ -90,8 +90,8 @@ class GridGeometry:
         """
         M, N = self.shape
         minx, miny, maxx, maxy = self.bounds
-        cols = np.clip(((x - minx) / self.dx).astype(int), 0, N - 1)
-        rows = np.clip(((maxy - y) / self.dy).astype(int), 0, M - 1)
+        cols = np.clip(np.floor((x - minx) / self.dx).astype(int), 0, N - 1)
+        rows = np.clip(np.floor((y - miny) / self.dy).astype(int), 0, M - 1)
         return rows, cols
 
 
@@ -214,10 +214,10 @@ class BedrockMap:
                 np.savetxt(abs_target_path, grid_asc, header=header, comments="", fmt="%.4f")
 
             elif fmt == "csv":
-                np.savetxt(abs_target_path, self.grid, delimiter=",")
+                np.savetxt(abs_target_path, self.grid[::-1, :], delimiter=",")
 
             elif fmt == "npy":
-                np.save(abs_target_path, self.grid)
+                np.save(abs_target_path, self.grid[::-1, :])
 
             saved_files.append(abs_target_path)
 
@@ -698,64 +698,66 @@ def load_outline(
                 fill=0,
                 dtype=np.uint8,
             )
-            return mask.astype(bool)
+            # Rasterize output is top-down; flip vertically to align with bottom-up DEM grid
+            return mask[::-1].astype(bool)
         except ValueError:
             raise
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Vector outline parsing failed for '{outline_input}': {e}. Falling back to text coordinate parser.")
 
-        # 2. Text / CSV polygon coordinates (supports NaN-separated exterior and interior hole rings & text headers)
+    # 2. Text / CSV polygon coordinates (supports NaN-separated exterior and interior hole rings & text headers)
+    try:
         try:
-            try:
-                raw_coords = np.loadtxt(outline_input, delimiter="," if ext == ".csv" else None)
-            except ValueError:
-                import pandas as pd
-                df_tmp = pd.read_csv(outline_input)
-                raw_coords = df_tmp.select_dtypes(include=[np.number]).to_numpy()
+            raw_coords = np.loadtxt(outline_input, delimiter="," if ext == ".csv" else None)
+        except ValueError:
+            import pandas as pd
+            df_tmp = pd.read_csv(outline_input)
+            raw_coords = df_tmp.select_dtypes(include=[np.number]).to_numpy()
 
-            if raw_coords.ndim == 2 and raw_coords.shape[1] >= 2:
-                # Split coordinate blocks by NaN rows
-                nan_mask = np.isnan(raw_coords[:, 0]) | np.isnan(raw_coords[:, 1])
-                if np.any(nan_mask):
-                    split_indices = np.where(nan_mask)[0]
-                    rings = []
-                    prev_idx = 0
-                    for s_idx in split_indices:
-                        ring = raw_coords[prev_idx:s_idx, :2]
-                        if len(ring) >= 3:
-                            rings.append(ring)
-                        prev_idx = s_idx + 1
-                    if prev_idx < len(raw_coords):
-                        ring = raw_coords[prev_idx:, :2]
-                        if len(ring) >= 3:
-                            rings.append(ring)
-                else:
-                    rings = [raw_coords[:, :2]]
+        if raw_coords.ndim == 2 and raw_coords.shape[1] >= 2:
+            # Split coordinate blocks by NaN rows
+            nan_mask = np.isnan(raw_coords[:, 0]) | np.isnan(raw_coords[:, 1])
+            if np.any(nan_mask):
+                split_indices = np.where(nan_mask)[0]
+                rings = []
+                prev_idx = 0
+                for s_idx in split_indices:
+                    ring = raw_coords[prev_idx:s_idx, :2]
+                    if len(ring) >= 3:
+                        rings.append(ring)
+                    prev_idx = s_idx + 1
+                if prev_idx < len(raw_coords):
+                    ring = raw_coords[prev_idx:, :2]
+                    if len(ring) >= 3:
+                        rings.append(ring)
+            else:
+                rings = [raw_coords[:, :2]]
 
-                    from matplotlib.path import Path as MplPath
+            if rings:
+                from matplotlib.path import Path as MplPath
 
-                    minx, miny, maxx, maxy = bounds
-                    dx = meta.get("dx", (maxx - minx) / width)
-                    dy = meta.get("dy", (maxy - miny) / height)
+                minx, miny, maxx, maxy = bounds
+                dx = meta.get("dx", (maxx - minx) / width)
+                dy = meta.get("dy", (maxy - miny) / height)
 
-                    x_c, y_c, _ = ensure_spatial_coords(
-                        (height, width),
-                        dx=dx,
-                        dy=dy,
-                        bounds=bounds,
-                    )
-                    xx, yy = np.meshgrid(x_c, y_c)
-                    pts = np.column_stack((xx.ravel(), yy.ravel()))
+                x_c, y_c, _ = ensure_spatial_coords(
+                    (height, width),
+                    dx=dx,
+                    dy=dy,
+                    bounds=bounds,
+                )
+                xx, yy = np.meshgrid(x_c, y_c)
+                pts = np.column_stack((xx.ravel(), yy.ravel()))
 
-                    outer_mask = MplPath(rings[0]).contains_points(pts).reshape((height, width))
-                    hole_mask = np.zeros((height, width), dtype=bool)
-                    for hole_ring in rings[1:]:
-                        if len(hole_ring) >= 3:
-                            hole_mask |= MplPath(hole_ring).contains_points(pts).reshape((height, width))
+                outer_mask = MplPath(rings[0]).contains_points(pts).reshape((height, width))
+                hole_mask = np.zeros((height, width), dtype=bool)
+                for hole_ring in rings[1:]:
+                    if len(hole_ring) >= 3:
+                        hole_mask |= MplPath(hole_ring).contains_points(pts).reshape((height, width))
 
-                    return outer_mask & ~hole_mask
-        except Exception:
-            pass
+                return outer_mask & ~hole_mask
+    except Exception as e:
+        logger.warning(f"Text/CSV outline parsing failed for '{outline_input}': {e}. Defaulting to DEM NaN boundary.")
 
     return ~np.isnan(dem_grid)
 

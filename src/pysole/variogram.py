@@ -190,10 +190,48 @@ def calculate_variogram(
 def spherical_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarray:
     """Spherical variogram model: gamma(h) = n + c * [1.5*(h/a) - 0.5*(h/a)^3] for h <= a; n + c for h > a."""
     h = np.asarray(h, dtype=float)
+    a_eff = max(float(a), 1e-6)
     gamma = np.full_like(h, n + c)
-    mask = h <= a
-    gamma[mask] = n + c * (1.5 * (h[mask] / a) - 0.5 * (h[mask] / a)**3)
+    mask = h <= a_eff
+    h_rel = h[mask] / a_eff
+    gamma[mask] = n + c * (1.5 * h_rel - 0.5 * (h_rel**3))
     return gamma
+
+
+def exponential_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarray:
+    """Exponential variogram model: gamma(h) = n + c * [1 - exp(-3h/a)]."""
+    h = np.asarray(h, dtype=float)
+    a_eff = max(float(a), 1e-6)
+    return n + c * (1.0 - np.exp(-3.0 * h / a_eff))
+
+
+def gaussian_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarray:
+    """Gaussian variogram model: gamma(h) = n + c * [1 - exp(-3*(h/a)^2)]."""
+    h = np.asarray(h, dtype=float)
+    a_eff = max(float(a), 1e-6)
+    return n + c * (1.0 - np.exp(-3.0 * (h / a_eff)**2))
+
+
+def linear_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarray:
+    """Linear variogram model: gamma(h) = n + c * min(h/a, 1)."""
+    h = np.asarray(h, dtype=float)
+    a_eff = max(float(a), 1e-6)
+    return n + c * np.clip(h / a_eff, 0.0, 1.0)
+
+
+def evaluate_variogram_model(
+    h: np.ndarray, model_type: str, a: float, c: float, n: float
+) -> np.ndarray:
+    """Evaluates the specified theoretical variogram model curve at lag distances h."""
+    m_type = str(model_type).lower().strip()
+    if "exp" in m_type:
+        return exponential_variogram(h, a, c, n)
+    elif "gauss" in m_type:
+        return gaussian_variogram(h, a, c, n)
+    elif "lin" in m_type:
+        return linear_variogram(h, a, c, n)
+    else:
+        return spherical_variogram(h, a, c, n)
 
 
 def fit_variogram_model(
@@ -203,8 +241,9 @@ def fit_variogram_model(
     show_progress: bool = False,
 ) -> tuple[float, float, float, dict[str, np.ndarray]]:
     """
-    Fits a theoretical variogram model (Spherical) to experimental variogram data.
-    Ported from variogramfit.m.
+    Fits a theoretical variogram model to experimental variogram data.
+    Supports Spherical, Exponential, Gaussian, and Linear model functions.
+    Scale-invariant fitting scales initial guesses and bounds relative to experimental semivariance magnitude.
 
     Returns
     -------
@@ -225,26 +264,39 @@ def fit_variogram_model(
     ) as pbar:
         if len(distances) < 3 or len(semivars) < 3:
             a_default = float(np.max(distances)) if len(distances) > 0 else 1000.0
-            sill_default = float(np.var(semivars)) if len(semivars) > 0 else 1.0
+            sill_default = float(np.mean(semivars)) if len(semivars) > 0 else 1.0
             h_fine = np.linspace(0, a_default * 1.5, 100)
             pbar.update(max(1, len(distances)))
             return a_default, sill_default, 0.0, {"h": h_fine, "gamma": np.full_like(h_fine, sill_default)}
 
         max_dist = float(np.max(distances))
-        var_val = float(np.var(semivars)) if np.var(semivars) > 0 else float(np.mean(semivars))
-        p0 = [max_dist * 0.5, var_val * 0.8, 0.0]
-        bounds = ([1e-3, 1e-6, 0.0], [max_dist * 3.0, var_val * 10.0, var_val * 2.0])
+        gamma_tail = float(np.mean(semivars[-max(1, len(semivars) // 3) :]))
+        sill0 = max(gamma_tail, 1e-12)
+
+        p0 = [max_dist * 0.5, sill0 * 0.8, 0.0]
+        bounds = ([1e-3, 1e-15, 0.0], [max_dist * 5.0, sill0 * 20.0, sill0 * 2.0])
+
+        m_type = str(model_type).lower().strip()
+        if "exp" in m_type:
+            fit_func = exponential_variogram
+        elif "gauss" in m_type:
+            fit_func = gaussian_variogram
+        elif "lin" in m_type:
+            fit_func = linear_variogram
+        else:
+            fit_func = spherical_variogram
 
         try:
-            popt, _ = curve_fit(spherical_variogram, distances, semivars, p0=p0, bounds=bounds, maxfev=2000)
+            popt, _ = curve_fit(fit_func, distances, semivars, p0=p0, bounds=bounds, maxfev=2000)
             a_range, sill, nugget = float(popt[0]), float(popt[1]), float(popt[2])
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Variogram curve fitting ({model_type}) failed: {e}. Falling back to default parameters.")
             a_range = max_dist * 0.5
-            sill = var_val
+            sill = sill0
             nugget = 0.0
 
         h_fine = np.linspace(0, max_dist * 1.2, 150)
-        gamma_fine = spherical_variogram(h_fine, a_range, sill, nugget)
+        gamma_fine = evaluate_variogram_model(h_fine, model_type, a_range, sill, nugget)
         model_curve = {"h": h_fine, "gamma": gamma_fine}
 
         pbar.update(len(distances))
