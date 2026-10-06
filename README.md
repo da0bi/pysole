@@ -23,7 +23,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Universal Kriging Drift Models](#universal-kriging-drift-models)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[7. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[8. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[9. Conversion of Wavenumber to Wavelength](#wavenumber-to-wavelength-conversion)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[9. Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Command-Line Interface (CLI) Execution](#cli-execution)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
@@ -242,7 +242,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal traveltimes. If `false`, migration is skipped. |
 | | `velocity` | `float` | `0.16` | Signal propagation velocity (default value of `0.16` m/ns is characteristic for radar wave propagation in temperate ice). |
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual migrated depths and horizontal displacement vector plots. |
-| **`optimization_parameters`** | `fft_filter_metric` | `str` | `"wavenumber"` | Metric used for the FFT low-pass filter: `"wavenumber"` in radiant per meter [rad/m], or `"wavelength"` in meters [m]. |
+| **`optimization_parameters`** | `fft_filter_metric` | `str` | `"wavenumber"` | Metric used for the FFT low-pass filter: `"wavenumber"` in radians per meter [rad/m], or `"wavelength"` in meters [m]. |
 | | `kc_max` | `float` | `null` | Maximum corner frequency cutoff $k_{\text{c,max}}$ in [rad/m]. If `null`, defaults to grid Nyquist wavenumber $k_{\text{Nyquist}}$. |
 | | `kc_min` | `float` | `0.01` | Minimum corner frequency cutoff $k_{\text{c,min}}$ in [rad/m]. |
 | | `d_kc` | `float` | `0.01` | Corner frequency stepwidth $\mathrm{d}k$ in [rad/m]. |
@@ -513,7 +513,7 @@ Z_{\text{bed}}(x,y) &= Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)
 Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual $Z_{\text{surface}} - S(Z_{\text{surface}})$ from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
-#### 9. Wavenumber and Wavelengths
+#### 9. Wavenumbers and Wavelengths
 In `PySole`, 2D spatial Gaussian low-pass smoothing operates in the physical 2D spatial frequency domain. Spatial wavenumber components along orthogonal grid axes $X$ and $Y$ are constructed in physical units of **[radians per meter]** as:
 
 <p align="center">
@@ -547,7 +547,7 @@ For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 | **$0.0314\text{ rad/m}$** | $\mathbf{200.0\text{ m}}$ | Broad spatial smoothing |
 | **$0.0100\text{ rad/m}$** | $\mathbf{628.3\text{ m}}$ | Very broad regional smoothing |
 
-Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and can be selected via the `"fft_filter_metric"` setting (`"wavenumber"` vs `"wavelength"`).
+Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and can be selected via the `"fft_filter_metric"` setting (`"wavenumber"` or `"wavelength"`).
 
 ---
 
