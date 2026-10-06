@@ -110,6 +110,9 @@ class SurveyPlanner:
         """
         Generates central longitudinal flowline and transverse cross-profiles subject to total length budget max_length_km.
         """
+        if max_length_km <= 0:
+            raise ValueError(f"Survey track length budget (max_length_km={max_length_km}) must be greater than zero.")
+
         max_length_m = max_length_km * 1000.0
         ny, nx = d_sia.shape
         minx, miny, maxx, maxy = self.bounds

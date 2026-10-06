@@ -15,6 +15,7 @@ from scipy.spatial.distance import pdist
 from scipy.optimize import curve_fit
 from .smoothing import (
     compute_gradients,
+    compute_slope_rad,
     precompute_fft_grid,
     fft_gaussian_smooth_precomputed,
 )
@@ -154,6 +155,46 @@ def calculate_variogram(
     n_pts = len(coords)
     if n_pts < 2:
         return {"distance": np.array([]), "val": np.array([]), "np": np.array([])}
+
+    if precomputed_dists is None and n_pts > 5000:
+        sub_sample_size = min(1000, n_pts)
+        sub_idx = np.linspace(0, n_pts - 1, sub_sample_size, dtype=int)
+        sub_dists = pdist(coords[sub_idx])
+        calc_maxdist = 0.5 * float(np.max(sub_dists)) if (maxdist is None or maxdist <= 0) else float(maxdist)
+
+        n_pairs = (n_pts * (n_pts - 1)) // 2
+        max_bins_for_30_pairs = max(3, n_pairs // 30)
+        actual_nrbins = max_bins_for_30_pairs if (nrbins is None or nrbins <= 0) else max(3, int(nrbins))
+
+        bins = np.linspace(0, calc_maxdist, actual_nrbins + 1)
+        bin_centers = 0.5 * (bins[:-1] + bins[1:])
+
+        counts = np.zeros(actual_nrbins, dtype=np.int64)
+        sums = np.zeros(actual_nrbins, dtype=np.float64)
+
+        chunk_rows = 500
+        for i_start in range(0, n_pts - 1, chunk_rows):
+            i_end = min(i_start + chunk_rows, n_pts - 1)
+            for i in range(i_start, i_end):
+                j_idx = np.arange(i + 1, n_pts)
+                d_ij = np.hypot(coords[i, 0] - coords[j_idx, 0], coords[i, 1] - coords[j_idx, 1])
+                diff_ij = (values[i] - values[j_idx]) ** 2
+
+                b_idx = np.digitize(d_ij, bins) - 1
+                valid_m = (b_idx >= 0) & (b_idx < actual_nrbins)
+                if np.any(valid_m):
+                    counts += np.bincount(b_idx[valid_m], minlength=actual_nrbins)
+                    sums += np.bincount(b_idx[valid_m], weights=diff_ij[valid_m], minlength=actual_nrbins)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            semivars = np.where(counts > 0, 0.5 * (sums / np.maximum(counts, 1)), np.nan)
+
+        valid = ~np.isnan(semivars) & (counts > 0)
+        return {
+            "distance": bin_centers[valid],
+            "val": semivars[valid],
+            "np": counts[valid],
+        }
 
     if precomputed_dists is not None:
         dists = precomputed_dists
@@ -366,7 +407,7 @@ def optimize_bss_variance(
 
     # Pre-compute 2D Forward FFT and wavenumber grid ONCE on raw DEM elevation Z_surf
     A_shift_dem, k_grid_dem, k_max_grid = precompute_fft_grid(dem, dx=dx, dy=dy)
-    base_slope = compute_gradients(dem, dx=dx, dy=dy)["slope_rad"]
+    base_slope = compute_slope_rad(dem, dx=dx, dy=dy)
 
     use_wavelength = str(fft_filter_metric).lower().strip() == "wavelength" or (lambda_min is not None or lambda_max is not None)
 
@@ -435,7 +476,7 @@ def optimize_bss_variance(
 
         kc_key = round(float(kc_val), 6)
         smoothed_dem = fft_gaussian_smooth_precomputed(A_shift_dem, k_grid_dem, kc=kc_val)
-        smoothed_slope = compute_gradients(smoothed_dem, dx=dx, dy=dy)["slope_rad"]
+        smoothed_slope = compute_slope_rad(smoothed_dem, dx=dx, dy=dy)
 
         interp_slope = geometry.create_interpolator(smoothed_slope, fill_value=np.nan)
         pts_xy = np.column_stack((survey_points[:, 1], survey_points[:, 0]))

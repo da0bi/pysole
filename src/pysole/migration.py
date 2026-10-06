@@ -11,7 +11,7 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from .smoothing import compute_gradients
 from .raster import GridGeometry
-from .logging import get_progress_bar
+from .logging import logger, get_progress_bar
 
 
 @dataclass
@@ -141,6 +141,14 @@ def migrate_eikonal_points(
     s12_quadr_grid = s1_grid**2 + s2_grid**2 + 2.0 * s1_grid * s2_grid * sin_alpha_x * sin_alpha_y
 
     inv_v_sq = (1.0 / max(velocity, 1e-4))**2
+    evanescent_mask = s12_quadr_grid > inv_v_sq
+    evanescent_count = int(np.sum(evanescent_mask))
+    if evanescent_count > 0:
+        logger.info(
+            f"   [3D Ray Migration] {evanescent_count} grid cells triggered evanescent wave condition "
+            f"(|s_h| > 1/v); vertical slowness s3 clamped to 0.0."
+        )
+
     s3_grid = np.sqrt(np.maximum(inv_v_sq - s12_quadr_grid, 0.0))
 
     A_grid = (cos_alpha_y**2) * (cos_alpha_x**2) + (sin_alpha_y**2) * (cos_alpha_x**2) + (sin_alpha_x**2) * (cos_alpha_y**2)
@@ -199,6 +207,12 @@ def migrate_eikonal_points(
     # Fallback to unmigrated depth if dzi interpolation is zero
     unmig_d = survey_points[:, 3] * velocity
     valid_d = d_mig > 0
+    fallback_count = int(np.sum(~valid_d))
+    if fallback_count > 0:
+        logger.info(
+            f"   [3D Ray Migration] {fallback_count} survey picks fell back to unmigrated coordinates "
+            f"due to boundary NaN gradients."
+        )
     d_mig[~valid_d] = unmig_d[~valid_d]
 
     # Sample surface DEM elevation at migrated (x_mig, y_mig)

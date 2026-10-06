@@ -35,6 +35,12 @@ def compute_surface_curvature(
     return d2z_dx2 + d2z_dy2
 
 
+def compute_slope_rad(dem: np.ndarray, dx: float = 1.0, dy: float = 1.0) -> np.ndarray:
+    """Fast computation of surface slope in radians without auxiliary aspect/curvature grids."""
+    slope_y, slope_x = np.gradient(dem, dy, dx)
+    return np.arctan(np.hypot(slope_x, slope_y))
+
+
 def compute_gradients(
     dem: np.ndarray, dx: float = 1.0, dy: float = 1.0
 ) -> dict[str, np.ndarray]:

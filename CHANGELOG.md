@@ -12,17 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added configuration parameter `fft_filter_metric` (`"wavenumber"` vs `"wavelength"`) and dual parameter support (`lambda_min`, `lambda_max`, `d_lambda` alongside `kc_min`, `kc_max`, `d_kc`).
   - Added automatic Nyquist limit calculation ($k_{\text{Nyquist}} = \pi / \min(\mathrm{d}x, \mathrm{d}y)$, $\lambda_{\text{Nyquist}} = 2 \cdot \min(\mathrm{d}x, \mathrm{d}y)$), logging active DEM Nyquist limits, and clamping invalid out-of-bound user inputs with warning logs.
   - Audited `interactive_optimization` CLI loop for metric-aware interactive prompting.
-- **[M2] FFT Smoothing Edge Padding & NaN Normalized Convolution (`src/pysole/smoothing.py`)**:
-  - Applied reflect boundary padding ($\approx 3\sigma$) and normalized convolution $\text{smooth}(\text{data} \cdot \text{mask}) / \text{smooth}(\text{mask})$ to eliminate edge ringing artifacts at glacier margins.
-- **[M5 & M11] Dual Kriging & Continuous Margin Blending (`src/pysole/interpolation.py`)**:
-  - Passed physical metric sampling `(dy, dx)` to `distance_transform_edt` in `blend_margin_topography()`.
-  - Streamlined Dual Kriging vector dot product prediction paths.
-- **[H7] Low-Slope Thickness Underestimation Floor Symmetry (`src/pysole/solver.py`, `src/pysole/interpolation.py`)**:
-  - Enforced symmetric slope floor clamping (`slope_floor_deg`, default $5^\circ$, $\sin 5^\circ \approx 0.08715$) across both forward product generation (`get_sample_points`) and inverse thickness recovery (`finalize_bedrock` / `interpolate_kriging`).
-  - Purged hardcoded `1e-4` ($\sim 0.0057^\circ$) floor remnants from `get_sample_points`, eliminating the artificial $\sim 60\%$ ice thickness underestimation at low-slope glacier interiors ($\alpha \approx 2^\circ$).
-- **[H6] Residual Variogram Fitting Propagation (`src/pysole/solver.py`, `src/pysole/interpolation.py`)**:
-  - Propagated fitted variogram parameters (`opt_variogram_params`) from `Solver` into `kriging_interpolation()` and `built_in_kriging_interpolation()`.
-  - Allowed `built_in_kriging_interpolation()` to accept `dict` or `tuple` variogram parameters, preventing fallback to raw data variance `var(z)` on detrended residual interpolation.
+- **[M3, M4, Low-1, Low-3] Variogram & Memory Optimizations (`src/pysole/variogram.py`, `src/pysole/smoothing.py`)**:
+  - Implemented tail-semivariance initial sill estimation $S_0 = \text{mean}(\gamma_{\text{tail}})$ in `fit_variogram_model()` for scale-independent fitting.
+  - Consolidated variogram model evaluation (`evaluate_variogram_model()`) supporting spherical, exponential, and gaussian models.
+  - Added chunked row processing in `calculate_variogram()` for memory-efficient distance binning on large pick sets ($N > 5000$).
+  - Added fast `compute_slope_rad()` helper to accelerate surface slope gradient evaluation during $k_c$ optimization loops.
+- **[M5] Dual Kriging Matrix Regularization (`src/pysole/interpolation.py`)**:
+  - Scaled Tikhonov diagonal regularization relative to sill magnitude ($\lambda \cdot \text{sill} \cdot I$) applied specifically to the point-point covariance matrix, preserving exact Lagrange drift constraints.
+- **[M6, M7, M8] Drift Analyzer Performance, Feature Alignment & AICc Comparability (`src/pysole/drift_analyzer.py`)**:
+  - Pre-cached curvature and SIA drift grids upon `DriftBasis` initialization.
+  - Aligned primitive feature parameters (SIA slope floor, curvature smoothing) with production `PySoleSolver` defaults.
+  - Implemented common-intersection valid sample mask for fair AICc comparisons across candidate drift models.
+- **[M10] Eikonal 3D Ray Migration Diagnostic Logging (`src/pysole/migration.py`)**:
+  - Added explicit diagnostic logging for boundary fallback point counts and evanescent wave clamping triggers ($|s_h| > 1/v$).
+- **[M13, M14, Low-2] Raster Orientation Symmetry & Explicit Input Validation (`src/pysole/raster.py`, `src/pysole/survey_planner.py`)**:
+  - Standardized coordinate orientation symmetry across raster file exports (GeoTIFF, ASCII Grid, CSV, NPY).
+  - Raised explicit `ValueError` exceptions for invalid drift model names, unrecognized variogram models, and negative survey planner length budgets.
 
 ### Added
 - **Codebase Audit Implementations (Claude Review)**:

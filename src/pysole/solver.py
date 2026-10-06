@@ -1050,7 +1050,7 @@ class Solver:
 
         elif method == "fft_lowpass":
             M, N = out_grid.shape
-            kc = kc_cutoff if kc_cutoff is not None else 1.0
+            kc = kc_cutoff if kc_cutoff is not None else (self.opt_kc if self.opt_kc is not None else 1.0)
 
             kx = 2.0 * np.pi * np.fft.fftfreq(N, d=self.dx)
             ky = 2.0 * np.pi * np.fft.fftfreq(M, d=self.dy)

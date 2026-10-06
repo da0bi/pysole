@@ -358,8 +358,9 @@ def built_in_kriging_interpolation(
             K[N_pts + curr_col, :N_pts] = pts_x_norm * pts_y_norm
             curr_col += 1
 
-    K += np.eye(K.shape[0]) * 1e-6
-    logger.info(f"   [Dual Kriging Engine] Applied 1e-06 * I Tikhonov matrix regularization (N={N_pts} points, n_drift={n_drift})")
+    reg_val = max(1e-6 * float(sill), 1e-6)
+    K += np.eye(K.shape[0]) * reg_val
+    logger.info(f"   [Dual Kriging Engine] Applied {reg_val:.1e} Tikhonov matrix regularization (N={N_pts} points, n_drift={n_drift})")
 
     z_aug = np.zeros(N_pts + n_drift, dtype=np.float64)
     z_aug[:N_pts] = pts[:, 2]
