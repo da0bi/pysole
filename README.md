@@ -540,7 +540,7 @@ For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 
 | Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Glaciological Feature Scale |
 | :--- | :--- | :--- |
-| **$k_{\text{Nyquist}} \approx 0.6283\text{ rad/m}$** | $\mathbf{10.0\text{ m}}$ | Nyquist grid limit ($2 \cdot \min(dx, dy)$, rawest resolution) |
+| **$k_{\text{Nyquist}} \approx 0.6283\text{ rad/m}$** | $\mathbf{10.0\text{ m}}$ | Nyquist limit ($2 \cdot \min(dx, dy)$, finest resolvable feature) |
 | **$0.3142\text{ rad/m}$** | $\mathbf{20.0\text{ m}}$ | Fine spatial smoothing (filters features $< 20\text{ m}$) |
 | **$0.1257\text{ rad/m}$** | $\mathbf{50.0\text{ m}}$ | Medium-fine spatial smoothing |
 | **$0.0628\text{ rad/m}$** | $\mathbf{100.0\text{ m}}$ | Medium spatial smoothing |
