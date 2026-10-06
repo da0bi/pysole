@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.2] - 2026-10-06
 
-### Fixed
+- **[M1] Physical Wavenumber ($k_c$ [rad/m]) & Spatial Wavelength ($\lambda_c$ [m]) Dual Parameterization**:
+  - Corrected spatial wavenumber calculation in `smoothing.py` ($k_x = \frac{2\pi \cdot \text{fftfreq}(N)}{\mathrm{d}x}$ [rad/m]) to ensure 100% grid resolution invariance ($\mathrm{d}x, \mathrm{d}y$).
+  - Added configuration parameter `fft_filter_metric` (`"wavenumber"` vs `"wavelength"`) and dual parameter support (`lambda_min`, `lambda_max`, `d_lambda` alongside `kc_min`, `kc_max`, `d_kc`).
+  - Added automatic Nyquist limit calculation ($k_{\text{Nyquist}} = \pi / \min(\mathrm{d}x, \mathrm{d}y)$, $\lambda_{\text{Nyquist}} = 2 \cdot \min(\mathrm{d}x, \mathrm{d}y)$), logging active DEM Nyquist limits, and clamping invalid out-of-bound user inputs with warning logs.
+  - Audited `interactive_optimization` CLI loop for metric-aware interactive prompting.
+- **[M2] FFT Smoothing Edge Padding & NaN Normalized Convolution (`src/pysole/smoothing.py`)**:
+  - Applied reflect boundary padding ($\approx 3\sigma$) and normalized convolution $\text{smooth}(\text{data} \cdot \text{mask}) / \text{smooth}(\text{mask})$ to eliminate edge ringing artifacts at glacier margins.
+- **[M5 & M11] Dual Kriging & Continuous Margin Blending (`src/pysole/interpolation.py`)**:
+  - Passed physical metric sampling `(dy, dx)` to `distance_transform_edt` in `blend_margin_topography()`.
+  - Streamlined Dual Kriging vector dot product prediction paths.
 - **[H7] Low-Slope Thickness Underestimation Floor Symmetry (`src/pysole/solver.py`, `src/pysole/interpolation.py`)**:
   - Enforced symmetric slope floor clamping (`slope_floor_deg`, default $5^\circ$, $\sin 5^\circ \approx 0.08715$) across both forward product generation (`get_sample_points`) and inverse thickness recovery (`finalize_bedrock` / `interpolate_kriging`).
   - Purged hardcoded `1e-4` ($\sim 0.0057^\circ$) floor remnants from `get_sample_points`, eliminating the artificial $\sim 60\%$ ice thickness underestimation at low-slope glacier interiors ($\alpha \approx 2^\circ$).

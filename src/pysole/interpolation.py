@@ -162,7 +162,7 @@ def blend_margin_topography(
         thickness = dem - bedrock_grid
         thickness[~boundary_mask] = 0.0
 
-        dist_from_margin = distance_transform_edt(boundary_mask) * cellsize
+        dist_from_margin = distance_transform_edt(boundary_mask, sampling=(abs(dy), abs(dx)))
         weight = np.clip(dist_from_margin / max(margin_width, 1e-6), 0.0, 1.0)
         weight = 0.5 * (1.0 - np.cos(np.pi * weight))  # smooth cosine transition
 
@@ -193,7 +193,7 @@ def blend_margin_topography(
     thickness_grid = np.maximum(np.nan_to_num(thickness_grid, nan=0.0), 0.0)
     thickness_grid[~boundary_mask] = 0.0
 
-    dist_from_margin = distance_transform_edt(boundary_mask) * cellsize
+    dist_from_margin = distance_transform_edt(boundary_mask, sampling=(abs(dy), abs(dx)))
     weight = np.clip(dist_from_margin / max(margin_width, 1e-6), 0.0, 1.0)
     weight = 0.5 * (1.0 - np.cos(np.pi * weight))
 

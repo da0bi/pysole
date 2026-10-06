@@ -163,8 +163,8 @@ def precompute_fft_grid(
 
     M_pad, N_pad = grid_padded.shape
 
-    kx = fftshift(fftfreq(N_pad)) * (2.0 * np.pi * abs(dx))
-    ky = fftshift(fftfreq(M_pad)) * (2.0 * np.pi * abs(dy))
+    kx = fftshift(fftfreq(N_pad, d=abs(dx))) * (2.0 * np.pi)
+    ky = fftshift(fftfreq(M_pad, d=abs(dy))) * (2.0 * np.pi)
 
     kx_grid, ky_grid = np.meshgrid(kx, ky)
     k_grid = np.sqrt(kx_grid**2 + ky_grid**2)

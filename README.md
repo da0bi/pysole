@@ -162,9 +162,13 @@ All execution options can be fully defined in a single JSON configuration file, 
         "interactive_migration": false
     },
     "optimization_parameters": {
-        "kc_max": 10.0,
+        "fft_filter_metric": "wavenumber",
+        "kc_max": null,
         "kc_min": 0.01,
-        "d_kc": 0.1,
+        "d_kc": 0.01,
+        "lambda_min": null,
+        "lambda_max": null,
+        "d_lambda": null,
         "nrbins": null,
         "slope_floor_deg": 5.0,
         "interactive_optimization": false
@@ -238,9 +242,13 @@ All execution options can be fully defined in a single JSON configuration file, 
 | **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal traveltimes. If `false`, migration is skipped. |
 | | `velocity` | `float` | `0.16` | Signal propagation velocity (default value of `0.16` m/ns is characteristic for radar wave propagation in temperate ice). |
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual migrated depths and horizontal displacement vector plots. |
-| **`optimization_parameters`** | `kc_max` | `float` | `10.0` | Maximum corner frequency for FFT Gaussian low-pass smoothing. |
-| | `kc_min` | `float` | `0.01` | Minimum corner frequency for FFT Gaussian low-pass smoothing. |
-| | `d_kc` | `float` | `0.1` | Corner frequency stepwidth  for FFT Gaussian low-pass smoothing. |
+| **`optimization_parameters`** | `fft_filter_metric` | `str` | `"wavenumber"` | Metric used for FFT low-pass filter spectrum optimization: `"wavenumber"` (uses $k_c$ in `rad/m`) or `"wavelength"` (uses $\lambda_c$ in `m`). |
+| | `kc_max` | `float` | `null` | Maximum corner frequency cutoff $k_{\text{max}}$ in `rad/m`. If `null`, defaults to grid Nyquist wavenumber $k_{\text{Nyquist}} = \pi / \min(\mathrm{d}x, \mathrm{d}y)$. |
+| | `kc_min` | `float` | `0.01` | Minimum corner frequency cutoff $k_{\text{min}}$ in `rad/m`. |
+| | `d_kc` | `float` | `0.01` | Corner frequency stepwidth $\mathrm{d}k_c$ in `rad/m`. |
+| | `lambda_min` | `float` | `null` | Minimum physical spatial wavelength $\lambda_{\text{min}}$ in meters (`m`). Used when `fft_filter_metric` is `"wavelength"`. If `null`, defaults to grid Nyquist wavelength $\lambda_{\text{Nyquist}} = 2 \cdot \min(\mathrm{d}x, \mathrm{d}y)$. |
+| | `lambda_max` | `float` | `null` | Maximum physical spatial wavelength $\lambda_{\text{max}}$ in meters (`m`). |
+| | `d_lambda` | `float` | `10.0` | Spatial wavelength stepwidth $\mathrm{d}\lambda$ in meters (`m`). |
 | | `nrbins` | `int` | `null` | Number of variogram lag distance bins. If `null` (default), dynamically calculated to receive ~30 point pairs per bin, and an absolute minimum floor of 3 bins. |
 | | `slope_floor_deg` | `float` | `5.0` | Minimum surface slope angle threshold in degrees [°] enforced during surface slope optimization to prevent numerical division singularities. |
 | | `interactive_optimization` | `bool` | `false` | If `true`, enables interactive CLI prompt to inspect BSS variance curve and adjust corner frequency spectrum parameters (`kc_min`, `kc_max`, `d_kc`), lag distance bin count (`nrbins`), and correlation range (`a_range`). |
@@ -505,51 +513,41 @@ Z_{\text{bed}}(x,y) &= Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)
 Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual $Z_{\text{surface}} - S(Z_{\text{surface}})$ from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
-#### 9. Conversion of Wavenumber to Wavelength
-In `PySole` 2D lowpass spatial smoothing operates in the discrete frequency domain. Spatial wavenumber components along the orthogonal grid axes $X$ and $Y$ are constructed as:
+#### 9. Wavenumber and Wavelengths
+In `PySole`, 2D spatial Gaussian low-pass smoothing operates in the physical 2D spatial frequency domain. Spatial wavenumber components along orthogonal grid axes $X$ and $Y$ are constructed in physical units of **[radians per meter]** as:
 
 <p align="center">
 $$\begin{aligned}
-k_x &= f_{x,\text{pixel}} \cdot (2\pi \cdot |dx|) \quad [\text{rad}] \\
-k_y &= f_{y,\text{pixel}} \cdot (2\pi \cdot |dy|) \quad [\text{rad}]
+k_x &= 2\pi \cdot f_{x,\text{phys}} = \frac{2\pi \cdot \text{fftfreq}(N_x)}{dx} \quad [\text{rad/m}] \\
+k_y &= 2\pi \cdot f_{y,\text{phys}} = \frac{2\pi \cdot \text{fftfreq}(M_y)}{dy} \quad [\text{rad/m}]
 \end{aligned}$$
 </p>
 
-where $f_{x,\text{pixel}}, f_{y,\text{pixel}} \in [-0.5, +0.5]$ are discrete frequencies in **[cycles / pixel]**, and $dx, dy$ are grid pixel spacings in **[meters / pixel]**.
+where $dx, dy$ are spatial grid cell resolutions in **[meters]**, and $N_x, M_y$ are grid dimensions. The 2D spatial wavenumber magnitude is $k = \sqrt{k_x^2 + k_y^2}$ [rad/m].
 
-Because physical spatial frequencies are $f_{x,\text{phys}} = f_{x,\text{pixel}} / dx$ and $f_{y,\text{phys}} = f_{y,\text{pixel}} / dy$ [cycles / m], the physical spatial wavenumbers $k_{x,\text{phys}}, k_{y,\text{phys}}$ [rad / m] relate to the code wavenumbers by:
-
-<p align="center">
-$$\begin{aligned}
-k_{x,\text{phys}} &= 2\pi f_{x,\text{phys}} = \frac{k_x}{dx^2} \quad [\text{rad/m}] \\
-k_{y,\text{phys}} &= 2\pi f_{y,\text{phys}} = \frac{k_y}{dy^2} \quad [\text{rad/m}]
-\end{aligned}$$
-</p>
-
-Thus, the directional physical spatial cutoff wavelengths $\lambda_{\text{c},x}$ and $\lambda_{\text{c},y}$ [meters] corresponding to a corner frequency cutoff $k_{\text{c}}$ are:
+Physical angular wavenumber $k_c$ [rad/m] relates directly to physical spatial wavelength $\lambda_c$ [meters] via the fundamental physical relationship:
 
 <p align="center">
-$$\begin{aligned}
-\lambda_{\text{c},x} &= \frac{2\pi}{k_{x,\text{phys}}} = \frac{2\pi \cdot dx^2}{k_{\text{c}}} \quad [\text{m}] \\
-\lambda_{\text{c},y} &= \frac{2\pi}{k_{y,\text{phys}}} = \frac{2\pi \cdot dy^2}{k_{\text{c}}} \quad [\text{m}]
-\end{aligned}$$
+$$k_c = \frac{2\pi}{\lambda_c} \quad \Longleftrightarrow \quad \lambda_c = \frac{2\pi}{k_c}$$
 </p>
 
-The overall 2D effective spatial cutoff wavelength $\lambda_{\text{c,eff}}$ (geometric mean across both coordinate axes) is:
+##### Concrete Calculation Example ($dx = 5.0\text{ m}, dy = 5.0\text{ m}$)
+For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
+1. **Minimum Physical Nyquist Wavelength**: $\lambda_{\text{Nyquist}} = 2 \cdot \min(dx, dy) = 2 \cdot 5.0\text{ m} = \mathbf{10.0\text{ m}}$ (the shortest feature resolvable on a 5m grid).
+2. **Maximum Physical Nyquist Wavenumber**: $k_{\text{Nyquist}} = \frac{2\pi}{\lambda_{\text{Nyquist}}} = \frac{\pi}{5.0} \approx \mathbf{0.6283\text{ rad/m}}$.
 
-<p align="center">
-$$\lambda_{\text{c,eff}} = \sqrt{\lambda_{\text{c},x} \cdot \lambda_{\text{c},y}} = \frac{2\pi \cdot |dx \cdot dy|}{k_{\text{c}}} = \frac{2\pi \cdot ds^2}{k_{\text{c}}} \quad [\text{meters}]$$
-</p>
+##### Physical Reference Conversion Table ($5\text{ m} \times 5\text{ m}$ DEM)
 
-where $ds = \sqrt{|dx \cdot dy|}$ represents the effective spatial grid cell resolution (or grid cell area scale $ds^2 = |dx \cdot dy|$).
+| Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Glaciological Feature Scale |
+| :--- | :--- | :--- |
+| **$k_{\text{Nyquist}} \approx 0.6283\text{ rad/m}$** | $\mathbf{10.0\text{ m}}$ | Nyquist grid limit ($2 \cdot dx$, rawest resolution) |
+| **$0.3142\text{ rad/m}$** | $\mathbf{20.0\text{ m}}$ | Fine spatial smoothing (filters features $< 20\text{ m}$) |
+| **$0.1257\text{ rad/m}$** | $\mathbf{50.0\text{ m}}$ | Medium-fine spatial smoothing |
+| **$0.0628\text{ rad/m}$** | $\mathbf{100.0\text{ m}}$ | Medium spatial smoothing |
+| **$0.0314\text{ rad/m}$** | $\mathbf{200.0\text{ m}}$ | Broad spatial smoothing |
+| **$0.0100\text{ rad/m}$** | $\mathbf{628.3\text{ m}}$ | Very broad regional smoothing |
 
-For example, on an isotropic grid with $dx = dy = 5.0$ m ($ds = 5.0$ m, $ds^2 = 25.0$ $m^2$), an optimal corner frequency $k_{\text{c,opt}} = 0.4$ corresponds to a physical spatial cutoff wavelength:
-
-<p align="center">
-$$\lambda_{\text{c,opt}} = \frac{2\pi \cdot 25.0}{0.4} \approx 392.70 \quad [\text{meters}]$$
-</p>
-
-This physical cutoff wavelength is reported alongside $k_{\text{c,opt}}$ in the `PySole` logging outputs (`pysole.log`).
+Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and can be selected via the `"fft_filter_metric"` setting (`"wavenumber"` vs `"wavelength"`).
 
 ---
 

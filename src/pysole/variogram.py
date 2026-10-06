@@ -22,14 +22,22 @@ from .raster import GridGeometry
 from .logging import logger, get_progress_bar
 
 
-def compute_cutoff_wavelength(kc: float, dx: float, dy: float) -> float:
+def compute_cutoff_wavelength(kc: float, dx: float = 1.0, dy: float = 1.0) -> float:
     """
-    Converts 2D corner frequency wavenumber cutoff kc [rad/m] to physical spatial wavelength [m].
-    Accounts for isotropic or anisotropic DEM grid cell resolution (ds = sqrt(|dx * dy|)).
+    Converts physical 2D corner frequency wavenumber cutoff kc [rad/m] to physical spatial wavelength lambda_c [m].
     """
     if kc <= 0:
         return float("inf")
-    return (2.0 * np.pi * abs(dx * dy)) / kc
+    return (2.0 * np.pi) / kc
+
+
+def compute_cutoff_wavenumber(wavelength: float) -> float:
+    """
+    Converts physical spatial wavelength lambda_c [m] to physical corner frequency wavenumber cutoff kc [rad/m].
+    """
+    if wavelength <= 0:
+        return float("inf")
+    return (2.0 * np.pi) / wavelength
 
 
 @dataclass
@@ -72,9 +80,13 @@ class BSSOptimizer:
     def optimize(
         self,
         survey_points: np.ndarray,
-        kc_max: float = 10.0,
-        kc_min: float = 0.01,
-        d_kc: float = 0.1,
+        kc_max: float | None = None,
+        kc_min: float | None = None,
+        d_kc: float | None = None,
+        lambda_min: float | None = None,
+        lambda_max: float | None = None,
+        d_lambda: float | None = None,
+        fft_filter_metric: str = "wavenumber",
         plots_dir: str | Path | None = None,
         prefix: str = "01_",
         stage_name: str = "stage1",
@@ -91,6 +103,10 @@ class BSSOptimizer:
             kc_max=kc_max,
             kc_min=kc_min,
             d_kc=d_kc,
+            lambda_min=lambda_min,
+            lambda_max=lambda_max,
+            d_lambda=d_lambda,
+            fft_filter_metric=fft_filter_metric,
             plots_dir=plots_dir,
             prefix=prefix,
             stage_name=stage_name,
@@ -307,9 +323,13 @@ def optimize_bss_variance(
     dem: np.ndarray,
     survey_points: np.ndarray,
     geometry: GridGeometry,
-    kc_max: float = 10.0,
-    kc_min: float = 0.01,
-    d_kc: float = 0.1,
+    kc_max: float | None = None,
+    kc_min: float | None = None,
+    d_kc: float | None = None,
+    lambda_min: float | None = None,
+    lambda_max: float | None = None,
+    d_lambda: float | None = None,
+    fft_filter_metric: str = "wavenumber",
     plots_dir: str | Path | None = None,
     prefix: str = "01_",
     stage_name: str = "stage1",
@@ -319,16 +339,8 @@ def optimize_bss_variance(
     show_progress: bool = True,
 ) -> OptimizationResult:
     """
-    Iterative optimization process to determine optimum DEM surface slope smoothing degree kc.
-    Ported from FFTSmooth.m.
-
-    Plots the normalized variograms of the evaluated product for ALL tested corner frequencies (kc)
-    in a single comparison plot, normalizing individual variograms with their individual product mean value squared.
-    Saves all evaluated filtered DEM surface slope grids into a dictionary cache.
-    Accelerated with multi-core CPU parallelization via n_cores.
-    If interactive is True, enables an interactive CLI prompt allowing inspection of the BSS variance curve
-    and adjustment of corner frequency search spectrum (kc_min, kc_max, d_kc), lag distance bin count (nrbins),
-    and correlation range (a_range).
+    Iterative optimization process to determine optimum DEM surface slope smoothing degree.
+    Supports filter parameterization by wavenumber (kc [rad/m]) or spatial wavelength (lambda [m]).
     """
     dx = geometry.dx
     dy = geometry.dy
@@ -336,6 +348,15 @@ def optimize_bss_variance(
     y_coords = geometry.y_coords
 
     effective_n_cores = (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
+
+    cellsize_min = min(abs(dx), abs(dy))
+    lambda_nyquist = 2.0 * cellsize_min
+    k_nyquist = np.pi / cellsize_min
+
+    logger.info(
+        f"   DEM Spatial Resolution dx={dx:.1f}m, dy={dy:.1f}m -> Nyquist Limits: "
+        f"k_Nyquist = {k_nyquist:.4f} rad/m, λ_Nyquist = {lambda_nyquist:.1f} m"
+    )
 
     # Pre-filter valid survey points ONCE and compute distance matrix ONCE
     val_col = 3 if survey_points.shape[1] >= 4 else 2
@@ -347,11 +368,30 @@ def optimize_bss_variance(
     A_shift_dem, k_grid_dem, k_max_grid = precompute_fft_grid(dem, dx=dx, dy=dy)
     base_slope = compute_gradients(dem, dx=dx, dy=dy)["slope_rad"]
 
-    kc_max = float(kc_max) if kc_max is not None else 10.0
-    kc_min = float(kc_min) if kc_min is not None else 0.01
-    d_kc = float(d_kc) if d_kc is not None else 0.1
+    use_wavelength = str(fft_filter_metric).lower().strip() == "wavelength" or (lambda_min is not None or lambda_max is not None)
 
-    logger.info(f"   Input DEM Maximum Wavenumber (k_max_grid): {k_max_grid:.4f} rad/m (using kc_max = {kc_max:.4f}, kc_min = {kc_min:.4f}, d_kc = {d_kc:.4f}, n_cores = {effective_n_cores})")
+    if use_wavelength:
+        lambda_min_val = float(lambda_min) if lambda_min is not None else lambda_nyquist
+        if lambda_min_val < lambda_nyquist:
+            logger.warning(
+                f"   [Warning] Requested lambda_min ({lambda_min_val:.1f} m) is smaller than grid Nyquist wavelength "
+                f"λ_Nyquist = {lambda_nyquist:.1f} m (for cellsize={cellsize_min:.1f} m). Clamping lambda_min to {lambda_nyquist:.1f} m."
+            )
+            lambda_min_val = lambda_nyquist
+
+        lambda_max_val = float(lambda_max) if lambda_max is not None else max(1000.0, lambda_min_val * 10.0)
+        d_lambda_val = float(d_lambda) if d_lambda is not None else 10.0
+    else:
+        kc_max_val = float(kc_max) if kc_max is not None else min(1.0, k_nyquist)
+        if kc_max_val > k_nyquist:
+            logger.warning(
+                f"   [Warning] Requested kc_max ({kc_max_val:.4f} rad/m) exceeds grid Nyquist wavenumber "
+                f"k_Nyquist = {k_nyquist:.4f} rad/m (for cellsize={cellsize_min:.1f} m). Clamping kc_max to {k_nyquist:.4f} rad/m."
+            )
+            kc_max_val = k_nyquist
+
+        kc_min_val = float(kc_min) if kc_min is not None else 0.01
+        d_kc_val = float(d_kc) if d_kc is not None else 0.01
 
     if survey_dists is not None and len(survey_dists) > 0:
         n_pairs = len(survey_dists)
@@ -424,27 +464,42 @@ def optimize_bss_variance(
     go_on = True
     while go_on:
         if interactive:
-            logger.info(f"--- BSS Filter Optimization (Grid k_max = {k_max_grid:.4f}) ---")
+            logger.info(f"--- BSS Filter Optimization (Grid k_Nyquist = {k_nyquist:.4f} rad/m, λ_Nyquist = {lambda_nyquist:.1f} m) ---")
             try:
-                curr_max_default = kc_max
-                val_max = input(f"Enter Maximum Corner Frequency (kc_max, default = {curr_max_default:.4f}): ").strip()
-                if val_max:
-                    kc_max = float(val_max)
-
-                val_min = input(f"Enter Minimum Corner Frequency (kc_min, default = {kc_min:.4f}): ").strip()
-                if val_min:
-                    kc_min = float(val_min)
-
-                val_step = input(f"Enter Corner Frequency Stepwidth d_kc (default = {d_kc:.4f}): ").strip()
-                if val_step:
-                    d_kc = float(val_step)
+                if use_wavelength:
+                    val_min = input(f"Enter Minimum Spatial Wavelength (lambda_min in meters, default = {lambda_min_val:.1f}): ").strip()
+                    if val_min:
+                        lambda_min_val = max(float(val_min), lambda_nyquist)
+                    val_max = input(f"Enter Maximum Spatial Wavelength (lambda_max in meters, default = {lambda_max_val:.1f}): ").strip()
+                    if val_max:
+                        lambda_max_val = float(val_max)
+                    val_step = input(f"Enter Spatial Wavelength Stepwidth d_lambda (default = {d_lambda_val:.1f}): ").strip()
+                    if val_step:
+                        d_lambda_val = abs(float(val_step))
+                else:
+                    val_max = input(f"Enter Maximum Corner Frequency (kc_max in rad/m, default = {kc_max_val:.4f}): ").strip()
+                    if val_max:
+                        kc_max_val = min(float(val_max), k_nyquist)
+                    val_min = input(f"Enter Minimum Corner Frequency (kc_min in rad/m, default = {kc_min_val:.4f}): ").strip()
+                    if val_min:
+                        kc_min_val = float(val_min)
+                    val_step = input(f"Enter Corner Frequency Stepwidth d_kc (default = {d_kc_val:.4f}): ").strip()
+                    if val_step:
+                        d_kc_val = abs(float(val_step))
             except Exception as e:
                 logger.warning(f"Input error, using defaults: {e}")
 
-        effective_dkc = abs(d_kc) if d_kc > 0 else 0.1
-        kc_values = np.arange(kc_max, kc_min - 1e-9, -effective_dkc)
-        if len(kc_values) > 0 and kc_values[-1] > kc_min + 1e-6:
-            kc_values = np.append(kc_values, kc_min)
+        if use_wavelength:
+            eff_dlam = abs(d_lambda_val) if d_lambda_val > 0 else 10.0
+            lambda_vals = np.arange(lambda_min_val, lambda_max_val + 1e-9, eff_dlam)
+            if len(lambda_vals) > 0 and lambda_vals[-1] < lambda_max_val - 1e-6:
+                lambda_vals = np.append(lambda_vals, lambda_max_val)
+            kc_values = (2.0 * np.pi) / lambda_vals
+        else:
+            effective_dkc = abs(d_kc_val) if d_kc_val > 0 else 0.01
+            kc_values = np.arange(kc_max_val, kc_min_val - 1e-9, -effective_dkc)
+            if len(kc_values) > 0 and kc_values[-1] > kc_min_val + 1e-6:
+                kc_values = np.append(kc_values, kc_min_val)
 
         step_variances = []
         evaluated_variograms = []

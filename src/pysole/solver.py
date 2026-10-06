@@ -866,14 +866,18 @@ class Solver:
         kc_max: float | None = None,
         kc_min: float | None = None,
         d_kc: float | None = None,
+        lambda_min: float | None = None,
+        lambda_max: float | None = None,
+        d_lambda: float | None = None,
+        fft_filter_metric: str | None = None,
         nrbins: int | None = None,
         prefix: str | None = None,
         interactive: bool = False,
         plotit: bool = False,
     ) -> float:
         """
-        Iterative optimization process to determine optimum surface slope smoothing degree kc.
-        When interactive is True, enables CLI prompts to adjust kc_min, kc_max, d_kc, nrbins, and a_range.
+        Iterative optimization process to determine optimum surface slope smoothing degree.
+        When interactive is True, enables CLI prompts to adjust filter spectrum parameters.
         """
         pts = self.migrated_points if self.migrated_points is not None else self.survey_points
         if pts is None:
@@ -882,14 +886,25 @@ class Solver:
 
         if hasattr(self, "config") and isinstance(self.config, dict):
             opt_cfg = self.config.get("optimization_parameters", {})
-            if kc_max is None and "kc_max" in opt_cfg:
-                kc_max = opt_cfg["kc_max"]
-            if kc_min is None and "kc_min" in opt_cfg:
-                kc_min = opt_cfg["kc_min"]
-            if d_kc is None and "d_kc" in opt_cfg:
-                d_kc = opt_cfg["d_kc"]
-            if nrbins is None and "nrbins" in opt_cfg:
-                nrbins = opt_cfg["nrbins"]
+            if fft_filter_metric is None:
+                fft_filter_metric = opt_cfg.get("fft_filter_metric", "wavenumber")
+            if kc_max is None:
+                kc_max = opt_cfg.get("kc_max")
+            if kc_min is None:
+                kc_min = opt_cfg.get("kc_min")
+            if d_kc is None:
+                d_kc = opt_cfg.get("d_kc")
+            if lambda_min is None:
+                lambda_min = opt_cfg.get("lambda_min")
+            if lambda_max is None:
+                lambda_max = opt_cfg.get("lambda_max")
+            if d_lambda is None:
+                d_lambda = opt_cfg.get("d_lambda")
+            if nrbins is None:
+                nrbins = opt_cfg.get("nrbins")
+
+        if fft_filter_metric is None:
+            fft_filter_metric = "wavenumber"
 
         if nrbins is None:
             nrbins = self.nrbins
@@ -904,6 +919,10 @@ class Solver:
             kc_max=kc_max,
             kc_min=kc_min,
             d_kc=d_kc,
+            lambda_min=lambda_min,
+            lambda_max=lambda_max,
+            d_lambda=d_lambda,
+            fft_filter_metric=fft_filter_metric,
             plots_dir=self.plots_dir,
             prefix=prefix,
             stage_name=stage_name,
