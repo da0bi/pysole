@@ -5,6 +5,26 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-10-06
+
+### Fixed
+- **[H7] Low-Slope Thickness Underestimation Floor Symmetry (`src/pysole/solver.py`, `src/pysole/interpolation.py`)**:
+  - Enforced symmetric slope floor clamping (`slope_floor_deg`, default $5^\circ$, $\sin 5^\circ \approx 0.08715$) across both forward product generation (`get_sample_points`) and inverse thickness recovery (`finalize_bedrock` / `interpolate_kriging`).
+  - Purged hardcoded `1e-4` ($\sim 0.0057^\circ$) floor remnants from `get_sample_points`, eliminating the artificial $\sim 60\%$ ice thickness underestimation at low-slope glacier interiors ($\alpha \approx 2^\circ$).
+- **[H6] Residual Variogram Fitting Propagation (`src/pysole/solver.py`, `src/pysole/interpolation.py`)**:
+  - Propagated fitted variogram parameters (`opt_variogram_params`) from `Solver` into `kriging_interpolation()` and `built_in_kriging_interpolation()`.
+  - Allowed `built_in_kriging_interpolation()` to accept `dict` or `tuple` variogram parameters, preventing fallback to raw data variance `var(z)` on detrended residual interpolation.
+
+### Added
+- **Codebase Audit Implementations (Claude Review)**:
+  - **H1 (Spatial Grid Alignment)**: Standardized `GridGeometry` bounds, resolution verification, and spatial indexing across all modules (`raster.py`, `interpolation.py`).
+  - **H2 (Outline Orientation Symmetry)**: Unified top-down vs. bottom-up raster coordinate orientations and CRS alignment checks.
+  - **H3 (GPX/GeoJSON Reprojection)**: Automated CRS transformation & reprojection checking for vector tracks and survey profiles.
+  - **H4 (Spearman Rank Correlation)**: Integrated non-linear rank correlation evaluation ($\rho_s$) alongside Pearson $r$ into `DriftAnalyzer` (`drift_analyzer.py`).
+  - **H5 (Cross-Validation Standardization)**: Standardized feature normalization and scaling across spatial cross-validation folds.
+  - **H8 (Survey Planner Boundary Masking)**: Fixed grid geometry and polygon boundary masking in survey track planning (`survey_planner.py`).
+  - **M12 (CRS Transforms)**: Hardened projected metric coordinate system transformation edge cases.
+
 ## [0.4.1] - 2026-10-03
 
 ### Added

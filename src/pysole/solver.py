@@ -606,7 +606,8 @@ class Solver:
             interp_slope = self.geometry.create_interpolator(opt_slope_sin, fill_value=np.nan)
             pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
             slopes_pts = interp_slope(pts_xy)
-            slopes_pts = np.maximum(np.nan_to_num(slopes_pts, nan=0.1), 1e-4)
+            min_slope_sin = np.sin(np.radians(self.slope_floor_deg))
+            slopes_pts = np.maximum(np.nan_to_num(slopes_pts, nan=min_slope_sin), min_slope_sin)
 
             product_values = pts[:, val_col] * slopes_pts
             sample_pts = np.column_stack((pts[:, 0], pts[:, 1], product_values))
@@ -700,6 +701,7 @@ class Solver:
             geometry=self.geometry,
             method=krig_method,
             variogram_model=var_model,
+            variogram_params=getattr(self, "opt_variogram_params", None),
             dem_grid=self.dem_grid,
             opt_slope_grid=self.opt_slope,
             drift_terms=drift_terms,

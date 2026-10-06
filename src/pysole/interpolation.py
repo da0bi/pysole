@@ -213,7 +213,7 @@ def built_in_kriging_interpolation(
     variogram_model: str = "spherical",
     external_drift_grid: np.ndarray | dict[str, np.ndarray] | None = None,
     drift_terms: list[str] | None = None,
-    variogram_params: tuple[float, float, float] | None = None,
+    variogram_params: tuple[float, float, float] | dict[str, float] | None = None,
     n_cores: int = -1,
     show_progress: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -246,7 +246,12 @@ def built_in_kriging_interpolation(
     max_d = float(np.max(sample_dists)) if N_pts > 1 else 100.0
 
     if variogram_params is not None:
-        range_a, sill, nugget = variogram_params
+        if isinstance(variogram_params, dict):
+            range_a = float(variogram_params.get("range", max(max_d * 0.6, 1.0)))
+            sill = float(variogram_params.get("sill", np.var(pts[:, 2]) if N_pts > 1 else 1.0))
+            nugget = float(variogram_params.get("nugget", 0.0))
+        else:
+            range_a, sill, nugget = variogram_params
     else:
         range_a = max(max_d * 0.6, 1.0)
         sill = float(np.var(pts[:, 2])) if N_pts > 1 else 1.0
@@ -580,6 +585,7 @@ def kriging_interpolation(
     geometry: GridGeometry,
     method: str = "universal",
     variogram_model: str = "spherical",
+    variogram_params: tuple[float, float, float] | dict[str, float] | None = None,
     dem_grid: np.ndarray | None = None,
     opt_slope_grid: np.ndarray | None = None,
     drift_terms: list[str] | None = None,
@@ -693,6 +699,7 @@ def kriging_interpolation(
             variogram_model=variogram_model,
             external_drift_grid=external_drift_grids if has_ext_drifts else None,
             drift_terms=drift_terms,
+            variogram_params=variogram_params,
             n_cores=n_cores,
             show_progress=show_progress,
         )
