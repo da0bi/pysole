@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 .venv/
 .pytest_cache/
 *.egg-info/
@@ -20,3 +21,10 @@ examples/**/*.tiff
 paper.md
 paper.bib
 CONTRIBUTING.md
+/tmp/
+
+# Ignore all PNG images everywhere across the repo
+*.png
+
+# EXCEPT for the specific images used in the README documentation
+!images/*.png
