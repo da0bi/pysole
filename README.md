@@ -329,12 +329,12 @@ Physical angular wavenumber $k_c$ [rad/m] relates directly to physical spatial w
 $$k_c = \frac{2\pi}{\lambda_c} \quad \Longleftrightarrow \quad \lambda_c = \frac{2\pi}{k_c}$$
 </p>
 
-##### Concrete Calculation Example ($dx = 5.0\text{ m}, dy = 5.0\text{ m}$)
+#### Concrete Calculation Example ($dx = 5.0\text{ m}, dy = 5.0\text{ m}$)
 For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 1. **Minimum Physical Nyquist Wavelength**: $\lambda_{\text{Nyquist}} = 2 \cdot \min(dx, dy) = 2 \cdot 5.0\text{ m} = \mathbf{10.0\text{ m}}$ (the shortest feature resolvable on a 5m grid).
 2. **Maximum Physical Nyquist Wavenumber**: $k_{\text{Nyquist}} = \frac{2\pi}{\lambda_{\text{Nyquist}}} = \frac{\pi}{5.0} \approx \mathbf{0.6283\text{ rad/m}}$.
 
-##### Physical Reference Conversion Table ($5\text{ m} \times 5\text{ m}$ DEM)
+#### Physical Reference Conversion Table ($5\text{ m} \times 5\text{ m}$ DEM)
 
 | Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Glaciological Feature Scale |
 | :--- | :--- | :--- |
@@ -347,7 +347,7 @@ For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 
 Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and can be selected via the `"fft_filter_metric"` setting (`"wavenumber"` or `"wavelength"`).
 
-##### Derivation of FFT Filter Parameter Defaults (`kc_max`, `kc_min`, `lambda_min`, `lambda_max`, `n_steps`)
+#### Derivation of FFT Filter Parameter Defaults (`kc_max`, `kc_min`, `lambda_min`, `lambda_max`, `n_steps`)
 
 When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` dynamically derives physically sound parameter defaults based on the DEM spatial resolution ($\Delta x, \Delta y$) and total domain extent ($L_{\text{max}} = \max(N_x \cdot |dx|, M_y \cdot |dy|)$):
 
