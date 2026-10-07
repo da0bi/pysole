@@ -642,8 +642,30 @@ def kriging_interpolation(
     if len(pts) == 0:
         return KrigingResult(bedrock_grid=np.zeros((M, N)), variance_grid=np.zeros((M, N)))
 
+    if isinstance(engine, str):
+        engine_clean = str(engine).lower().replace("_kriging", "").strip()
+    else:
+        engine_clean = "native"
+    var_model_clean = str(variogram_model).lower().strip()
+
     method_clean = str(method).lower().replace("_kriging", "").strip()
-    engine_clean = str(engine).lower().strip()
+    valid_methods = {"ordinary", "universal", "sia", "regression"}
+    if method_clean not in valid_methods:
+        raise ValueError(
+            f"Invalid interpolation method '{method}'. Supported methods: 'ordinary', 'universal', 'sia', 'regression'."
+        )
+
+    valid_engines = {"native", "pykrige"}
+    if engine_clean not in valid_engines:
+        raise ValueError(
+            f"Invalid Kriging engine '{engine}'. Supported engines: 'native', 'pykrige'."
+        )
+
+    valid_variogram_models = {"spherical", "exponential", "gaussian"}
+    if var_model_clean not in valid_variogram_models:
+        raise ValueError(
+            f"Invalid variogram model '{variogram_model}'. Supported models: 'spherical', 'exponential', 'gaussian'."
+        )
 
     external_drift_grids: dict[str, np.ndarray] = {}
     if isinstance(external_drift_grid, dict):

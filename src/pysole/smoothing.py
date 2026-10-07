@@ -222,12 +222,14 @@ def fft_gaussian_smooth_precomputed(
         pad_m, pad_n = spectrum.pad_m, spectrum.pad_n
         M, N = spectrum.orig_shape
         has_nans = spectrum.has_nans
+        nan_mask = spectrum.nan_mask
     else:
         data_fft = spectrum
         mask_fft = None
         pad_m, pad_n = 0, 0
         M, N = spectrum.shape
         has_nans = False
+        nan_mask = None
 
     if kc <= 0:
         filt = np.ones_like(k_grid, dtype=np.float64)
@@ -250,7 +252,7 @@ def fft_gaussian_smooth_precomputed(
 
         valid_mask = mask_filtered > 1e-3
         grid_filtered = np.where(valid_mask, data_filtered / np.maximum(mask_filtered, 1e-3), np.nan)
-        if np.any(nan_mask):
+        if nan_mask is not None and np.any(nan_mask):
             grid_filtered[nan_mask] = np.nan
     else:
         grid_filtered = data_filtered

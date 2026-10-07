@@ -69,6 +69,12 @@ class EikonalMigrator:
             show_progress=show_progress,
         )
 
+    def migrate_points(self, points: np.ndarray, velocity: float = 0.16) -> np.ndarray:
+        """Alias method for 3D Eikonal ray migration on a survey point set."""
+        tt_dummy = np.zeros_like(self.dem)
+        res = self.migrate(travel_time_grid=tt_dummy, survey_points=points, velocity=velocity, show_progress=False)
+        return res.migrated_points
+
 
 def migrate_eikonal_points(
     dem: np.ndarray,

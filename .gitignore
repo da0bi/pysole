@@ -22,6 +22,7 @@ paper.md
 paper.bib
 CONTRIBUTING.md
 /tmp/
+.antigravityrules
 
 # Ignore all PNG images everywhere across the repo
 *.png

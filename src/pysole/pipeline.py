@@ -149,6 +149,8 @@ def run_from_config(
     config_path: str | Path = "pysole.json",
     log_level: str | None = None,
     is_batch: bool = False,
+    drift_analyzer: bool | None = None,
+    survey_profile_column: str | None = None,
 ) -> BedrockMap:
     """
     Executes the complete PySole glaciological processing pipeline from a configuration file.
@@ -161,6 +163,10 @@ def run_from_config(
         Logging level override ('DEBUG', 'INFO', 'WARNING', 'ERROR').
     is_batch : bool, default False
         If True, disables all interactive terminal prompts and variogram optimization dialogs.
+    drift_analyzer : bool, optional
+        If True, enables the interactive Drift Analyzer helper tool.
+    survey_profile_column : str, optional
+        Survey profile column name for spatial cross-validation.
 
     Returns
     -------
@@ -219,6 +225,11 @@ def run_from_config(
         solver = Solver.from_config(config_file)
         if is_batch:
             solver.show_progress = False
+
+        if drift_analyzer is not None:
+            solver.drift_analyzer = drift_analyzer
+        if survey_profile_column is not None:
+            solver.survey_profile_column = survey_profile_column
 
         interactive_flag = not is_batch and sys.stdin.isatty()
 

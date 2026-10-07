@@ -39,6 +39,18 @@ def _get_transparent_cmap(cmap_name: str):
     return cmap
 
 
+def _get_cell_edge_extent(x_coords: np.ndarray, y_coords: np.ndarray) -> list[float]:
+    """Calculates cell-edge extent [left, right, bottom, top] from grid cell center coordinates."""
+    dx = abs(x_coords[1] - x_coords[0]) if len(x_coords) > 1 else 1.0
+    dy = abs(y_coords[1] - y_coords[0]) if len(y_coords) > 1 else 1.0
+    return [
+        float(x_coords[0] - dx / 2),
+        float(x_coords[-1] + dx / 2),
+        float(y_coords[0] - dy / 2),
+        float(y_coords[-1] + dy / 2),
+    ]
+
+
 def plot_unfiltered_product_variogram(
     distances: np.ndarray,
     semivars: np.ndarray,
@@ -151,7 +163,7 @@ def plot_migration_displacement_vectors(
         import matplotlib.pyplot as plt
         from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-        plot_extent = [x_coords[0], x_coords[-1], y_coords[0], y_coords[-1]]
+        plot_extent = _get_cell_edge_extent(x_coords, y_coords)
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 10))
 

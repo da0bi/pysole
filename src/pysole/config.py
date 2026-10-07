@@ -425,4 +425,11 @@ def main_cli() -> None:
 
     log_level = "DEBUG" if args.debug else None
     from .pipeline import run_from_config
-    run_from_config(args.config, log_level=log_level, is_batch=args.batch)
+    run_from_config(
+        args.config,
+        log_level=log_level,
+        is_batch=args.batch,
+        drift_analyzer=args.drift_analyzer,
+        survey_profile_column=args.survey_profile_column,
+    )
+

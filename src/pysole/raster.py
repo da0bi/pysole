@@ -91,7 +91,7 @@ class GridGeometry:
         M, N = self.shape
         minx, miny, maxx, maxy = self.bounds
         cols = np.clip(np.floor((x - minx) / self.dx).astype(int), 0, N - 1)
-        rows = np.clip(np.floor((y - miny) / self.dy).astype(int), 0, M - 1)
+        rows = np.clip(np.floor((maxy - y) / self.dy).astype(int), 0, M - 1)
         return rows, cols
 
 
@@ -574,7 +574,7 @@ def load_dem(
     # Standard GIS rasters (GeoTIFF, ASCII Grid, CSV, NPY) store Row 0 at Y_max (top-down).
     # PySole's spatial coordinate vector y_coords[0] represents Y_min (bottom-up).
     # Flip grid vertically on file load so Row 0 aligns with y_coords[0] (Y_min).
-    if not isinstance(dem_input, np.ndarray):
+    if not isinstance(dem_input, np.ndarray) and not is_headerless:
         grid = grid[::-1, :]
 
     calc_dx = dx if dx is not None else native_dx

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.2] - 2026-10-07
 
+### Added / Fixed (Phase 3 Audit Resolutions — 2nd Pass Review: Low Priority)
+- **[M14, N-M6, N-L8] Strict Input Parameter Validation & Outline Failure Guard (`src/pysole/interpolation.py`, `src/pysole/variogram.py`, `src/pysole/raster.py`)**:
+  - Implemented strict input parameter validation in `kriging_interpolation()` for `method` (`"ordinary"`, `"universal"`, `"regression"`), `variogram_model` (`"spherical"`, `"exponential"`, `"gaussian"`), and `engine` (`"native"`, `"pykrige"` or `KrigingEngine` instance), raising explicit `ValueError` on invalid strings.
+  - Added search range validation in `optimize_bss_variance()` enforcing $k_{c,\text{min}} < k_{c,\text{max}}$ before executing frequency sweeps.
+  - Updated `load_outline()` to raise an explicit `ValueError` when a provided `outline_path` fails to load, replacing the silent fallback to unconstrained DEM domain rectangle.
+- **[N-M11, N-L1] CLI & Config Parameter Alignment (`src/pysole/config.py`, `src/pysole/pipeline.py`, `src/pysole/solver.py`)**:
+  - Forwarded `--drift-analyzer` and `--profile-col` CLI flags from `main_cli()` into `run_from_config()` and set `drift_analyzer` and `survey_profile_column` on `Solver`.
+  - Aligned default parameters between `Solver.__init__` and `config.py` default schema dictionary.
+- **[N-M12] Cell-Edge Extent Rendering, Histogram Mean & Figure Prefixes (`src/pysole/plotting.py`)**:
+  - Standardized Matplotlib spatial extent boundaries using `_get_cell_edge_extent(x_coords, y_coords)` (`[minx - dx/2, maxx + dx/2, miny - dy/2, maxy + dy/2]`) across figure generators to eliminate 0.5-pixel image shift.
+  - Updated `plot_final_ice_thickness_histogram()` mean calculation to compute average depth strictly on active ice cells ($D > 0$).
+  - Standardized stage filename prefixes (`01_`, `03_`) for diagnostic plots to prevent stage-1 and stage-2 figures from overwriting each other.
+- **[Test Gap] Comprehensive Audit Regression Unit Test Suite (`tests/test_audit_regressions.py`)**:
+  - Created dedicated unit test file containing 12 unit tests verifying all 7 original audit regression test cases (`test_coords_to_grid_indices_bottom_up`, `test_dual_kriging_loo_linear_field`, `test_outline_vector_orientation`, `test_outline_nan_rings_hole`, `test_survey_tracks_inside_mask`, `test_csv_npy_roundtrip_orientation`, `test_fit_variogram_scale_invariance`) as well as Phase 1, 2, and 3 fixes (`test_run_from_config_non_interactive_batch`, `test_fft_normalized_convolution_nan_boundary`, `test_utm_drift_basis_centering_condition_number`, `test_compound_drift_term_expansion`, `test_eikonal_migration_oblique_surface_accuracy`).
+
 ### Added / Fixed (Phase 2 Audit Resolutions — 2nd Pass Review: Medium Priority)
 - **[N-M9, M10] Exact 3D Eikonal Ray Migration (`src/pysole/migration.py`)**:
   - Replaced non-orthogonal approximation ($s_3 = \sqrt{v^{-2} - s_1^2 - s_2^2}$) with exact 3D closed-form slowness vector along non-horizontal surface normal $\vec{n} = (-z_x, -z_y, 1)^T$:
