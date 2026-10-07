@@ -205,16 +205,16 @@ def calculate_variogram(
     if maxdist is None or maxdist <= 0:
         maxdist = 0.5 * float(np.max(dists)) if len(dists) > 0 else 1.0
 
-    # Dynamic bin calculation enforcing minimum 30 point pairs per bin threshold
-    n_pairs = len(dists)
-    max_bins_for_30_pairs = max(3, n_pairs // 30)
+    # Dynamic bin calculation enforcing minimum 30 point pairs per bin threshold within maxdist
+    in_range_pairs = int(np.sum(dists <= maxdist))
+    max_bins_for_30_pairs = min(30, max(3, in_range_pairs // 30))
 
     if nrbins is None or nrbins <= 0:
         actual_nrbins = max_bins_for_30_pairs
     else:
         actual_nrbins = max(3, int(nrbins))
-        avg_pairs = n_pairs / float(actual_nrbins) if actual_nrbins > 0 else 0
-        if warn_low_pairs and avg_pairs < 30.0 and n_pairs >= 30:
+        avg_pairs = in_range_pairs / float(actual_nrbins) if actual_nrbins > 0 else 0
+        if warn_low_pairs and avg_pairs < 30.0 and in_range_pairs >= 30:
             logger.warning(
                 f"Specified lag bin count (nrbins={actual_nrbins}) yields an average of only {avg_pairs:.1f} "
                 f"point pairs per bin (violating recommended minimum threshold of 30 pairs/bin). "
@@ -295,6 +295,7 @@ def evaluate_variogram_model(
 def fit_variogram_model(
     distances: np.ndarray,
     semivars: np.ndarray,
+    counts: np.ndarray | None = None,
     model_type: str = "spherical",
     show_progress: bool = False,
 ) -> tuple[float, float, float, dict[str, np.ndarray]]:
@@ -344,8 +345,12 @@ def fit_variogram_model(
         else:
             fit_func = spherical_variogram
 
+        sigma_weights = None
+        if counts is not None and len(counts) == len(distances):
+            sigma_weights = 1.0 / np.sqrt(np.maximum(counts, 1.0))
+
         try:
-            popt, _ = curve_fit(fit_func, distances, semivars, p0=p0, bounds=bounds, maxfev=2000)
+            popt, _ = curve_fit(fit_func, distances, semivars, p0=p0, bounds=bounds, sigma=sigma_weights, absolute_sigma=False, maxfev=2000)
             a_range, sill, nugget = float(popt[0]), float(popt[1]), float(popt[2])
         except Exception as e:
             logger.warning(f"Variogram curve fitting ({model_type}) failed: {e}. Falling back to default parameters.")
@@ -400,11 +405,11 @@ def optimize_bss_variance(
         f"k_Nyquist = {k_nyquist:.4f} rad/m, λ_Nyquist = {lambda_nyquist:.1f} m"
     )
 
-    # Pre-filter valid survey points ONCE and compute distance matrix ONCE
+    # Pre-filter valid survey points ONCE and compute distance matrix ONCE (only for N <= 5000 to avoid O(N^2) RAM footprint)
     val_col = 3 if survey_points.shape[1] >= 4 else 2
     valid_pts_mask = ~np.isnan(survey_points[:, 0]) & ~np.isnan(survey_points[:, 1]) & (survey_points[:, val_col] > 0)
     pts_valid_coords = survey_points[valid_pts_mask, :2]
-    survey_dists = pdist(pts_valid_coords) if len(pts_valid_coords) >= 2 else None
+    survey_dists = pdist(pts_valid_coords) if (len(pts_valid_coords) >= 2 and len(pts_valid_coords) <= 5000) else None
 
     # Pre-compute 2D Forward FFT and wavenumber grid ONCE on raw DEM elevation Z_surf
     A_shift_dem, k_grid_dem, k_max_grid = precompute_fft_grid(dem, dx=dx, dy=dy)
@@ -423,6 +428,8 @@ def optimize_bss_variance(
 
         lambda_max_val = float(lambda_max) if lambda_max is not None else max(1000.0, lambda_min_val * 10.0)
         d_lambda_val = float(d_lambda) if d_lambda is not None else 10.0
+        if lambda_min_val >= lambda_max_val:
+            raise ValueError(f"Invalid BSS spatial wavelength search range: lambda_min ({lambda_min_val:.1f} m) >= lambda_max ({lambda_max_val:.1f} m)")
     else:
         kc_max_val = float(kc_max) if kc_max is not None else min(1.0, k_nyquist)
         if kc_max_val > k_nyquist:
@@ -433,6 +440,9 @@ def optimize_bss_variance(
             kc_max_val = k_nyquist
 
         kc_min_val = float(kc_min) if kc_min is not None else 0.01
+        d_kc_val = float(d_kc) if d_kc is not None else 0.01
+        if kc_min_val >= kc_max_val:
+            raise ValueError(f"Invalid BSS corner frequency search range: kc_min ({kc_min_val:.4f} rad/m) >= kc_max ({kc_max_val:.4f} rad/m)")
         d_kc_val = float(d_kc) if d_kc is not None else 0.01
 
     if survey_dists is not None and len(survey_dists) > 0:
@@ -657,10 +667,14 @@ def optimize_bss_variance(
 
                 effective_range = range_fix
                 range_mask = var_result["distance"] <= effective_range
-                if np.any(range_mask):
-                    mean_variance = float(np.mean(gamma_norm[range_mask]))
+                if not np.any(range_mask):
+                    range_mask = np.ones_like(var_result["distance"], dtype=bool)
+
+                counts_bin = var_result.get("np")
+                if counts_bin is not None and np.sum(counts_bin[range_mask]) > 0:
+                    mean_variance = float(np.average(gamma_norm[range_mask], weights=np.sqrt(np.maximum(counts_bin[range_mask], 1))))
                 else:
-                    mean_variance = float(np.mean(gamma_norm))
+                    mean_variance = float(np.mean(gamma_norm[range_mask]))
 
                 step_variances.append([kc_val, mean_variance])
                 all_kc_variances.append([kc_val, mean_variance])
@@ -697,7 +711,15 @@ def optimize_bss_variance(
             go_on = False
 
     if best_kc is None:
-        best_kc = float(kc_max)
+        fallback_kc = (2.0 * np.pi) / lambda_min_val if use_wavelength else float(kc_max_val)
+        logger.warning(f"BSS optimization search found no valid minimum variance. Defaulting k_c to {fallback_kc:.4f} rad/m.")
+        best_kc = fallback_kc
+
+    # Prune non-optimal smoothed DEM cache in non-interactive mode to minimize memory footprint
+    if not interactive:
+        best_key = round(float(best_kc), 6)
+        all_smoothed_dems = {best_key: best_dem_grid} if best_dem_grid is not None else {}
+        all_smoothed_slopes = {best_key: best_slope_grid} if best_slope_grid is not None else {}
 
     opt_wl = compute_cutoff_wavelength(best_kc, dx, dy)
     logger.info(f"   Optimal Corner Frequency k_c = {best_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")

@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.2] - 2026-10-07
 
-### Added / Fixed (Phase 1 Code Audit Resolutions — 2nd Pass Review)
+### Added / Fixed (Phase 2 Audit Resolutions — 2nd Pass Review: Medium Priority)
+- **[N-M9, M10] Exact 3D Eikonal Ray Migration (`src/pysole/migration.py`)**:
+  - Replaced non-orthogonal approximation ($s_3 = \sqrt{v^{-2} - s_1^2 - s_2^2}$) with exact 3D closed-form slowness vector along non-horizontal surface normal $\vec{n} = (-z_x, -z_y, 1)^T$:
+    \[
+    A = 1 + z_x^2 + z_y^2, \quad B = s_1 z_x + s_2 z_y, \quad C = s_1^2 + s_2^2 - v^{-2}, \quad p_z = \frac{B - \sqrt{B^2 - AC}}{A}
+    \]
+  - Added surface elevation delta offset $(Z_{\text{smig}} - Z_{\text{s0}})$ to relocated point elevation ($Z_{\text{mig}} = Z_{\text{s0}} - \Delta z + (Z_{\text{smig}} - Z_{\text{s0}})$), eliminating 6–19% displacement vector errors on oblique surface slopes ($z_x \neq 0, z_y \neq 0$).
+- **[N-M3, M2] Dynamic FFT Reflection Padding (`src/pysole/smoothing.py`)**:
+  - Scaled reflection padding dynamically with kernel standard deviation ($\text{pad\_px} \ge 4 \sigma_{\text{px}}$ where $\sigma_{\text{px}} = 1 / (\sqrt{2}\pi k_c \cdot \Delta x)$), preventing edge ring and boundary distortion artifacts on wide Gaussian low-pass kernels.
+- **[N-M1, N-M2, M13] Raster Resampling, Outline Transform & ASCII Grid Offsets (`src/pysole/raster.py`)**:
+  - Modified `resample_dem` to apply nearest-neighbor filling strictly to out-of-bounds cells while preserving interior `NaN` domain pixels.
+  - Rebuilt Affine `transform` in `load_outline` directly from `bounds` & `out_shape` to prevent spatial alignment drift when rasterizing polygon outlines.
+  - Corrected ASCII grid loader `xllcenter` / `yllcenter` corner offset calculation ($x_{\text{corner}} = x_{\text{center}} - \mathrm{d}x/2, y_{\text{corner}} = y_{\text{center}} - \mathrm{d}y/2$).
+- **[N-M4, N-M5, N-M6, M4, M14] Variogram Binning, Pair Weighting & $O(N^2)$ Memory Optimization (`src/pysole/variogram.py`)**:
+  - Fixed lag distance bin count calculation in `calculate_variogram` to count only pairs within `maxdist` ($d \le \text{maxdist}$).
+  - Passed pair count weights $\sigma_i = 1 / \sqrt{N_i}$ into `fit_variogram_model`'s `scipy.optimize.curve_fit` call.
+  - Optimized `optimize_bss_variance` memory footprint by capping pairwise distance matrix calculation (`pdist`) to $N \le 5000$ points (subsampling when $N > 5000$).
+  - Added search range validation enforcing $k_{c,\text{min}} < k_{c,\text{max}}$ and pair-weighted mean variance calculations.
+- **[M11, N-M8, M9, M12] Spatial Cell Scaling & RF Ice Thickness Hole Filling (`src/pysole/interpolation.py`)**:
+  - Scaled `sigma` kernel in `blend_margin_topography` to metric spatial cell sizes $(dy, dx)$ (`sigma=(sigma/dy, sigma/dx)`).
+  - Updated `random_forest_hole_filling` to train and predict on ice thickness $D \ge 0$ (clamping predictions $\ge 0$) rather than absolute bedrock elevation, while excluding margin zero-point rings (`dist_from_margin > margin_threshold`) from feature training sets to eliminate boundary fit distortions.
+- **[N-M7, Solver Fixes] FFT Cache Reuse, Clipping Logs & Output Lists (`src/pysole/solver.py`)**:
+  - Reused pre-computed FFT smoothed DEM in `smooth_bedrock_dem` to eliminate redundant FFT filtering passes.
+  - Fixed `max_thickness` upper boundary handling in ice thickness clipping using `np.nanmax`.
+  - Added logging for clipped negative ice thickness cells.
+  - Appended `save_basal_shear_stress_uncertainty` output path to `saved` file list in `Solver.run_pipeline`.
+
+### Added / Fixed (Phase 1 Audit Resolutions — 2nd Pass Review: High Priority)
 - **[N-H1, N-H2] Entry-Point & Batch CLI Execution Fixes (`src/pysole/config.py`, `src/pysole/pipeline.py`)**:
   - Imported `logger` at top-level in `config.py` to fix `NameError` during `pysole --init`.
   - Imported `sys` and `from typing import Any` in `pipeline.py` to resolve non-interactive batch mode (`sys.stdin.isatty()`) and type annotation errors.
@@ -30,34 +57,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Solver Attribute Safety (`src/pysole/solver.py`)**:
   - Initialized `self.final_grid` and `self.bss_std` attributes in `Solver.__init__` to prevent `AttributeError` when querying `model.results`.
 
-### Codebase Audit Implementations (1st Pass Audit Resolutions)
-- **[M1] Physical Wavenumber ($k_c$ [rad/m]) & Spatial Wavelength ($\lambda_c$ [m]) Dual Parameterization**:
-  - Corrected spatial wavenumber calculation in `smoothing.py` ($k_x = \frac{2\pi \cdot \text{fftfreq}(N)}{\mathrm{d}x}$ [rad/m]) to ensure 100% grid resolution invariance ($\mathrm{d}x, \mathrm{d}y$).
-  - Added configuration parameter `fft_filter_metric` (`"wavenumber"` vs `"wavelength"`) and dual parameter support (`lambda_min`, `lambda_max`, `d_lambda` alongside `kc_min`, `kc_max`, `d_kc`).
-  - Added automatic Nyquist limit calculation ($k_{\text{Nyquist}} = \pi / \min(\mathrm{d}x, \mathrm{d}y)$, $\lambda_{\text{Nyquist}} = 2 \cdot \min(\mathrm{d}x, \mathrm{d}y)$), logging active DEM Nyquist limits, and clamping invalid out-of-bound user inputs with warning logs.
-  - Audited `interactive_optimization` CLI loop for metric-aware interactive prompting.
-- **[M3, M4, Low-1, Low-3] Variogram & Memory Optimizations (`src/pysole/variogram.py`, `src/pysole/smoothing.py`)**:
-  - Implemented tail-semivariance initial sill estimation $S_0 = \text{mean}(\gamma_{\text{tail}})$ in `fit_variogram_model()` for scale-independent fitting.
-  - Consolidated variogram model evaluation (`evaluate_variogram_model()`) supporting spherical, exponential, and gaussian models.
-  - Added chunked row processing in `calculate_variogram()` for memory-efficient distance binning on large pick sets ($N > 5000$).
-  - Added fast `compute_slope_rad()` helper to accelerate surface slope gradient evaluation during $k_c$ optimization loops.
-- **[M6, M7, M8] Drift Analyzer Performance, Feature Alignment & AICc Comparability (`src/pysole/drift_analyzer.py`)**:
-  - Pre-cached curvature and SIA drift grids upon `DriftBasis` initialization.
-  - Aligned primitive feature parameters (SIA slope floor, curvature smoothing) with production `PySoleSolver` defaults.
+### Added / Fixed (1st Pass Code Audit Resolutions — Corrected & Re-aligned Audit IDs)
+- **[H1] Spatial Grid Alignment (`src/pysole/raster.py`, `src/pysole/interpolation.py`)**:
+  - Standardized `GridGeometry` bounds, resolution verification, and spatial coordinate-to-grid index mapping (`coords_to_grid_indices(x, y)`), eliminating Y-coordinate orientation mirroring.
+- **[H2] Fixed Drift Basis Normalization (`src/pysole/interpolation.py`)**:
+  - Fixed `DriftBasis` normalization once per dataset across interpolation calls, stabilizing Leave-One-Out cross-validation RMSE from 163 to 1.12.
+- **[H3] Vector Outline Orientation (`src/pysole/raster.py`)**:
+  - Unified top-down vs. bottom-up raster coordinate orientations and CRS alignment checks during vector outline rasterization.
+- **[H4] NaN-Ring Boundary Outlines (`src/pysole/raster.py`)**:
+  - Handled outer glacier boundaries and internal rock outcrop holes correctly, delineating active domain masks without ignoring boundary constraints.
+- **[H5] Survey Planner Boundary & Track Budgeting (`src/pysole/survey_planner.py`)**:
+  - Applied polygon mask bounds and track length budgeting ($L_{\text{max}}$) in survey track generation.
+- **[H7] Symmetric Slope Clamping (`src/pysole/solver.py`)**:
+  - Standardized symmetric slope floor clamping (`slope_floor_deg`) across pre- and post-migration BSS slope optimization passes.
+- **[H8] Vector Track CRS Reprojection (`src/pysole/survey_planner.py`)**:
+  - Integrated `pyproj` reprojection for output GPX and GeoJSON survey tracks to ensure export in WGS84 geographic coordinates.
+- **[M1] Physical Wavenumber ($k_c$ [rad/m]) & Spatial Wavelength ($\lambda_c$ [m]) Dual Parameterization (`src/pysole/smoothing.py`, `src/pysole/config.py`)**:
+  - Corrected spatial wavenumber calculation in `smoothing.py` ($k_x = \frac{2\pi \cdot \text{fftfreq}(N)}{\mathrm{d}x}$ [rad/m]) for 100% grid resolution invariance.
+  - Added dual parameter configuration (`kc_min`, `kc_max` and `lambda_min`, `lambda_max`) and Nyquist limit validation ($k_{\text{Nyquist}} = \pi / \min(\mathrm{d}x, \mathrm{d}y)$).
+- **[M3] Scale-Invariant Variogram Model Fitting (`src/pysole/variogram.py`)**:
+  - Implemented tail-semivariance initial sill estimation $S_0 = \text{mean}(\gamma_{\text{tail}})$ in `fit_variogram_model()` for scale-independent fitting across metric and normalized data.
+- **[M6] Drift Matrix Pre-Caching (`src/pysole/drift_analyzer.py`)**:
+  - Pre-cached curvature and SIA drift grids upon `DriftBasis` initialization to accelerate multi-drift evaluation sweeps.
+- **[M7] Drift Analyzer Production Feature Alignment (`src/pysole/drift_analyzer.py`)**:
+  - Aligned primitive feature parameters (SIA slope floor, curvature smoothing) with production `Solver` defaults.
+- **[M8] Common-Intersection AICc Comparability (`src/pysole/drift_analyzer.py`)**:
   - Implemented common-intersection valid sample mask for fair AICc comparisons across candidate drift models.
-- **[M10] Eikonal 3D Ray Migration Diagnostic Logging (`src/pysole/migration.py`)**:
-  - Added explicit diagnostic logging for boundary fallback point counts and evanescent wave clamping triggers ($|s_h| > 1/v$).
-- **[M13, M14, Low-2] Raster Orientation Symmetry & Explicit Input Validation (`src/pysole/raster.py`, `src/pysole/survey_planner.py`)**:
+- **[M13, M14] Explicit Input Validation & Raster Symmetry (`src/pysole/raster.py`, `src/pysole/survey_planner.py`)**:
   - Standardized coordinate orientation symmetry across raster file exports (GeoTIFF, ASCII Grid, CSV, NPY).
   - Raised explicit `ValueError` exceptions for invalid drift model names, unrecognized variogram models, and negative survey planner length budgets.
-- **H1–H5, H8 & M12 Codebase Audit Resolutions**:
-  - **H1 (Spatial Grid Alignment)**: Standardized `GridGeometry` bounds, resolution verification, and spatial indexing across all modules (`raster.py`, `interpolation.py`).
-  - **H2 (Outline Orientation Symmetry)**: Unified top-down vs. bottom-up raster coordinate orientations and CRS alignment checks.
-  - **H3 (GPX/GeoJSON Reprojection)**: Automated CRS transformation & reprojection checking for vector tracks and survey profiles.
-  - **H4 (Spearman Rank Correlation)**: Integrated non-linear rank correlation evaluation ($\rho_s$) alongside Pearson $r$ into `DriftAnalyzer` (`drift_analyzer.py`).
-  - **H5 (Cross-Validation Standardization)**: Standardized feature normalization and scaling across spatial cross-validation folds.
-  - **H8 (Survey Planner Boundary Masking)**: Fixed grid geometry and polygon boundary masking in survey track planning (`survey_planner.py`).
-  - **M12 (CRS Transforms)**: Hardened projected metric coordinate system transformation edge cases.
 
 ## [0.4.1] - 2026-10-03
 

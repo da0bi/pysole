@@ -167,7 +167,8 @@ def blend_margin_topography(
         weight = 0.5 * (1.0 - np.cos(np.pi * weight))  # smooth cosine transition
 
         tapered_thickness = thickness * weight
-        smoothed_thickness = gaussian_filter(tapered_thickness, sigma=1.0)
+        sigma_px = (max(margin_width / (3.0 * abs(dy)), 0.5), max(margin_width / (3.0 * abs(dx)), 0.5))
+        smoothed_thickness = gaussian_filter(tapered_thickness, sigma=sigma_px)
         final_thickness = weight * thickness + (1.0 - weight) * smoothed_thickness
         final_thickness[~boundary_mask] = 0.0
 
@@ -768,12 +769,16 @@ def random_forest_hole_filling(
     grads = compute_gradients(dem, dx=geometry.dx, dy=geometry.dy)
     slope_grid = grads["slope_rad"]
 
+    dist_from_margin = distance_transform_edt(boundary_mask, sampling=(abs(geometry.dy), abs(geometry.dx)))
+    dist_flat = dist_from_margin.ravel()
+    margin_threshold = max(geometry.dx, geometry.dy) * 2.0
+
     features = np.column_stack((xx.ravel(), yy.ravel(), dem.ravel(), slope_grid.ravel()))
-    target = bedrock_grid.ravel()
+    bedrock_flat = bedrock_grid.ravel()
     mask_flat = boundary_mask.ravel()
 
-    thickness_flat = dem.ravel() - target
-    valid_train = mask_flat & ~np.isnan(target) & (thickness_flat > 0.1)
+    thickness_target = dem.ravel() - bedrock_flat
+    valid_train = mask_flat & ~np.isnan(bedrock_flat) & (thickness_target > 0.1) & (dist_flat > margin_threshold)
 
     if np.sum(valid_train) < 10:
         return bedrock_grid.copy()
@@ -787,21 +792,19 @@ def random_forest_hole_filling(
         disable=not show_progress,
     ) as pbar:
         rf = RandomForestRegressor(n_estimators=100, max_depth=15, random_state=42, n_jobs=effective_n_cores)
-        rf.fit(features[valid_train], target[valid_train])
+        rf.fit(features[valid_train], thickness_target[valid_train])
         pbar.update(50)
 
         logger.info("   [RF Gap Filling] Finished learning Random Forest regression model")
 
-        # [VECTORIZATION OPTION 3]: Mask-scoped feature extraction & prediction for ML gap filling.
-        # Avoids evaluating RF regression predictions across all M*N grid pixels; predicts strictly
-        # on pixels inside target missing data holes (holes_flat), saving 80%-90% RAM and CPU overhead.
-        holes_flat = mask_flat & ((dem.ravel() - target) <= 0.1)
+        # Predict ice thickness strictly on missing interior data holes, excluding the margin ring
+        holes_flat = mask_flat & (np.isnan(bedrock_flat) | (thickness_target <= 0.1)) & (dist_flat > margin_threshold)
         filled_bedrock = bedrock_grid.copy()
 
         if np.any(holes_flat):
             hole_features = features[holes_flat]
-            hole_predictions = rf.predict(hole_features)
-            filled_bedrock.ravel()[holes_flat] = hole_predictions
+            predicted_thickness = np.maximum(rf.predict(hole_features), 0.0)
+            filled_bedrock.ravel()[holes_flat] = dem.ravel()[holes_flat] - predicted_thickness
 
         pbar.update(50)
 

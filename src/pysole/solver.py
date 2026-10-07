@@ -391,6 +391,8 @@ class Solver:
                     saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_basal_shear_stress_uncertainty and self.bss_std is not None:
                 res = self._export_optional_raster(self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty")
+                if res:
+                    saved.extend([res] if isinstance(res, str) else res)
 
         return saved
 
@@ -974,7 +976,16 @@ class Solver:
         prod_var = krig_res.variance_grid
 
         val_col = 3 if pts.shape[1] >= 4 else 2
-        max_thickness = max(float(np.max(pts[:, val_col])) * 1.5, 500.0)
+        valid_pts_val = pts[~np.isnan(pts[:, val_col]), val_col]
+        max_thickness = max(float(np.max(valid_pts_val)) * 1.5, 500.0) if len(valid_pts_val) > 0 else 500.0
+
+        n_clipped_neg = int(np.sum(grid_raw < 0.0))
+        n_clipped_max = int(np.sum(grid_raw > max_thickness))
+        if n_clipped_neg > 0 or n_clipped_max > 0:
+            logger.info(
+                f"   [Thickness Clipping] Clipped {n_clipped_neg} negative cells and {n_clipped_max} excessive cells "
+                f"(> {max_thickness:.1f}m) to valid thickness range [0, {max_thickness:.1f}m]."
+            )
         thickness_grid = np.clip(grid_raw, 0.0, max_thickness)
 
         if self.outline_mask is not None:
@@ -1053,23 +1064,12 @@ class Solver:
             out_grid = median_filter(out_grid, size=kernel_size)
 
         elif method == "fft_lowpass":
-            M, N = out_grid.shape
-            kc = kc_cutoff if kc_cutoff is not None else (self.opt_kc if self.opt_kc is not None else 1.0)
+            from .smoothing import fft_gaussian_smooth
 
-            kx = 2.0 * np.pi * np.fft.fftfreq(N, d=self.dx)
-            ky = 2.0 * np.pi * np.fft.fftfreq(M, d=self.dy)
-            KX, KY = np.meshgrid(kx, ky)
-            KR = np.sqrt(KX**2 + KY**2)
-
-            H_filter = np.exp(-(KR**2) / (2.0 * (kc**2)))
-
+            kc = kc_cutoff if kc_cutoff is not None else (self.opt_kc if self.opt_kc is not None else 0.05)
+            smoothed_grid, _, _ = fft_gaussian_smooth(out_grid, dx=self.dx, dy=self.dy, kc=kc)
             valid_mask = ~np.isnan(out_grid)
-            filled = np.where(valid_mask, out_grid, np.nanmean(out_grid))
-
-            F_grid = np.fft.fft2(filled)
-            F_filtered = F_grid * H_filter
-            smoothed = np.real(np.fft.ifft2(F_filtered))
-            out_grid[valid_mask] = smoothed[valid_mask]
+            out_grid[valid_mask] = smoothed_grid[valid_mask]
 
         return out_grid
 

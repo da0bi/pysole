@@ -387,16 +387,25 @@ def resample_dem(
     pts = np.column_stack((new_yy.ravel(), new_xx.ravel()))
     resampled = interp(pts).reshape((M_target, N_target))
 
-    # Fill boundary NaNs if any with nearest neighbor
+    # Only fill out-of-bounds cells (outside original coordinate range) with nearest-neighbor, preserving interior NaNs
     nan_mask = np.isnan(resampled)
     if np.any(nan_mask):
-        orig_xx, orig_yy = np.meshgrid(orig_x, orig_y)
-        sample_pts = np.column_stack((orig_xx.ravel(), orig_yy.ravel()))
-        sample_vals = grid.ravel()
-        valid = ~np.isnan(sample_vals)
-        if np.any(valid):
-            near_vals = griddata(sample_pts[valid], sample_vals[valid], (new_xx[nan_mask], new_yy[nan_mask]), method="nearest")
-            resampled[nan_mask] = near_vals
+        out_of_bounds = (
+            (new_xx < orig_x.min()) | (new_xx > orig_x.max()) |
+            (new_yy < orig_y.min()) | (new_yy > orig_y.max())
+        )
+        fill_mask = nan_mask & out_of_bounds
+        if np.any(fill_mask):
+            orig_xx, orig_yy = np.meshgrid(orig_x, orig_y)
+            sample_pts = np.column_stack((orig_xx.ravel(), orig_yy.ravel()))
+            sample_vals = grid.ravel()
+            valid = ~np.isnan(sample_vals)
+            if np.any(valid):
+                near_vals = griddata(
+                    sample_pts[valid], sample_vals[valid],
+                    (new_xx[fill_mask], new_yy[fill_mask]), method="nearest"
+                )
+                resampled[fill_mask] = near_vals
 
     new_bounds = (minx, miny, minx + N_target * target_dx, miny + M_target * target_dy)
     return resampled, new_bounds
@@ -469,8 +478,19 @@ def load_dem(
             ncols = int(header.get("ncols", grid.shape[1]))
             nrows = int(header.get("nrows", grid.shape[0]))
             cellsize = header.get("cellsize", 1.0)
-            xll = header.get("xllcorner", header.get("xllcenter", 0.0))
-            yll = header.get("yllcorner", header.get("yllcenter", 0.0))
+            if "xllcorner" in header:
+                xll = float(header["xllcorner"])
+            elif "xllcenter" in header:
+                xll = float(header["xllcenter"]) - 0.5 * cellsize
+            else:
+                xll = 0.0
+
+            if "yllcorner" in header:
+                yll = float(header["yllcorner"])
+            elif "yllcenter" in header:
+                yll = float(header["yllcenter"]) - 0.5 * cellsize
+            else:
+                yll = 0.0
 
             native_dx = cellsize
             native_dy = cellsize
@@ -685,9 +705,8 @@ def load_outline(
             if dem_crs is not None and gdf.crs is not None:
                 check_crs_alignment(dem_crs, gdf.crs)
 
-            transform = meta.get("transform")
-            if transform is None:
-                transform = from_bounds(*bounds, width, height)
+            # Always construct transform from bounds and target dimensions to guarantee alignment after resampling
+            transform = from_bounds(*bounds, width, height)
 
             geoms = validate_and_extract_polygons(gdf)
             shapes = [(geom, 1) for geom in geoms]

@@ -117,31 +117,29 @@ def migrate_eikonal_points(
     x_coords = geometry.x_coords
     y_coords = geometry.y_coords
 
-    # 1. Calculate horizontal slownesses s1 = dT/dx and s2 = dT/dy from continuous travel time field
+    # 1. Calculate horizontal slownesses s1 = \partial T / \partial x and s2 = \partial T / \partial y
     tt_grads = compute_gradients(travel_time_grid, dx=dx, dy=dy)
     s1_grid = tt_grads["slope_x"]  # \partial T / \partial x
     s2_grid = tt_grads["slope_y"]  # \partial T / \partial y
 
-    # 2. Retrieve pre-computed surface DEM directional slope components or calculate ONCE
+    # 2. Retrieve pre-computed surface DEM directional slope components zx = \partial Z / \partial x, zy = \partial Z / \partial y
     if dem_grads is None:
         dem_grads = compute_gradients(dem, dx=dx, dy=dy)
 
-    dz_dx = dem_grads["slope_x"]
-    dz_dy = dem_grads["slope_y"]
+    zx_grid = dem_grads["slope_x"]
+    zy_grid = dem_grads["slope_y"]
 
-    alpha_x = np.arctan(dz_dx)
-    alpha_y = np.arctan(dz_dy)
+    # 3. Closed-form Eikonal 3D ray slowness vector formulation (exact for arbitrary oblique slopes zx, zy)
+    # Ref: p_z = (B - \sqrt{B^2 - A C}) / A, where A = 1 + zx^2 + zy^2, B = s1*zx + s2*zy, C = s1^2 + s2^2 - 1/v^2
+    v_inv = 1.0 / max(velocity, 1e-4)
+    v_inv_sq = v_inv**2
 
-    sin_alpha_x = np.sin(alpha_x)
-    cos_alpha_x = np.cos(alpha_x)
-    sin_alpha_y = np.sin(alpha_y)
-    cos_alpha_y = np.cos(alpha_y)
+    A_grid = 1.0 + zx_grid**2 + zy_grid**2
+    B_grid = s1_grid * zx_grid + s2_grid * zy_grid
+    C_grid = s1_grid**2 + s2_grid**2 - v_inv_sq
 
-    # 3. Non-orthogonal slowness coordinate transformation (matching MATLAB MIG.m)
-    s12_quadr_grid = s1_grid**2 + s2_grid**2 + 2.0 * s1_grid * s2_grid * sin_alpha_x * sin_alpha_y
-
-    inv_v_sq = (1.0 / max(velocity, 1e-4))**2
-    evanescent_mask = s12_quadr_grid > inv_v_sq
+    disc_grid = B_grid**2 - A_grid * C_grid
+    evanescent_mask = disc_grid < 0.0
     evanescent_count = int(np.sum(evanescent_mask))
     if evanescent_count > 0:
         logger.info(
@@ -149,36 +147,18 @@ def migrate_eikonal_points(
             f"(|s_h| > 1/v); vertical slowness s3 clamped to 0.0."
         )
 
-    s3_grid = np.sqrt(np.maximum(inv_v_sq - s12_quadr_grid, 0.0))
+    disc_clamped = np.maximum(disc_grid, 0.0)
+    pz_grid = (B_grid - np.sqrt(disc_clamped)) / A_grid
+    px_grid = s1_grid - pz_grid * zx_grid
+    py_grid = s2_grid - pz_grid * zy_grid
 
-    A_grid = (cos_alpha_y**2) * (cos_alpha_x**2) + (sin_alpha_y**2) * (cos_alpha_x**2) + (sin_alpha_x**2) * (cos_alpha_y**2)
-    A_grid = np.maximum(A_grid, 1e-6)
-
-    # Calculate 3D surface-normal slowness components (sx_grid, sy_grid, sz_grid)
-    sx1_grid = cos_alpha_x * ((cos_alpha_y**2 + sin_alpha_y**2) / A_grid) * s1_grid
-    sx2_grid = -sin_alpha_x * cos_alpha_x * (sin_alpha_y / A_grid) * s2_grid
-    sx3_grid = -sin_alpha_x * (cos_alpha_y / np.sqrt(A_grid)) * s3_grid
-    sx_grid = sx1_grid + sx2_grid + sx3_grid
-
-    sy1_grid = -sin_alpha_y * sin_alpha_x * (cos_alpha_y / A_grid) * s1_grid
-    sy2_grid = cos_alpha_y * ((cos_alpha_x**2 + sin_alpha_x**2) / A_grid) * s2_grid
-    sy3_grid = -cos_alpha_x * (sin_alpha_y / np.sqrt(A_grid)) * s3_grid
-    sy_grid = sy1_grid + sy2_grid + sy3_grid
-
-    sz1_grid = (cos_alpha_y**2) * (sin_alpha_x / A_grid) * s1_grid
-    sz2_grid = (cos_alpha_x**2) * (sin_alpha_y / A_grid) * s2_grid
-    sz3_grid = cos_alpha_x * (cos_alpha_y / np.sqrt(A_grid)) * s3_grid
-    sz_grid = sz1_grid + sz2_grid + sz3_grid
-
-    # 4. Ray displacement vector grids: dx_grid, dy_grid, dz_grid (MIG.m)
+    # 4. Ray displacement vector grids: dx_grid, dy_grid, dz_grid
     v_sq = velocity**2
-    dx_grid = -travel_time_grid * v_sq * sx_grid
-    dy_grid = -travel_time_grid * v_sq * sy_grid
-    dz_grid = -travel_time_grid * v_sq * sz_grid
+    dx_grid = travel_time_grid * v_sq * px_grid
+    dy_grid = travel_time_grid * v_sq * py_grid
+    dz_grid = travel_time_grid * v_sq * pz_grid
 
     # 5. Vectorized multi-channel interpolation of 3D ray displacement vectors at scattered survey locations
-    # [VECTORIZATION OPTION 5]: Zero-copy coordinate indexing via 2D slice selection survey_points[:, [1, 0]] (Y, X)
-    # Avoids intermediate array memory allocations and tuple copying prior to spatial interpolator evaluation.
     with get_progress_bar(
         total=len(survey_points),
         desc="   [3D Ray Migration] Relocating survey picks",
@@ -199,14 +179,20 @@ def migrate_eikonal_points(
 
     interp_dem = geometry.create_interpolator(dem, fill_value=np.nan)
 
-    # Migrated coordinates & depth d_mig = -dz
+    # Migrated coordinates & thickness adjustment for surface elevation delta between source and relocated point
     x_mig = survey_points[:, 0] + dxi
     y_mig = survey_points[:, 1] + dyi
-    d_mig = np.maximum(-dzi, 0.0)
 
-    # Fallback to unmigrated depth if dzi interpolation is zero
+    z_s0 = interp_dem(pts_xy)
+    pts_mig_xy = np.column_stack((y_mig, x_mig))
+    z_smig = interp_dem(pts_mig_xy)
+
+    delta_zs = np.where(np.isnan(z_smig - z_s0), 0.0, z_smig - z_s0)
+    d_mig = np.maximum(-dzi + delta_zs, 0.0)
+
+    # Fallback to unmigrated depth if dzi interpolation is zero or invalid
     unmig_d = survey_points[:, 3] * velocity
-    valid_d = d_mig > 0
+    valid_d = (~np.isnan(dzi)) & (d_mig > 0)
     fallback_count = int(np.sum(~valid_d))
     if fallback_count > 0:
         logger.info(

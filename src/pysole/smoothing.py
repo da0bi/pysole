@@ -125,7 +125,7 @@ class FFTSpectrum:
 
 
 def precompute_fft_grid(
-    grid: np.ndarray, dx: float = 1.0, dy: float = 1.0
+    grid: np.ndarray, dx: float = 1.0, dy: float = 1.0, kc: float | None = None
 ) -> tuple[FFTSpectrum, np.ndarray, float]:
     """
     Pre-computes 2D Forward FFT spectra with reflect boundary padding and spatial wavenumber grid.
@@ -140,6 +140,8 @@ def precompute_fft_grid(
         Grid spacing along X (columns).
     dy : float
         Grid spacing along Y (rows).
+    kc : float, optional
+        Filter corner frequency [rad/m] for dynamic padding calculation.
 
     Returns
     -------
@@ -156,8 +158,11 @@ def precompute_fft_grid(
 
     grid_clean = np.where(nan_mask, 0.0, grid)
 
-    pad_m = min(M // 4, 32)
-    pad_n = min(N // 4, 32)
+    kc_eff = float(kc) if (kc is not None and kc > 0) else 0.01
+    sigma_px_y = 1.0 / (kc_eff * abs(dy))
+    sigma_px_x = 1.0 / (kc_eff * abs(dx))
+    pad_m = min(M, max(32, int(np.ceil(4.0 * sigma_px_y))))
+    pad_n = min(N, max(32, int(np.ceil(4.0 * sigma_px_x))))
 
     if pad_m > 0 or pad_n > 0:
         grid_padded = np.pad(grid_clean, ((pad_m, pad_m), (pad_n, pad_n)), mode="reflect")
