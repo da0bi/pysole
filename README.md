@@ -17,13 +17,13 @@
 [Technical & Methodological Notes](#technical-and-methodological-notes)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Formats](#supported-dem-formats)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop Input Files](#parsing-rock-outcrops)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[3. Variogram Binning with Minimum Pair Threshold](#variogram-binning)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[4. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. Robust Baseline Interpolation Strategies](#interpolation-strategies)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[6. Universal Kriging Drift Models](#universal-kriging-drift-models)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[7. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[8. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[9. Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[3. Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[4. Variogram Binning with Minimum Pair Threshold](#variogram-binning)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[6. Robust Baseline Interpolation Strategies](#interpolation-strategies)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[7. Universal Kriging Drift Models](#universal-kriging-drift-models)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[8. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[9. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Command-Line Interface (CLI) Execution](#cli-execution)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
@@ -164,11 +164,10 @@ All execution options can be fully defined in a single JSON configuration file, 
     "optimization_parameters": {
         "fft_filter_metric": "wavenumber",
         "kc_max": null,
-        "kc_min": 0.01,
-        "d_kc": 0.01,
+        "kc_min": null,
         "lambda_min": null,
         "lambda_max": null,
-        "d_lambda": null,
+        "n_steps": null,
         "nrbins": null,
         "slope_floor_deg": 5.0,
         "interactive_optimization": false
@@ -242,29 +241,28 @@ All execution options can be fully defined in a single JSON configuration file, 
 | **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal traveltimes. If `false`, migration is skipped. |
 | | `velocity` | `float` | `0.16` | Signal propagation velocity (default value of `0.16` m/ns is characteristic for radar wave propagation in temperate ice). |
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual migrated depths and horizontal displacement vector plots. |
-| **`optimization_parameters`** | `fft_filter_metric` | `str` | `"wavenumber"` | Metric used for the FFT low-pass filter: `"wavenumber"` in radians per meter [rad/m], or `"wavelength"` in meters [m]. |
-| | `kc_max` | `float` | `null` | Maximum corner frequency cutoff $k_{\text{c,max}}$ in [rad/m]. If `null`, defaults to grid Nyquist wavenumber $k_{\text{Nyquist}}$. |
-| | `kc_min` | `float` | `0.01` | Minimum corner frequency cutoff $k_{\text{c,min}}$ in [rad/m]. |
-| | `d_kc` | `float` | `0.01` | Corner frequency stepwidth $\mathrm{d}k$ in [rad/m]. |
-| | `lambda_min` | `float` | `null` | Minimum spatial wavelength $\lambda_{\text{c,min}}$ in [m]. Used when `fft_filter_metric` is `"wavelength"`. If `null`, defaults to grid Nyquist wavelength $\lambda_{\text{Nyquist}}$. |
-| | `lambda_max` | `float` | `null` | Maximum spatial wavelength $\lambda_{\text{c,max}}$ in [m]. |
-| | `d_lambda` | `float` | `10.0` | Spatial wavelength stepwidth $\mathrm{d}\lambda$ in [m]. |
-| | `nrbins` | `int` | `null` | Number of variogram lag distance bins. If `null` (default), dynamically calculated to receive ~30 point pairs per bin, and an absolute minimum floor of 3 bins. |
+| **`optimization_parameters`** | `fft_filter_metric` | `str` | `"wavenumber"` | Frequency spectrum filter metric: `"wavenumber"` [rad/m] or `"wavelength"` [m]. |
+| | `kc_max` | `float` | `null` | Maximum corner frequency cutoff $k_{\text{c,max}}$ in [rad/m]. If `null`, defaults to grid Nyquist wavenumber $k_{\text{Nyquist}}$. For full details, see section [Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion). |
+| | `kc_min` | `float` | `null` | Minimum corner frequency cutoff $k_{\text{c,min}}$ in [rad/m]. If `null`, defaults to half of the DEM extent. For full details, see section [Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion).|
+| | `lambda_min` | `float` | `null` | Minimum spatial cutoff wavelength $\lambda_{\text{min}}$ in [m]. If `null`, falls back directly to `kc_max`. For full details, see section [Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion). |
+| | `lambda_max` | `float` | `null` | Maximum spatial cutoff wavelength $\lambda_{\text{max}}$ in [m]. If `null`, falls back directly to `kc_min`. For full details, see section [Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion). |
+| | `n_steps` | `int` | `null` | Number of $k_{\text{c}}$ steps, defining regular $\delta k = \frac{(k_{\text{c,max}}-k_{\text{c,min}})}{n_steps}$ . If `null`, dynamically calculated from DEM grid and constrained by $[10, 50]$. For full details, see section [Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion). |
+| | `nrbins` | `int` | `null` | Number of variogram lag distance bins. If `null` (default), dynamically calculated to receive ~30 point pairs per bin, and an absolute minimum floor of 3 bins. For full details, see section [Variogram Binning with Minimum Pair Threshold](#variogram-binning). |
 | | `slope_floor_deg` | `float` | `5.0` | Minimum surface slope angle threshold in degrees [°] enforced during surface slope optimization to prevent numerical division singularities. |
-| | `interactive_optimization` | `bool` | `false` | If `true`, enables interactive CLI prompt to inspect BSS variance curve and adjust corner frequency spectrum parameters (`kc_min`, `kc_max`, `d_kc`), lag distance bin count (`nrbins`), and correlation range (`a_range`). |
+| | `interactive_optimization` | `bool` | `false` | If `true`, enables interactive CLI prompt to inspect BSS variance curve and adjust corner frequency spectrum parameters (`kc_min`, `kc_max`, `lambda_min`, `lambda_max`, `n_steps`), lag distance bin count (`nrbins`), and correlation range (`a_range`). |
 | **`kriging_parameters`** | `engine` | `str` | `"native"` | Kriging calculation engine: `"native"` (default, high-performance Dual Kriging solver) or `"pykrige"` (uses external [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package - optional dependency in `pyproject.toml`). |
 | | `pre_migration` | `dict` | *Sub-section* | Configuration for pre-migration traveltime field, <i>T</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `pre_migration.interpolation_target` | `str` | `"P"` | Pre-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>T</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct signal traveltimes (<i>T</i><sub>i</sub>). |
 | | `pre_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (the default for `pre_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
 | | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` tool. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
-| | `pre_migration.drift_terms` | `list[str]` | `[]` | `["sia"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes". |
+| | `pre_migration.drift_terms` | `list[str]` | `[]` | `["sia"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described in the subsection "7. Universal Kriging Drift Models" in the "Technical & Methodological Notes". |
 | | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 s) along the perimeter and rock outcrop margin outline(s). |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth, <i>D</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
 | | `post_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (the default for `post_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
 | | `post_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` tool. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
-| | `post_migration.drift_terms` | `list[str]` | `[]` |  `["sia"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described in the subsection "6. Universal Kriging Drift Models" in the "Technical & Methodological Notes". |
+| | `post_migration.drift_terms` | `list[str]` | `[]` |  `["sia"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described in the subsection "7. Universal Kriging Drift Models" in the "Technical & Methodological Notes". |
 | | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
 | **`finalization_parameters`** | `random_forest_gap_filling` | `bool` | `false` | If `true`, applies Random Forest machine learning gap filling across unmeasured interior regions. |
@@ -312,8 +310,75 @@ For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
 - **CRS Alignment**: The shapefile's Coordinate Reference System must match the DEM raster projection.
 - **Valid Geometries**: Rings must not intersect themselves (`PySole` automatically executes `validate_and_extract_polygons()` on load to auto-repair geometries or fall back to the outer boundary shell if holes fail criteria).
 
+<a id="wavenumber-to-wavelength-conversion"></a>
+#### 3. Wavenumbers and Wavelengths
+In `PySole`, 2D spatial Gaussian low-pass smoothing operates in the physical 2D spatial frequency domain. Spatial wavenumber components along orthogonal grid axes $X$ and $Y$ are constructed in physical units of **[radians per meter]** as:
+
+<p align="center">
+$$\begin{aligned}
+k_x &= 2\pi \cdot f_{x,\text{phys}} = \frac{2\pi \cdot \text{fftfreq}(N_x)}{dx} \quad [\text{rad/m}] \\
+k_y &= 2\pi \cdot f_{y,\text{phys}} = \frac{2\pi \cdot \text{fftfreq}(M_y)}{dy} \quad [\text{rad/m}]
+\end{aligned}$$
+</p>
+
+where $dx, dy$ are spatial grid cell resolutions in **[meters]**, and $N_x, M_y$ are grid dimensions. The 2D spatial wavenumber magnitude is $k = \sqrt{k_x^2 + k_y^2}$ [rad/m].
+
+Physical angular wavenumber $k_c$ [rad/m] relates directly to physical spatial wavelength $\lambda_c$ [meters] via the fundamental physical relationship:
+
+<p align="center">
+$$k_c = \frac{2\pi}{\lambda_c} \quad \Longleftrightarrow \quad \lambda_c = \frac{2\pi}{k_c}$$
+</p>
+
+##### Concrete Calculation Example ($dx = 5.0\text{ m}, dy = 5.0\text{ m}$)
+For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
+1. **Minimum Physical Nyquist Wavelength**: $\lambda_{\text{Nyquist}} = 2 \cdot \min(dx, dy) = 2 \cdot 5.0\text{ m} = \mathbf{10.0\text{ m}}$ (the shortest feature resolvable on a 5m grid).
+2. **Maximum Physical Nyquist Wavenumber**: $k_{\text{Nyquist}} = \frac{2\pi}{\lambda_{\text{Nyquist}}} = \frac{\pi}{5.0} \approx \mathbf{0.6283\text{ rad/m}}$.
+
+##### Physical Reference Conversion Table ($5\text{ m} \times 5\text{ m}$ DEM)
+
+| Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Glaciological Feature Scale |
+| :--- | :--- | :--- |
+| **$k_{\text{Nyquist}} \approx 0.6283\text{ rad/m}$** | $\mathbf{10.0\text{ m}}$ | Nyquist limit ($2 \cdot \min(dx, dy)$, finest resolvable feature) |
+| **$0.3142\text{ rad/m}$** | $\mathbf{20.0\text{ m}}$ | Fine spatial smoothing (filters features $< 20\text{ m}$) |
+| **$0.1257\text{ rad/m}$** | $\mathbf{50.0\text{ m}}$ | Medium-fine spatial smoothing |
+| **$0.0628\text{ rad/m}$** | $\mathbf{100.0\text{ m}}$ | Medium spatial smoothing |
+| **$0.0314\text{ rad/m}$** | $\mathbf{200.0\text{ m}}$ | Broad spatial smoothing |
+| **$0.0100\text{ rad/m}$** | $\mathbf{628.3\text{ m}}$ | Very broad regional smoothing |
+
+Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and can be selected via the `"fft_filter_metric"` setting (`"wavenumber"` or `"wavelength"`).
+
+##### Derivation of FFT Filter Parameter Defaults (`kc_max`, `kc_min`, `lambda_min`, `lambda_max`, `n_steps`)
+
+When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` dynamically derives physically sound parameter defaults based on the DEM spatial resolution ($\Delta x, \Delta y$) and total domain extent ($L_{\text{max}} = \max(N_x \cdot |dx|, M_y \cdot |dy|)$):
+
+1. **Maximum Frequency Cutoff $k_{\text{c,max}}$ and Minimum Wavelength $\lambda_{\text{min}}$**:
+   - **`kc_max` Default**: Defaults to the spatial Nyquist wavenumber limit of the DEM grid:
+     <p align="center">
+     $$k_{\text{c,max}} = k_{\text{Nyquist}} = \frac{\pi}{\min(|dx|, |dy|)} \quad [\text{rad/m}]$$
+     </p>
+   - **`lambda_min` Wavelength Metric & Fallback**: If the user provides a custom $\lambda_{\text{min}}$ [m], it converts directly to wavenumber as $k_{\text{c,max}} = 2\pi / \lambda_{\text{min}}$ for the FFT filtering. When `lambda_min` is `null` (or when `fft_filter_metric = "wavelength"` with `null` `lambda_min`), `PySole` falls back directly to `kc_max` ($k_{\text{Nyquist}}$).
+
+2. **Minimum Frequency Cutoff $k_{\text{c,min}}$ and Maximum Wavelength $\lambda_{\text{max}}$**:
+   - **`kc_min` Default (Half-Domain Limit)**: Defaults to the Half-Domain scaling limit:
+     <p align="center">
+     $$k_{\text{c,min}} = \frac{4\pi}{L_{\text{DEM,max}}} \quad [\text{rad/m}]$$
+     </p>
+     This constrains the maximum filter wavelength to half the physical DEM extent ($\lambda_{\text{max}} = L_{\text{DEM,max}} / 2$).
+   - **`lambda_max` Wavelength Metric & Fallback**: If the user provides a custom $\lambda_{\text{max}}$ [m], it converts directly to wavenumber as $k_{\text{c,min}} = 2\pi / \lambda_{\text{max}}$ for the FFT filtering. When `lambda_max` is `null`, `PySole` falls back directly to `kc_min` ($4\pi / L_{\text{max}}$).
+
+3. **Evaluation Step Count `n_steps` (Discrete Fourier Mode Counting)**:
+   - When `n_steps` is `null`, `PySole` dynamically calculates the number of integer Fourier modes spanning the frequency search range $[k_{\text{c,min}}, k_{\text{c,max}}]$ over the maximum domain length $L_{\text{DEM,max}}$:
+     <p align="center">
+     $$n_{\text{modes}} = \left\lfloor \frac{(k_{\text{c,max}} - k_{\text{c,min}}) \cdot L_{\text{max}}}{2\pi} \right\rfloor$$
+     </p>
+   - The evaluation step count is then dynamically clamped between a minimum floor of 10 steps and a maximum ceiling of 50 steps:
+     <p align="center">
+     $$n_{\text{steps}} = \text{clip}(n_{\text{modes}}, 10, 50)$$
+     </p>
+   - The candidate corner frequency vector $\mathbf{k}_c$ is generated as a linearly spaced array from $k_{\text{c,max}}$ down to $k_{\text{c,min}}$ with $n_{\text{steps}}$ evaluation passes.
+
 <a id="variogram-binning"></a>
-#### 3. Variogram Binning with Minimum Pair Threshold
+#### 4. Variogram Binning with Minimum Pair Threshold
 Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances across a total of $N$ survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole initially determines a minimum distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
 
 $$
@@ -323,7 +388,7 @@ $$
 Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields, however, fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice. An absolute lower floor of 3 lag distance bins is enforced across all calculations.
 
 <a id="dual-kriging-vector-engine"></a>
-#### 4. High-Performance Dual Kriging Vector Engine
+#### 5. High-Performance Dual Kriging Vector Engine
 `PySole` features a native, numerically optimized geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike standard Kriging implementations (Primal Kriging) that solve node-specific linear systems point-by-point for every target grid node (requiring millions of repetitive matrix inversions across a high-resolution DEM), Dual Kriging solves the global linear system only once for the entire sample observation set:
 
 <p align="center">
@@ -346,7 +411,7 @@ where:
 To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a small offset (10<sup>−6</sup>) to the main diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
 
 <a id="interpolation-strategies"></a>
-#### 5. Robust Baseline Interpolation Strategies
+#### 6. Robust Baseline Interpolation Strategies
 While users can combine any available interpolation options and deploy the `Drift Analyzer` to find the optimum Universal Kriging drift model, the following two interpolation strategies are recommended as a robust starting baseline. These are implemented in `PySole` as the default approaches based on the selected target variable (`interpolation_target`: `"P"`, `"T"`, or `"D"`):
 
 - **BSS-derived Product `"P"` Strategy**: Interpolates the BSS-derived product field $P = T \sin \alpha_{\text{opt}}$ (pre-migration) or $P = D \sin \alpha_{\text{opt}}$ (post-migration). **Ordinary Kriging** is initially recommended for BSS-derived product targets.
@@ -357,7 +422,7 @@ While users can combine any available interpolation options and deploy the `Drif
 - **Direct `"T"` or `"D"` Strategy**: Directly interpolates signal traveltimes $T_i$ (pre-migration) or (migrated) depths $D_i$. **Universal Kriging** with the `"sia"` physical drift model is initially recommended.
 
 <a id="universal-kriging-drift-models"></a>
-#### 6. Universal Kriging Drift Models
+#### 7. Universal Kriging Drift Models
 `PySole` provides the following **Single Drift Models**:
 
 - **Shallow Ice Approximation Physical Drift Model (`["sia"]`)**:
@@ -484,7 +549,7 @@ While users can combine any available interpolation options and deploy the `Drif
    <i>Recommended for e.g. tilted valley glaciers governed by viscous flow physics and linear spatial trends. Use `interpolation_target`: `"T"`, or `"D"`.</i>
 
 <a id="depth-uncertainty-derivation"></a>
-#### 7. Depth Uncertainty Derivation in Meters
+#### 8. Depth Uncertainty Derivation in Meters
 Kriging interpolation provides uncertainty estimates by variance of the product field $\sigma_{\text{P}}^2(x,y)$ $[m²]$. The 2D depth estimation variance field $\sigma_{\text{D}}^2(x,y)$ $[m²]$ is obtained via linear error propagation:
 
 <p align="center">
@@ -500,7 +565,7 @@ $$\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}]
 Under Gaussian linear estimation theory, $\pm 1.00$ $\sigma_{\text{D}}(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96$ $\sigma_{\text{D}}(x,y)$ represents the 95% confidence margin of error.
 
 <a id="dem-spatial-smoothing"></a>
-#### 8. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
+#### 9. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
 The depth field $D(x,y)$ is obtained by dividing the Kriged product field $P_{\text{D}}(x,y)$ with the optimally smoothed surface slope field $\sin(\alpha_{\text{opt}}(x,y))$. When post-processing DEM spatial smoothing is enabled (`smooth_bedrock: true`), `PySole` applies the spatial smoothing operator $S$ **directly to the ice depth field $D(x,y)$**:
 
 <p align="center">
@@ -511,43 +576,6 @@ Z_{\text{bed}}(x,y) &= Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)
 </p>
 
 Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual $Z_{\text{surface}} - S(Z_{\text{surface}})$ from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
-
-<a id="wavenumber-to-wavelength-conversion"></a>
-#### 9. Wavenumbers and Wavelengths
-In `PySole`, 2D spatial Gaussian low-pass smoothing operates in the physical 2D spatial frequency domain. Spatial wavenumber components along orthogonal grid axes $X$ and $Y$ are constructed in physical units of **[radians per meter]** as:
-
-<p align="center">
-$$\begin{aligned}
-k_x &= 2\pi \cdot f_{x,\text{phys}} = \frac{2\pi \cdot \text{fftfreq}(N_x)}{dx} \quad [\text{rad/m}] \\
-k_y &= 2\pi \cdot f_{y,\text{phys}} = \frac{2\pi \cdot \text{fftfreq}(M_y)}{dy} \quad [\text{rad/m}]
-\end{aligned}$$
-</p>
-
-where $dx, dy$ are spatial grid cell resolutions in **[meters]**, and $N_x, M_y$ are grid dimensions. The 2D spatial wavenumber magnitude is $k = \sqrt{k_x^2 + k_y^2}$ [rad/m].
-
-Physical angular wavenumber $k_c$ [rad/m] relates directly to physical spatial wavelength $\lambda_c$ [meters] via the fundamental physical relationship:
-
-<p align="center">
-$$k_c = \frac{2\pi}{\lambda_c} \quad \Longleftrightarrow \quad \lambda_c = \frac{2\pi}{k_c}$$
-</p>
-
-##### Concrete Calculation Example ($dx = 5.0\text{ m}, dy = 5.0\text{ m}$)
-For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
-1. **Minimum Physical Nyquist Wavelength**: $\lambda_{\text{Nyquist}} = 2 \cdot \min(dx, dy) = 2 \cdot 5.0\text{ m} = \mathbf{10.0\text{ m}}$ (the shortest feature resolvable on a 5m grid).
-2. **Maximum Physical Nyquist Wavenumber**: $k_{\text{Nyquist}} = \frac{2\pi}{\lambda_{\text{Nyquist}}} = \frac{\pi}{5.0} \approx \mathbf{0.6283\text{ rad/m}}$.
-
-##### Physical Reference Conversion Table ($5\text{ m} \times 5\text{ m}$ DEM)
-
-| Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Glaciological Feature Scale |
-| :--- | :--- | :--- |
-| **$k_{\text{Nyquist}} \approx 0.6283\text{ rad/m}$** | $\mathbf{10.0\text{ m}}$ | Nyquist limit ($2 \cdot \min(dx, dy)$, finest resolvable feature) |
-| **$0.3142\text{ rad/m}$** | $\mathbf{20.0\text{ m}}$ | Fine spatial smoothing (filters features $< 20\text{ m}$) |
-| **$0.1257\text{ rad/m}$** | $\mathbf{50.0\text{ m}}$ | Medium-fine spatial smoothing |
-| **$0.0628\text{ rad/m}$** | $\mathbf{100.0\text{ m}}$ | Medium spatial smoothing |
-| **$0.0314\text{ rad/m}$** | $\mathbf{200.0\text{ m}}$ | Broad spatial smoothing |
-| **$0.0100\text{ rad/m}$** | $\mathbf{628.3\text{ m}}$ | Very broad regional smoothing |
-
-Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and can be selected via the `"fft_filter_metric"` setting (`"wavenumber"` or `"wavelength"`).
 
 ---
 
@@ -686,7 +714,7 @@ bedrock_pts = model.migrate_eikonal(
 )
 
 # 3. Iterative BSS variance optimization (delegates to model.bss_optimizer)
-model.optimize_bss(kc_max=10.0, kc_min=0.01, d_kc=0.1)
+model.optimize_bss(kc_max=0.3, kc_min=0.01, n_steps=20)
 
 # 4. Primary Kriging spatial interpolation (delegates to model.kriging_engine)
 kriged_bedrock, kriged_variance = model.interpolate_kriging(
@@ -736,7 +764,7 @@ migrator = EikonalMigrator(dem=dem_grid, geometry=geometry, outline_mask=outline
 
 # 3. Standalone Basal Shear Stress Optimization Sub-Engine (pysole.variogram.BSSOptimizer)
 bss_optimizer = BSSOptimizer(dem=dem_grid, geometry=geometry)
-opt_res = bss_optimizer.optimize(survey_points=survey_pts, kc_max=10.0, kc_min=0.01, d_kc=0.1)
+opt_res = bss_optimizer.optimize(survey_points=survey_pts, kc_max=0.3, kc_min=0.01, n_steps=20)
 print(f"Optimal Corner Frequency: {opt_res.optimal_kc:.4f} rad/m")
 
 # 4. Standalone Dual Kriging Vector Sub-Engine (pysole.interpolation.KrigingEngine)

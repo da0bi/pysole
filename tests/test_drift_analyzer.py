@@ -26,7 +26,7 @@ class TestDriftAnalyzer(unittest.TestCase):
             perform_migration=True,
         )
         mig_pts = model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
-        model.optimize_bss(kc_min=0.01, kc_max=10.0, d_kc=2.0)
+        model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)
 
         analyzer = DriftAnalyzer(
             mode="post_migration",
@@ -98,7 +98,7 @@ class TestDriftAnalyzer(unittest.TestCase):
             perform_migration=True,
         )
         model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
-        model.optimize_bss(kc_min=0.01, kc_max=10.0, d_kc=2.0)
+        model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)
 
         # Test single-computation caching via get_sample_points
         pts1 = model.get_sample_points("post_migration", "P")

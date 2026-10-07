@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.2] - 2026-10-07
 
+### Added / Fixed (Wavelength Metric & Fallback Parameterization)
+- **[Wavelength Metric & Fallback Parameterization] Re-implementation of `fft_filter_metric`, `lambda_min`, and `lambda_max` (`src/pysole/config.py`, `src/pysole/variogram.py`, `src/pysole/solver.py`, `pysole.json`, `examples/gok/pysole_gok.json`, `examples/wuk/pysole_wuk.json`)**:
+  - Re-introduced `"fft_filter_metric"` (`"wavenumber"` [default] or `"wavelength"`), `"lambda_min"` (default `null`), and `"lambda_max"` (default `null`) into default configuration schemas.
+  - Implemented automatic metric resolution: when `fft_filter_metric == "wavelength"` or when `lambda_min`/`lambda_max` are set:
+    - If `lambda_min` / `lambda_max` are `null`, `PySole` falls back directly to `kc_max` ($k_{\text{Nyquist}} = \pi / \Delta x_{\text{min}}$) and `kc_min` ($4\pi / L_{\text{max}}$).
+    - When specified as numeric values, `lambda_min` / `lambda_max` convert directly to wavenumbers ($k_{c,\text{max}} = 2\pi / \lambda_{\text{min}}$, $k_{c,\text{min}} = 2\pi / \lambda_{\text{max}}$).
+  - Simplified `compute_cutoff_wavelength(kc: float)` signature in `src/pysole/variogram.py` to a single-argument helper returning $\lambda_c = 2\pi / k_c$.
+
+### Refactored / Streamlined (Codebase Audit & Architecture Clean-up)
+- **[Architecture & Codebase Audit] Code Purge & Module Clean-up (`src/pysole/config.py`, `src/pysole/pipeline.py`, `src/pysole/solver.py`, `src/pysole/interpolation.py`)**:
+  - Consolidated `OutputsConfig` dataclass in `config.py` with `save_bedrock_elevation_map: bool = True` and helper properties (`save_ice_thickness_map`, `save_basal_shear_stress_map`).
+  - Imported `OutputsConfig` directly from `.config` in `pipeline.py`, removing duplicate dataclass definition and unused imports (`copy`, `json`, `dataclass`, `field`).
+  - Streamlined `optimize_bss()` configuration extraction in `solver.py` (removed redundant `hasattr(self, "config")` guards), updated `opt_wavelength` calculations in `Solver` property and `run_pipeline()` to `compute_cutoff_wavelength(opt_kc)`, hoisted `compute_surface_curvature` to top-level, and removed unused import `fft_gaussian_smooth`.
+  - Hoisted inner imports (`compute_gradients`, `compute_surface_curvature`) in `interpolation.py` to top-level.
+
+### Documentation & Tests (Section 3 Reordering & Derivation Subsection)
+- **[Documentation] README.md Section & Derivation Subsection Updates (`README.md`)**:
+  - Updated JSON configuration snippet and Parameter Reference table with `"fft_filter_metric"`, `"lambda_min"`, and `"lambda_max"`.
+  - Added a dedicated subsection detailing dynamic derivations for default parameters `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, and `n_steps`.
+  - Reordered "Wavenumbers and Wavelengths" as subsection 3 (after subsection 2 "Parsing of Rock Outcrop Input Files") under "Technical & Methodological Notes", renumbering remaining subsections 4 through 9 accordingly.
+- **[Unit Tests] Parameter Defaults Unit Tests (`tests/test_parameter_defaults.py`)**:
+  - Added `test_lambda_fallback_when_null` and `test_lambda_min_max_conversion` verifying fallback behaviors and direct wavenumber conversion logic.
+
+### Added / Fixed (Dynamic BSS Spectrum Parameterization & Legacy Purge)
+- **[BSS Parameterization] Fourier Mode Step Count & Half-Domain Limit Default (`src/pysole/variogram.py`, `src/pysole/config.py`, `src/pysole/solver.py`)**:
+  - Replaced legacy stepwidth parameters (`d_kc`, `d_lambda`, `lambda_min`, `lambda_max`) with `n_steps` parameter.
+  - Implemented Strategy 2 Half-Domain domain-scaling limit for default $k_{c,\text{min}} = \frac{4\pi}{L_{\text{max}}}$ (where $L_{\text{max}} = \max(M \cdot |dy|, N \cdot |dx|)$), setting $\lambda_{\text{max}} = \frac{L_{\text{max}}}{2}$.
+  - Derived dynamic default `n_steps` from discrete Fourier mode resolution ($n_{\text{modes}} = \lfloor (k_{\text{max}} - k_{\text{min}}) \cdot L_{\text{max}} / 2\pi \rfloor$), clipped to $[10, 50]$.
+  - Completely purged legacy parameters (`d_kc`, `d_lambda`, `lambda_min`, `lambda_max`) with zero backward compatibility across `BSSOptimizer`, `Solver`, `pipeline.py`, JSON templates, CLI parsers, and documentation.
+- **[Documentation] README.md Parameter & Schema Alignment (`README.md`)**:
+  - Updated JSON configuration snippet and Parameter Reference table for `optimization_parameters` in `README.md`.
+
 ### Added / Fixed (Phase 3 Audit Resolutions — 2nd Pass Review: Low Priority)
 - **[M14, N-M6, N-L8] Strict Input Parameter Validation & Outline Failure Guard (`src/pysole/interpolation.py`, `src/pysole/variogram.py`, `src/pysole/raster.py`)**:
   - Implemented strict input parameter validation in `kriging_interpolation()` for `method` (`"ordinary"`, `"universal"`, `"regression"`), `variogram_model` (`"spherical"`, `"exponential"`, `"gaussian"`), and `engine` (`"native"`, `"pykrige"` or `KrigingEngine` instance), raising explicit `ValueError` on invalid strings.

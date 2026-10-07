@@ -17,6 +17,7 @@ from scipy.ndimage import distance_transform_edt, gaussian_filter
 from sklearn.ensemble import RandomForestRegressor
 from .raster import GridGeometry
 from .logging import logger, get_progress_bar
+from .smoothing import compute_gradients, compute_surface_curvature
 
 
 @dataclass
@@ -702,8 +703,6 @@ def kriging_interpolation(
         if opt_slope_grid is not None and opt_slope_grid.shape == (M, N):
             opt_slope_sin = np.sin(opt_slope_grid)
         elif dem_grid is not None and dem_grid.shape == (M, N):
-            from .smoothing import compute_gradients
-
             grads = compute_gradients(dem_grid, dx=geometry.dx, dy=geometry.dy)
             opt_slope_sin = np.sin(grads["slope_rad"])
         else:
@@ -718,8 +717,6 @@ def kriging_interpolation(
         external_drift_grids["z_dem"] = dem_grid
 
     if is_curvature_mode and "curvature_dem" not in external_drift_grids and dem_grid is not None and dem_grid.shape == (M, N):
-        from .smoothing import compute_surface_curvature
-
         external_drift_grids["curvature_dem"] = compute_surface_curvature(dem_grid, dx=geometry.dx, dy=geometry.dy)
 
     has_ext_drifts = len(external_drift_grids) > 0

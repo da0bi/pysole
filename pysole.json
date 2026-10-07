@@ -24,9 +24,12 @@
         "interactive_migration": false
     },
     "optimization_parameters": {
-        "kc_max": 10.0,
-        "kc_min": 0.01,
-        "d_kc": 0.1,
+        "fft_filter_metric": "wavenumber",
+        "kc_max": null,
+        "kc_min": null,
+        "lambda_min": null,
+        "lambda_max": null,
+        "n_steps": null,
         "nrbins": null,
         "slope_floor_deg": 5.0,
         "interactive_optimization": false

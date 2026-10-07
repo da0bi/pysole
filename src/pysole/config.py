@@ -25,10 +25,21 @@ class OutputsConfig:
     save_thickness_uncertainty: bool = False
     save_basal_shear_stress: bool = False
     save_basal_shear_stress_uncertainty: bool = False
+    save_bedrock_elevation_map: bool = True
+
+    @property
+    def save_ice_thickness_map(self) -> bool:
+        return self.save_thickness_grid
+
+    @property
+    def save_basal_shear_stress_map(self) -> bool:
+        return self.save_basal_shear_stress
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "OutputsConfig":
+    def from_dict(cls, data: dict[str, Any] | None) -> "OutputsConfig":
         """Constructs an OutputsConfig instance from a parameters dictionary."""
+        if not data:
+            return cls()
         valid_keys = cls.__dataclass_fields__.keys()
         filtered = {k: v for k, v in data.items() if k in valid_keys}
         return cls(**filtered)
@@ -83,11 +94,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "optimization_parameters": {
         "fft_filter_metric": "wavenumber",
         "kc_max": None,
-        "kc_min": 0.01,
-        "d_kc": 0.01,
+        "kc_min": None,
         "lambda_min": None,
         "lambda_max": None,
-        "d_lambda": None,
+        "n_steps": None,
         "nrbins": None,
         "slope_floor_deg": 5.0,
         "interactive_optimization": False,

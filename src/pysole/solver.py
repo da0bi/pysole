@@ -12,7 +12,7 @@ from .raster import BedrockMap, load_dem, load_outline, GridGeometry, load_surve
 from .migration import migrate_eikonal_points, EikonalMigrator, MigrationResult
 from .variogram import BSSOptimizer, OptimizationResult, compute_cutoff_wavelength
 from .interpolation import blend_margin_topography, kriging_interpolation, KrigingEngine, BedrockFinalizer, KrigingResult
-from .smoothing import compute_gradients, fft_gaussian_smooth, precompute_fft_grid, fft_gaussian_smooth_precomputed
+from .smoothing import compute_gradients, precompute_fft_grid, fft_gaussian_smooth_precomputed, compute_surface_curvature
 from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir
 from .logging import logger
 from .drift_analyzer import DriftAnalyzer
@@ -207,7 +207,7 @@ class Solver:
         """Optimal physical spatial cutoff wavelength lambda_c [m]."""
         if self.opt_kc is None:
             return None
-        return compute_cutoff_wavelength(self.opt_kc, self.dx, self.dy)
+        return compute_cutoff_wavelength(self.opt_kc)
 
     @property
     def thickness_grid(self) -> np.ndarray | None:
@@ -465,8 +465,6 @@ class Solver:
         return compute_gradients(smoothed_dem, dx=self.dx, dy=self.dy)["slope_rad"]
 
     def get_smoothed_curvature(self, kc: float) -> np.ndarray:
-        from .smoothing import compute_surface_curvature
-
         smoothed_dem = self.get_smoothed_dem(kc)
         return compute_surface_curvature(smoothed_dem, dx=self.dx, dy=self.dy)
 
@@ -870,10 +868,9 @@ class Solver:
         self,
         kc_max: float | None = None,
         kc_min: float | None = None,
-        d_kc: float | None = None,
+        n_steps: int | None = None,
         lambda_min: float | None = None,
         lambda_max: float | None = None,
-        d_lambda: float | None = None,
         fft_filter_metric: str | None = None,
         nrbins: int | None = None,
         prefix: str | None = None,
@@ -889,24 +886,21 @@ class Solver:
             xx, yy = np.meshgrid(self.x_coords[::5], self.y_coords[::5])
             pts = np.column_stack((xx.ravel(), yy.ravel(), self.dem_grid[::5, ::5].ravel(), np.ones(xx.size) * 10.0))
 
-        if hasattr(self, "config") and isinstance(self.config, dict):
-            opt_cfg = self.config.get("optimization_parameters", {})
-            if fft_filter_metric is None:
-                fft_filter_metric = opt_cfg.get("fft_filter_metric", "wavenumber")
-            if kc_max is None:
-                kc_max = opt_cfg.get("kc_max")
-            if kc_min is None:
-                kc_min = opt_cfg.get("kc_min")
-            if d_kc is None:
-                d_kc = opt_cfg.get("d_kc")
-            if lambda_min is None:
-                lambda_min = opt_cfg.get("lambda_min")
-            if lambda_max is None:
-                lambda_max = opt_cfg.get("lambda_max")
-            if d_lambda is None:
-                d_lambda = opt_cfg.get("d_lambda")
-            if nrbins is None:
-                nrbins = opt_cfg.get("nrbins")
+        opt_cfg = self.config.get("optimization_parameters", {}) if isinstance(self.config, dict) else {}
+        if kc_max is None:
+            kc_max = opt_cfg.get("kc_max")
+        if kc_min is None:
+            kc_min = opt_cfg.get("kc_min")
+        if n_steps is None:
+            n_steps = opt_cfg.get("n_steps")
+        if lambda_min is None:
+            lambda_min = opt_cfg.get("lambda_min")
+        if lambda_max is None:
+            lambda_max = opt_cfg.get("lambda_max")
+        if fft_filter_metric is None:
+            fft_filter_metric = opt_cfg.get("fft_filter_metric", "wavenumber")
+        if nrbins is None:
+            nrbins = opt_cfg.get("nrbins")
 
         if fft_filter_metric is None:
             fft_filter_metric = "wavenumber"
@@ -923,10 +917,9 @@ class Solver:
             survey_points=pts,
             kc_max=kc_max,
             kc_min=kc_min,
-            d_kc=d_kc,
+            n_steps=n_steps,
             lambda_min=lambda_min,
             lambda_max=lambda_max,
-            d_lambda=d_lambda,
             fft_filter_metric=fft_filter_metric,
             plots_dir=self.plots_dir,
             prefix=prefix,
@@ -1456,7 +1449,7 @@ class Solver:
             interactive=opt_interactive,
             plotit=True,
         )
-        opt_wl = compute_cutoff_wavelength(opt_kc, self.dx, self.dy)
+        opt_wl = compute_cutoff_wavelength(opt_kc)
         logger.info(f"   Optimal Post-Migration Corner Frequency k_c = {opt_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
         self.interpolate_kriging(interactive=opt_interactive, plotit=True)
 

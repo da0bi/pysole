@@ -10,62 +10,9 @@ import sys
 from typing import Any
 import numpy as np
 
-from .config import load_config, resolve_path, resolve_input_path, resolve_output_dir
+from .config import load_config, resolve_path, resolve_input_path, resolve_output_dir, OutputsConfig
 from .logging import logger, setup_logging
 from .raster import BedrockMap, save_points_csv
-
-
-@dataclass
-class OutputsConfig:
-    """
-    Structured outputs configuration parameters.
-    """
-    output_dir: str | None = None
-    output_format: str | list[str] = "tif"
-    output_prefix: str = "final"
-    plots_dir: str = "figures"
-    save_traveltime_grid: bool = False
-    save_migrated_points: bool = False
-    save_thickness_grid: bool = True
-    save_thickness_uncertainty: bool = True
-    save_basal_shear_stress: bool = True
-    save_basal_shear_stress_uncertainty: bool = True
-    save_bedrock_elevation_map: bool = True
-
-    @property
-    def save_ice_thickness_map(self) -> bool:
-        return self.save_thickness_grid
-
-    @property
-    def save_basal_shear_stress_map(self) -> bool:
-        return self.save_basal_shear_stress
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> "OutputsConfig":
-        if not data:
-            return cls()
-        valid_keys = cls.__dataclass_fields__.keys()
-        filtered = {k: v for k, v in data.items() if k in valid_keys}
-        return cls(**filtered)
-
-    def active_exports(self) -> dict[str, bool]:
-        return {
-            "save_traveltime_grid": self.save_traveltime_grid,
-            "save_migrated_points": self.save_migrated_points,
-            "save_thickness_grid": self.save_thickness_grid,
-            "save_thickness_uncertainty": self.save_thickness_uncertainty,
-            "save_basal_shear_stress": self.save_basal_shear_stress,
-            "save_basal_shear_stress_uncertainty": self.save_basal_shear_stress_uncertainty,
-        }
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "output_dir": self.output_dir,
-            "output_format": self.output_format,
-            "output_prefix": self.output_prefix,
-            "plots_dir": self.plots_dir,
-            **self.active_exports(),
-        }
 
 
 class PipelineExporter:
