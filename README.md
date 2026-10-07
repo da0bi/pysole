@@ -351,14 +351,14 @@ Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and c
 
 When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` dynamically derives physically sound parameter defaults based on the DEM spatial resolution ($\Delta x, \Delta y$) and total domain extent ($L_{\text{max}} = \max(N_x \cdot |dx|, M_y \cdot |dy|)$):
 
-1. **Maximum Frequency Cutoff $k_{\text{c,max}}$ and Minimum Wavelength $\lambda_{\text{min}}$**:
+- **Maximum Frequency Cutoff $k_{\text{c,max}}$ and Minimum Wavelength $\lambda_{\text{min}}$**:
    - **`kc_max` Default**: Defaults to the spatial Nyquist wavenumber limit of the DEM grid:
      <p align="center">
      $$k_{\text{c,max}} = k_{\text{Nyquist}} = \frac{\pi}{\min(|dx|, |dy|)} \quad [\text{rad/m}]$$
      </p>
    - **`lambda_min` Wavelength Metric & Fallback**: If the user provides a custom $\lambda_{\text{min}}$ [m], it converts directly to wavenumber as $k_{\text{c,max}} = 2\pi / \lambda_{\text{min}}$ for the FFT filtering. When `lambda_min` is `null` (or when `fft_filter_metric = "wavelength"` with `null` `lambda_min`), `PySole` falls back directly to `kc_max` ($k_{\text{Nyquist}}$).
 
-2. **Minimum Frequency Cutoff $k_{\text{c,min}}$ and Maximum Wavelength $\lambda_{\text{max}}$**:
+- **Minimum Frequency Cutoff $k_{\text{c,min}}$ and Maximum Wavelength $\lambda_{\text{max}}$**:
    - **`kc_min` Default (Half-Domain Limit)**: Defaults to the Half-Domain scaling limit:
      <p align="center">
      $$k_{\text{c,min}} = \frac{4\pi}{L_{\text{DEM,max}}} \quad [\text{rad/m}]$$
@@ -366,7 +366,7 @@ When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `n
      This constrains the maximum filter wavelength to half the physical DEM extent ($\lambda_{\text{max}} = L_{\text{DEM,max}} / 2$).
    - **`lambda_max` Wavelength Metric & Fallback**: If the user provides a custom $\lambda_{\text{max}}$ [m], it converts directly to wavenumber as $k_{\text{c,min}} = 2\pi / \lambda_{\text{max}}$ for the FFT filtering. When `lambda_max` is `null`, `PySole` falls back directly to `kc_min` ($4\pi / L_{\text{max}}$).
 
-3. **Evaluation Step Count `n_steps` (Discrete Fourier Mode Counting)**:
+- **Evaluation Step Count `n_steps` (Discrete Fourier Mode Counting)**:
    - When `n_steps` is `null`, `PySole` dynamically calculates the number of integer Fourier modes spanning the frequency search range $[k_{\text{c,min}}, k_{\text{c,max}}]$ over the maximum domain length $L_{\text{DEM,max}}$:
      <p align="center">
      $$n_{\text{modes}} = \left\lfloor \frac{(k_{\text{c,max}} - k_{\text{c,min}}) \cdot L_{\text{max}}}{2\pi} \right\rfloor$$
