@@ -650,9 +650,29 @@ def kriging_interpolation(
     elif isinstance(external_drift_grid, np.ndarray) and external_drift_grid.shape == (M, N):
         external_drift_grids["external_drift"] = external_drift_grid
 
-    is_sia_mode = (drift_terms is not None) and ("sia" in drift_terms)
-    is_z_dem_mode = (drift_terms is not None) and ("z_dem" in drift_terms)
-    is_curvature_mode = (drift_terms is not None) and ("curvature_dem" in drift_terms)
+    expanded_primitives: set[str] = set()
+    if drift_terms:
+        for term in drift_terms:
+            if term == "sia_space":
+                expanded_primitives.update(["sia", "linear_xy"])
+            elif term == "sia_z_dem":
+                expanded_primitives.update(["sia", "z_dem"])
+            elif term == "sia_curvature_dem":
+                expanded_primitives.update(["sia", "curvature_dem"])
+            elif term == "z_dem_curvature_dem":
+                expanded_primitives.update(["z_dem", "curvature_dem"])
+            elif term in ["sia_z_dem_curvature_dem", "full_physical"]:
+                expanded_primitives.update(["sia", "z_dem", "curvature_dem"])
+            elif term == "full_spatial_physical":
+                expanded_primitives.update(["sia", "z_dem", "curvature_dem", "linear_xy"])
+            elif term in DriftBasis.SUPPORTED_TERMS:
+                expanded_primitives.add(term)
+            else:
+                raise ValueError(f"Unknown drift term '{term}'. Supported terms: {sorted(DriftBasis.SUPPORTED_TERMS)}")
+
+    is_sia_mode = "sia" in expanded_primitives
+    is_z_dem_mode = "z_dem" in expanded_primitives
+    is_curvature_mode = "curvature_dem" in expanded_primitives
 
     # Compute external drift grids (SIA 1/sin(alpha), DEM elevation z_dem, surface curvature_dem)
     if is_sia_mode and "sia" not in external_drift_grids:
@@ -871,12 +891,12 @@ class DriftBasis:
         if "quadratic_xy" in primitives:
             m_x, s_x = float(np.mean(x_ref)), max(float(np.ptp(x_ref)), 1.0)
             m_y, s_y = float(np.mean(y_ref)), max(float(np.ptp(y_ref)), 1.0)
-            self.means.extend([m_x, m_y, m_x * m_y])
-            self.scales.extend([s_x**2, s_y**2, s_x * s_y])
+            self.means.extend([0.0, 0.0, 0.0])
+            self.scales.extend([1.0, 1.0, 1.0])
             self.evaluators.extend([
-                lambda x, y: x**2,
-                lambda x, y: y**2,
-                lambda x, y: x * y,
+                lambda x, y, mx=m_x, sx=s_x: ((x - mx) / sx) ** 2,
+                lambda x, y, my=m_y, sy=s_y: ((y - my) / sy) ** 2,
+                lambda x, y, mx=m_x, sx=s_x, my=m_y, sy=s_y: ((x - mx) / sx) * ((y - my) / sy),
             ])
 
         if "z_dem" in primitives and dem_grid is not None and bounds is not None:

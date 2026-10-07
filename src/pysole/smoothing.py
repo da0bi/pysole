@@ -154,8 +154,7 @@ def precompute_fft_grid(
     nan_mask = np.isnan(grid)
     has_nans = bool(np.any(nan_mask))
 
-    nan_mean = float(np.nanmean(grid)) if not np.all(nan_mask) else 0.0
-    grid_clean = np.nan_to_num(grid, nan=nan_mean)
+    grid_clean = np.where(nan_mask, 0.0, grid)
 
     pad_m = min(M // 4, 32)
     pad_n = min(N // 4, 32)
@@ -243,7 +242,11 @@ def fft_gaussian_smooth_precomputed(
             mask_filtered = mask_filtered_padded[pad_m : pad_m + M, pad_n : pad_n + N]
         else:
             mask_filtered = mask_filtered_padded
-        grid_filtered = data_filtered / np.maximum(mask_filtered, 1e-6)
+
+        valid_mask = mask_filtered > 1e-3
+        grid_filtered = np.where(valid_mask, data_filtered / np.maximum(mask_filtered, 1e-3), np.nan)
+        if np.any(nan_mask):
+            grid_filtered[nan_mask] = np.nan
     else:
         grid_filtered = data_filtered
 

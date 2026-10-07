@@ -184,14 +184,14 @@ class Solver:
         self.kriged_variance: np.ndarray | None = None
         self.rf_filled_bedrock: np.ndarray | None = None
         self.blended_bedrock: np.ndarray | None = None
+        self.final_grid: np.ndarray | None = None
         self.final_thickness: np.ndarray | None = None
         self.kriged_std: np.ndarray | None = None
         self.final_bss: np.ndarray | None = None
         self.bss_std: np.ndarray | None = None
-        self.final_grid: np.ndarray | None = None
+        self.opt_variogram_params: dict[str, float] | None = None
         self.config: dict[str, Any] = {}
         self.config_path: str | None = None
-        self.survey_profile_column: str | None = None
 
     @property
     def traveltime_grid(self) -> np.ndarray | None:
@@ -659,12 +659,13 @@ class Solver:
             if is_batch:
                 logger.info("   [INFO] Non-interactive environment detected (TTY disabled or --batch flag set). Automatically overriding interactive options to False.")
 
+            prof_col = self.survey_profile_column or self.config.get("inputs", {}).get("survey_profile_column")
             analyzer = DriftAnalyzer(
                 mode=stage_key,
                 target_name=self.survey_data_type,
                 interpolation_target=target_upper,
                 include_zero_boundary=zero_boundary,
-                survey_profile_column=self.config.get("inputs", {}).get("survey_profile_column"),
+                survey_profile_column=prof_col,
             )
 
             a_0 = 100.0
@@ -673,6 +674,7 @@ class Solver:
 
             var_params = {"nugget": 0.0, "sill": 1.0, "range": a_0}
             alpha_deg = np.degrees(self.opt_slope) if self.opt_slope is not None else np.zeros_like(self.dem_grid)
+            prof_data = sample_pts[:, 4] if (prof_col and sample_pts is not None and sample_pts.shape[1] >= 5) else None
 
             diag = analyzer.run_diagnostics(
                 x_pts=sample_pts[:, 0],
@@ -685,6 +687,7 @@ class Solver:
                 alpha_opt_deg=alpha_deg,
                 variogram_model=var_model,
                 variogram_params=var_params,
+                profile_data=prof_data,
                 interactive=not is_batch,
             )
             if diag:
@@ -934,6 +937,7 @@ class Solver:
 
         self.opt_kc = opt_res.optimal_kc
         self.opt_slope = opt_res.optimal_slope_grid
+        self.opt_variogram_params = opt_res.opt_variogram_params
         if opt_res.all_smoothed_dems:
             self._smoothed_dem_cache.update(opt_res.all_smoothed_dems)
         return self.opt_kc

@@ -6,6 +6,7 @@ and high-level execution wrappers.
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Any
 import numpy as np
 
@@ -221,17 +222,30 @@ def run_from_config(
 
         interactive_flag = not is_batch and sys.stdin.isatty()
 
-        solver.migrate_eikonal(interactive=interactive_flag)
+        mig_cfg = cfg.get("migration_parameters", {})
+        fin_cfg = cfg.get("finalization_parameters", {})
+
+        solver.migrate_eikonal(velocity=mig_cfg.get("velocity", 0.16), interactive=interactive_flag)
         solver.optimize_bss(interactive=interactive_flag)
         solver.calculate_bedrock(interactive=interactive_flag)
-        final_raster = solver.finalize_bedrock(interactive=interactive_flag)
+        final_raster = solver.finalize_bedrock(
+            interactive=interactive_flag,
+            random_forest_gap_filling=fin_cfg.get("random_forest_gap_filling"),
+            apply_margin_blend=fin_cfg.get("apply_margin_blend"),
+            min_gap_dist=fin_cfg.get("min_gap_dist"),
+            smooth_bedrock=fin_cfg.get("smooth_bedrock", False),
+            smoothing_method=fin_cfg.get("smoothing_method", "gaussian"),
+            smoothing_sigma=fin_cfg.get("smoothing_sigma", 1.5),
+            smoothing_kernel_size=fin_cfg.get("smoothing_kernel_size", 3),
+            smoothing_kc_cutoff=fin_cfg.get("smoothing_kc_cutoff"),
+        )
 
         exporter = PipelineExporter(solver)
         exporter.export_all()
 
         output_bedrock_file = outputs_cfg.get("output_bedrock_map")
         if output_bedrock_file:
-            full_out_path = resolve_path(output_bedrock_file, config_file, solver.output_dir)
+            full_out_path = resolve_path(output_bedrock_file, output_dir=solver.output_dir, config_path=config_file)
             fmt = outputs_cfg.get("output_format", "geotiff")
             saved_paths = final_raster.save(full_out_path, formats=fmt)
             if isinstance(saved_paths, list):

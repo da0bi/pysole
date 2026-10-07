@@ -5,8 +5,32 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.2] - 2026-10-06
+## [0.4.2] - 2026-10-07
 
+### Added / Fixed (Phase 1 Code Audit Resolutions — 2nd Pass Review)
+- **[N-H1, N-H2] Entry-Point & Batch CLI Execution Fixes (`src/pysole/config.py`, `src/pysole/pipeline.py`)**:
+  - Imported `logger` at top-level in `config.py` to fix `NameError` during `pysole --init`.
+  - Imported `sys` and `from typing import Any` in `pipeline.py` to resolve non-interactive batch mode (`sys.stdin.isatty()`) and type annotation errors.
+  - Corrected `resolve_path()` positional argument ordering (`output_dir=solver.output_dir`, `config_path=config_file`).
+- **[H6] Fitted Variogram Parameter Propagation (`src/pysole/variogram.py`, `src/pysole/solver.py`)**:
+  - Added `opt_variogram_params` (`range`, `sill`, `nugget`) attribute to `OptimizationResult` in `variogram.py`.
+  - Stored `self.opt_variogram_params` in `Solver` during BSS optimization and explicitly passed `variogram_params=self.opt_variogram_params` into downstream pre- and post-migration `kriging_interpolation()` passes.
+- **[M5] Dual Kriging Matrix Regularization (`src/pysole/interpolation.py`)**:
+  - Constrained diagonal Tikhonov matrix regularization strictly to the point-point covariance block $K_{:N, :N}$ (`K[:N_pts, :N_pts] += reg_val * I`), leaving the Lagrange drift block $F$ unperturbed to guarantee exact drift constraint satisfaction.
+- **[N-H3] Normalized Convolution & Edge Elevation Fix (`src/pysole/smoothing.py`)**:
+  - Replaced non-zero NaN padding with zero-filling (`grid_clean = np.where(nan_mask, 0.0, grid)`) in `smoothing.py`, ensuring exact normalized spatial convolution $S(D \cdot M) / S(M)$, restoring NaNs after filtering, and eliminating +88% (+2738m) edge elevation artifacts.
+- **[N-H4] Pre-Centered Quadratic UTM Drift Basis (`src/pysole/interpolation.py`)**:
+  - Updated `DriftBasis` quadratic polynomial terms to center coordinates prior to exponentiation ($((X - m_X)/s_X)^2$), drastically improving the Dual Kriging system condition number from $\sim 8 \cdot 10^{12}$ to $\sim 15$.
+- **[N-H5] LOPO-CV Profile Preservation (`src/pysole/solver.py`)**:
+  - Preserved `self.survey_profile_column` during `Solver` initialization and forwarded `profile_data` into `DriftAnalyzer.run_diagnostics()`.
+- **[N-H6] Compound Drift Term Expansion (`src/pysole/interpolation.py`)**:
+  - Implemented primitive drift term expansion (`expanded_primitives`) in `kriging_interpolation()` using `DriftBasis.SUPPORTED_TERMS` to decompose compound drift specifications (`"sia_z_dem"`, `"full_physical"`) into valid primitive basis functions.
+- **[N-H7] Default Cutoff Wavelength Scaling (`src/pysole/config.py`, `src/pysole/survey_planner.py`)**:
+  - Standardized default low-pass cutoff wavenumber to $k_c = 0.0314$ rad/m ($\lambda_c \approx 200$ meters) across CLI parsers and unprobed survey planning routines.
+- **Solver Attribute Safety (`src/pysole/solver.py`)**:
+  - Initialized `self.final_grid` and `self.bss_std` attributes in `Solver.__init__` to prevent `AttributeError` when querying `model.results`.
+
+### Codebase Audit Implementations (1st Pass Audit Resolutions)
 - **[M1] Physical Wavenumber ($k_c$ [rad/m]) & Spatial Wavelength ($\lambda_c$ [m]) Dual Parameterization**:
   - Corrected spatial wavenumber calculation in `smoothing.py` ($k_x = \frac{2\pi \cdot \text{fftfreq}(N)}{\mathrm{d}x}$ [rad/m]) to ensure 100% grid resolution invariance ($\mathrm{d}x, \mathrm{d}y$).
   - Added configuration parameter `fft_filter_metric` (`"wavenumber"` vs `"wavelength"`) and dual parameter support (`lambda_min`, `lambda_max`, `d_lambda` alongside `kc_min`, `kc_max`, `d_kc`).
@@ -17,8 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Consolidated variogram model evaluation (`evaluate_variogram_model()`) supporting spherical, exponential, and gaussian models.
   - Added chunked row processing in `calculate_variogram()` for memory-efficient distance binning on large pick sets ($N > 5000$).
   - Added fast `compute_slope_rad()` helper to accelerate surface slope gradient evaluation during $k_c$ optimization loops.
-- **[M5] Dual Kriging Matrix Regularization (`src/pysole/interpolation.py`)**:
-  - Scaled Tikhonov diagonal regularization relative to sill magnitude ($\lambda \cdot \text{sill} \cdot I$) applied specifically to the point-point covariance matrix, preserving exact Lagrange drift constraints.
 - **[M6, M7, M8] Drift Analyzer Performance, Feature Alignment & AICc Comparability (`src/pysole/drift_analyzer.py`)**:
   - Pre-cached curvature and SIA drift grids upon `DriftBasis` initialization.
   - Aligned primitive feature parameters (SIA slope floor, curvature smoothing) with production `PySoleSolver` defaults.
@@ -28,9 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[M13, M14, Low-2] Raster Orientation Symmetry & Explicit Input Validation (`src/pysole/raster.py`, `src/pysole/survey_planner.py`)**:
   - Standardized coordinate orientation symmetry across raster file exports (GeoTIFF, ASCII Grid, CSV, NPY).
   - Raised explicit `ValueError` exceptions for invalid drift model names, unrecognized variogram models, and negative survey planner length budgets.
-
-### Added
-- **Codebase Audit Implementations (Claude Review)**:
+- **H1–H5, H8 & M12 Codebase Audit Resolutions**:
   - **H1 (Spatial Grid Alignment)**: Standardized `GridGeometry` bounds, resolution verification, and spatial indexing across all modules (`raster.py`, `interpolation.py`).
   - **H2 (Outline Orientation Symmetry)**: Unified top-down vs. bottom-up raster coordinate orientations and CRS alignment checks.
   - **H3 (GPX/GeoJSON Reprojection)**: Automated CRS transformation & reprojection checking for vector tracks and survey profiles.

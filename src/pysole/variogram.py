@@ -52,6 +52,7 @@ class OptimizationResult:
     all_smoothed_slopes: dict[float, np.ndarray]
     optimal_dem_grid: np.ndarray | None = None
     all_smoothed_dems: dict[float, np.ndarray] | None = None
+    opt_variogram_params: dict[str, float] | None = None
     dx: float = 1.0
     dy: float = 1.0
 
@@ -469,6 +470,7 @@ def optimize_bss_variance(
     best_slope_grid = base_slope.copy()
     best_dem_grid = dem.copy()
     range_fix = None
+    fitted_var_params: dict[str, float] | None = None
 
     def _eval_single_kc(kc_val: float):
         if kc_val < 0:
@@ -558,6 +560,7 @@ def optimize_bss_variance(
                     a_range, sill, nugget, model_curve = fit_variogram_model(
                         var_result["distance"], var_result["val"], model_type="spherical"
                     )
+                    fitted_var_params = {"range": float(a_range), "sill": float(sill), "nugget": float(nugget)}
 
                     if interactive or (plots_dir is not None):
                         from .plotting import plot_unfiltered_product_variogram
@@ -707,6 +710,7 @@ def optimize_bss_variance(
         all_smoothed_slopes=all_smoothed_slopes,
         optimal_dem_grid=best_dem_grid,
         all_smoothed_dems=all_smoothed_dems,
+        opt_variogram_params=fitted_var_params,
         dx=float(dx),
         dy=float(dy),
     )

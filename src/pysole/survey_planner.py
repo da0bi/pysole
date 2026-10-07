@@ -79,7 +79,7 @@ class SurveyPlanner:
 
     def compute_synthetic_sia_depth(
         self,
-        kc: float = 0.5,
+        kc: float = 0.0314,
         tau_0: float = 100e3,
         slope_floor_deg: float = 5.0,
     ) -> np.ndarray:
