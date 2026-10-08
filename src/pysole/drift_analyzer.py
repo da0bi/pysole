@@ -248,8 +248,8 @@ class DriftAnalyzer:
                             drift_basis=drift_basis,
                         )
                         preds[val_mask] = solver.predict(x_pts[val_mask], y_pts[val_mask])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"LOPO fold prediction failed for profile '{prof}': {e}")
             else:
                 for i in eval_indices:
                     dist = np.hypot(x_pts - x_pts[i], y_pts - y_pts[i])
@@ -270,8 +270,8 @@ class DriftAnalyzer:
                         )
                         p_val = solver.predict(np.array([x_pts[i]]), np.array([y_pts[i]]))
                         preds[i] = p_val[0]
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Buffer LOO fold prediction failed for index {i}: {e}")
 
             model_candidates_data.append({
                 "name": name,

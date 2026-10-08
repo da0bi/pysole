@@ -14,6 +14,7 @@ from pysole.interpolation import (
     DriftBasis,
     DualKrigingSolver,
     kriging_interpolation,
+    built_in_kriging_interpolation,
     random_forest_hole_filling,
     blend_margin_topography,
 )
@@ -148,6 +149,30 @@ class TestAuditRegressions(unittest.TestCase):
 
         np.testing.assert_allclose(a1, a2, rtol=1e-2)
         np.testing.assert_allclose(s1 * 100.0, s2, rtol=1e-2)
+
+    def test_kriging_sill_scaling_invariance(self):
+        """7b. Verifies Kriging interpolation prediction invariance under 400x and 40,000x variogram sill scaling."""
+        geom = GridGeometry.create((20, 20), dx=10.0, dy=10.0, bounds=(0, 0, 200, 200))
+        pts = np.array([
+            [30.0, 30.0, 100.0],
+            [70.0, 120.0, 150.0],
+            [150.0, 60.0, 80.0],
+            [120.0, 170.0, 200.0],
+        ])
+        z1, _ = built_in_kriging_interpolation(
+            pts, geom.x_coords, geom.y_coords, method="ordinary",
+            variogram_model="spherical", variogram_params={"sill": 1.0, "range": 100.0, "nugget": 0.0}, show_progress=False
+        )
+        z2, _ = built_in_kriging_interpolation(
+            pts, geom.x_coords, geom.y_coords, method="ordinary",
+            variogram_model="spherical", variogram_params={"sill": 400.0, "range": 100.0, "nugget": 0.0}, show_progress=False
+        )
+        z3, _ = built_in_kriging_interpolation(
+            pts, geom.x_coords, geom.y_coords, method="ordinary",
+            variogram_model="spherical", variogram_params={"sill": 40000.0, "range": 100.0, "nugget": 0.0}, show_progress=False
+        )
+        np.testing.assert_allclose(z1, z2, atol=1e-6)
+        np.testing.assert_allclose(z1, z3, atol=1e-6)
 
     def test_run_from_config_interactive_mode(self):
         """8. Verifies run_from_config(is_batch=False) in non-TTY mode automatically bypasses interactive prompts safely."""

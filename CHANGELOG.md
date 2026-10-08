@@ -106,6 +106,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[Export Filename Prefix Cleaning] (`src/pysole/pipeline.py`)**:
   - Cleaned redundant `"final_"` prefix additions in `PipelineExporter.export_raster()`, preventing duplicate `"final_final_..."` output filenames when `output_prefix` is `"final"` (`N3-L4`).
 
+### Added / Fixed (Phase 8 Audit & Code Hardening — Pass 3 Mathematical & Streamlining Opportunities)
+- **[Kriging Sill-Scaling Invariance Verification] (`tests/test_audit_regressions.py`)**:
+  - Added unit test `test_kriging_sill_scaling_invariance` verifying that multiplying variogram sill parameters by $400\times$ or $40000\times$ leaves predicted Kriging values invariant to $< 10^{-6}\text{ m}$ under diagonal Tikhonov regularization.
+- **[Drift Analyzer Exception Logging] (`src/pysole/drift_analyzer.py`)**:
+  - Replaced silent `except Exception: pass` blocks in `DriftAnalyzer.evaluate_spatial_cv()` with explicit `logger.debug()` diagnostic messages, ensuring cross-validation fold failures are logged.
+- **[Pipeline Consolidation & Dead Code Cleanup] (`src/pysole/pipeline.py`, `src/pysole/solver.py`, `src/pysole/interpolation.py`)**:
+  - Streamlined pipeline exporter paths and consolidated configuration resolution across native solver and pipeline classes.
+
+
 
 
 
