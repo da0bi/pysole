@@ -22,75 +22,19 @@ class PipelineExporter:
 
     def __init__(self, solver: Any):
         self.solver = solver
-        self.outputs_cfg = OutputsConfig.from_dict(solver.config.get("outputs", {}))
+        self.outputs_cfg = solver.outputs_config_obj
 
     def get_resolved_output_prefix(self) -> str:
-        raw_prefix = self.outputs_cfg.output_prefix or "final"
-        prefix_path = Path(raw_prefix)
-        if prefix_path.suffix.lower() in [".tif", ".tiff", ".asc", ".csv", ".npy", ".geotiff"]:
-            prefix_path = prefix_path.with_suffix("")
-        return resolve_path(str(prefix_path), config_path=self.solver.config_path, output_dir=self.solver.output_dir)
+        return self.solver._get_resolved_output_prefix()
 
     def export_raster(self, grid: np.ndarray | None, suffix: str, name: str) -> str | list[str] | None:
-        if grid is None:
-            return None
-        base_prefix = self.get_resolved_output_prefix()
-        clean_suffix = suffix[6:] if (suffix.startswith("final_") and Path(base_prefix).name.lower().endswith("final")) else suffix
-        filepath = f"{base_prefix}_{clean_suffix}"
-        fmt = self.outputs_cfg.output_format
-        raster = BedrockMap(
-            grid=grid,
-            bounds=self.solver.bounds,
-            crs=self.solver.meta.get("crs"),
-            transform=self.solver.meta.get("transform"),
-            name=name,
-        )
-        saved = raster.save(filepath, formats=fmt)
-        if isinstance(saved, list):
-            for sf in saved:
-                logger.info(f"   Saved optional {name} map to: {sf}")
-        else:
-            logger.info(f"   Saved optional {name} map to: {saved}")
-        return saved
+        return self.solver._export_optional_raster(grid, suffix=suffix, name=name)
 
     def export_points_csv(self, points: np.ndarray | None, suffix: str) -> str | None:
-        if points is None:
-            return None
-        base_prefix = self.get_resolved_output_prefix()
-        filepath = f"{base_prefix}_{suffix}.csv"
-        saved = save_points_csv(points, filepath)
-        logger.info(f"   Saved optional migrated survey points to: {saved}")
-        return saved
+        return self.solver._export_optional_points_csv(points, suffix=suffix)
 
     def export_all(self, stage: str | None = None) -> list[str]:
-        saved: list[str] = []
-        cfg_out = self.outputs_cfg
-
-        if stage is None or stage == "migration":
-            if cfg_out.save_traveltime_grid and self.solver.traveltime_grid is not None:
-                res = self.export_raster(self.solver.traveltime_grid, "pre_migration_traveltime_grid", "Traveltime")
-                if res:
-                    saved.extend(res if isinstance(res, list) else [res])
-            if cfg_out.save_migrated_points and self.solver.migrated_points is not None:
-                res_csv = self.export_points_csv(self.solver.migrated_points, "migrated_points")
-                if res_csv:
-                    saved.append(res_csv)
-
-        if stage is None or stage == "finalization":
-            if cfg_out.save_ice_thickness_map and self.solver.thickness_grid is not None:
-                res = self.export_raster(self.solver.thickness_grid, "final_ice_thickness_map", "Ice Thickness")
-                if res:
-                    saved.extend(res if isinstance(res, list) else [res])
-            if cfg_out.save_basal_shear_stress_map and self.solver.basal_shear_stress_grid is not None:
-                res = self.export_raster(self.solver.basal_shear_stress_grid, "final_basal_shear_stress_map", "Basal Shear Stress")
-                if res:
-                    saved.extend(res if isinstance(res, list) else [res])
-            if cfg_out.save_bedrock_elevation_map and self.solver.final_grid is not None:
-                res = self.export_raster(self.solver.final_grid, "final_bedrock_elevation_map", "Bedrock Elevation")
-                if res:
-                    saved.extend(res if isinstance(res, list) else [res])
-
-        return saved
+        return self.solver.export_outputs(stage=stage)
 
 
 def run_from_config(

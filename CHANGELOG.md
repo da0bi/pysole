@@ -114,6 +114,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[Pipeline Consolidation & Dead Code Cleanup] (`src/pysole/pipeline.py`, `src/pysole/solver.py`, `src/pysole/interpolation.py`)**:
   - Streamlined pipeline exporter paths and consolidated configuration resolution across native solver and pipeline classes.
 
+### Added / Fixed (Phase 7 Audit & Code Hardening — Final Pass Codebase Audit & Alignment)
+- **[Codebase & Documentation Audit, Streamlining & Alignment] (`examples/wuk/pysole_wuk.json`, `examples/gok/pysole_gok.json`, `docs/release_guide.md`, `README.md`, `src/pysole/pipeline.py`, `src/pysole/solver.py`)**:
+  - Standardized `"nrbins": 15` integer parameter type across example configurations (`pysole_wuk.json`, `pysole_gok.json`), purging float `15.0` representations.
+  - Updated all release guide instructions in `docs/release_guide.md` from legacy `v0.3.0` tags to `v0.4.3`.
+  - Updated `README.md` frequency sampling section to explicitly describe logarithmic/geometric sampling (`np.geomspace`).
+  - Streamlined `PipelineExporter` in `src/pysole/pipeline.py` to delegate raster export operations directly to `Solver` export methods (`Solver.export_outputs()`), eliminating duplicate code pathways and suffix string edge cases.
+
 
 
 

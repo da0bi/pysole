@@ -1296,9 +1296,9 @@ class Solver:
                 interactive=interactive,
             )
 
+        self.final_grid = self.blended_bedrock
         self.export_outputs("finalization")
 
-        self.final_grid = self.blended_bedrock
         return BedrockMap(
             grid=self.final_grid,
             bounds=self.bounds,

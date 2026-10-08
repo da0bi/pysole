@@ -375,7 +375,7 @@ When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `n
      <p align="center">
      $$n_{\text{steps}} = \text{clip}(n_{\text{modes}}, 10, 50)$$
      </p>
-   - The candidate corner frequency vector $\mathbf{k}_c$ is generated as a linearly spaced array from $k_{\text{c,max}}$ down to $k_{\text{c,min}}$ with $n_{\text{steps}}$ evaluation passes.
+   - The candidate corner frequency vector $\mathbf{k}_c$ is generated as a logarithmically/geometrically spaced array (`np.geomspace`) from $k_{\text{c,max}}$ down to $k_{\text{c,min}}$ with $n_{\text{steps}}$ evaluation passes.
 
 <a id="variogram-binning"></a>
 #### 4. Variogram Binning with Minimum Pair Threshold

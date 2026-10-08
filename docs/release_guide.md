@@ -15,9 +15,9 @@ To install the latest state from the `main` branch:
 pip install git+https://github.com/da0bi/pysole.git
 ```
 
-To install a specific release version tag (e.g. `v0.3.0`):
+To install a specific release version tag (e.g. `v0.4.3`):
 ```bash
-pip install git+https://github.com/da0bi/pysole.git@v0.3.0
+pip install git+https://github.com/da0bi/pysole.git@v0.4.3
 ```
 
 ### 2. Editable Development Installation for Testers
@@ -62,17 +62,17 @@ pip install --upgrade build twine
 ### 2. Version Verification
 
 Ensure the version string is synchronized across all three location files:
-- `pyproject.toml` (`version = "0.3.0"`)
-- `src/pysole/__init__.py` (`__version__ = "0.3.0"`)
-- `CHANGELOG.md` (`## [0.3.0] - 2026-09-27`)
+- `pyproject.toml` (`version = "0.4.3"`)
+- `src/pysole/__init__.py` (`__version__ = "0.4.3"`)
+- `CHANGELOG.md` (`## [0.4.3] - 2026-10-08`)
 
 ### 3. Git Release Tagging
 
 Tag the release commit in your local git repository and push it to GitHub:
 ```bash
 git add .
-git commit -m "Release v0.3.0"
-git tag -a v0.3.0 -m "PySole Release v0.3.0"
+git commit -m "Release v0.4.3"
+git tag -a v0.4.3 -m "PySole Release v0.4.3"
 git push origin main --tags
 ```
 
@@ -88,8 +88,8 @@ python -m build
 ```
 
 Verify that the `dist/` directory contains both `.tar.gz` and `.whl` files:
-- `dist/pysole-0.3.0.tar.gz`
-- `dist/pysole-0.3.0-py3-none-any.whl`
+- `dist/pysole-0.4.3.tar.gz`
+- `dist/pysole-0.4.3-py3-none-any.whl`
 
 ### 5. Validate Package Metadata with Twine
 
@@ -100,8 +100,8 @@ twine check dist/*
 
 Expected output:
 ```text
-Checking dist/pysole-0.3.0-py3-none-any.whl: PASSED
-Checking dist/pysole-0.3.0.tar.gz: PASSED
+Checking dist/pysole-0.4.3-py3-none-any.whl: PASSED
+Checking dist/pysole-0.4.3.tar.gz: PASSED
 ```
 
 ### 6. Upload to TestPyPI (Optional Dry-Run)

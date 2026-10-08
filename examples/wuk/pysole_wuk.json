@@ -30,7 +30,7 @@
         "lambda_min": null,
         "lambda_max": null,
         "n_steps": null,
-        "nrbins": 15.0,
+        "nrbins": 15,
         "slope_floor_deg": 5.0,
         "interactive_optimization": false
     },

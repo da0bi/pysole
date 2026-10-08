@@ -208,10 +208,16 @@ Based on theoretical derivations and empirical benchmarks on WUK and GOK, we est
 * **Rationale**: Preserves SIA physics, accurately bounds ice thickness in central troughs, and naturally tapers to zero at valley walls without margin artifacts.
 * **JSON Configuration**:
   ```json
-  "pre_kriging_type": "ordinary",
-  "pre_drift_terms": [],
-  "post_kriging_type": "ordinary",
-  "post_drift_terms": []
+  "kriging_parameters": {
+    "pre_migration": {
+      "method": "ordinary",
+      "drift_terms": []
+    },
+    "post_migration": {
+      "method": "ordinary",
+      "drift_terms": []
+    }
+  }
   ```
 
 ### Case B: Glaciers with Strong Altitude/Elevation Gradients
@@ -219,10 +225,16 @@ Based on theoretical derivations and empirical benchmarks on WUK and GOK, we est
 * **Rationale**: Captures regional elevation-dependent ice thickness variations (accumulation zone vs. ablation tongue) while completely avoiding slope singularities.
 * **JSON Configuration**:
   ```json
-  "pre_kriging_type": "universal",
-  "pre_drift_terms": ["z_surface"],
-  "post_kriging_type": "universal",
-  "post_drift_terms": ["z_surface"]
+  "kriging_parameters": {
+    "pre_migration": {
+      "method": "universal",
+      "drift_terms": ["z_dem"]
+    },
+    "post_migration": {
+      "method": "universal",
+      "drift_terms": ["z_dem"]
+    }
+  }
   ```
 
 ### Case C: Flat Icefield Benches & Low-Slope Margin Regions ($\alpha < 5^\circ$)
