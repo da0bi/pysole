@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.3] - 2026-10-08
 
+### Added / Fixed (Task A Release Preparation — Core Export & Engine Plumbing)
+- **[Default Bedrock Elevation Raster Export] (`src/pysole/pipeline.py`, `src/pysole/solver.py`, `src/pysole/config.py`)**:
+  - Wired `run_from_config()` and `Solver.export_outputs("finalization")` to export the predicted bedrock elevation raster `<output_prefix>_bedrock.<ext>` by default when `save_bedrock_elevation_map` is `True` (`B1`).
+  - Added `"save_bedrock_elevation_map": True` to `DEFAULT_CONFIG["outputs"]` and `OutputsConfig.active_exports()`.
+  - Added regression test `test_run_from_config_exports_bedrock_raster` in `tests/test_audit_regressions.py`.
+- **[Output Directory & Log File Resolution] (`src/pysole/pipeline.py`)**:
+  - Fixed `resolve_output_dir` call signature in `run_from_config()` to pass `output_dir`, `survey_data_path`, and `config_path` as explicit keyword arguments (`B2`), preventing CWD log file stray outputs and ensuring paths resolve relative to `config_path`.
+- **[Kriging Engine String Pass-Through] (`src/pysole/solver.py`)**:
+  - Updated `Solver.interpolate_kriging()` to pass `engine=self.engine_type` string (`"native"` or `"pykrige"`) into `kriging_interpolation()` (`B3`), making `"pykrige"` engine selection fully functional from JSON configurations.
+  - Added regression test `test_kriging_engine_string_propagation` in `tests/test_audit_regressions.py`.
+
 ### Added / Fixed (Phase 1 Audit & Code Hardening — High Priority Findings)
 - **[Parameter Standard] Corner Wavenumber Standardized to $k_c = 0.0314\text{ rad/m}$ ($\lambda_c \approx 200\text{ m}$) (`src/pysole/survey_planner.py`, `src/pysole/config.py`, `src/pysole/solver.py`, `docs/drift_analyzer_&_survey_planner.md`)**:
   - Replaced legacy default $k_c = 0.5\text{ rad/m}$ ($\lambda_c \approx 12.57\text{ m}$) with $k_c = 0.0314\text{ rad/m}$ ($\lambda_c = 2\pi / k_c \approx 200\text{ m}$) across `SurveyPlanner.plan_survey()`, `Solver.plan_survey()`, CLI `--kc` option, and user manual documentation (`N-H7`).

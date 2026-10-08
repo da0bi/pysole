@@ -53,6 +53,7 @@ class OutputsConfig:
             "save_thickness_uncertainty": self.save_thickness_uncertainty,
             "save_basal_shear_stress": self.save_basal_shear_stress,
             "save_basal_shear_stress_uncertainty": self.save_basal_shear_stress_uncertainty,
+            "save_bedrock_elevation_map": self.save_bedrock_elevation_map,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -142,6 +143,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "save_thickness_uncertainty": False,
         "save_basal_shear_stress": False,
         "save_basal_shear_stress_uncertainty": False,
+        "save_bedrock_elevation_map": True,
     },
 }
 

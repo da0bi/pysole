@@ -401,6 +401,10 @@ class Solver:
                 res = self._export_optional_raster(self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty")
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
+            if getattr(cfg_out, "save_bedrock_elevation_map", True) and self.final_grid is not None:
+                res = self._export_optional_raster(self.final_grid, suffix="bedrock", name="bedrock elevation")
+                if res:
+                    saved.extend([res] if isinstance(res, str) else res)
 
         return saved
 
@@ -720,7 +724,7 @@ class Solver:
             outline_mask=self.outline_mask,
             include_zero_boundary_condition=zero_boundary,
             n_cores=self.n_cores,
-            engine=self.kriging_engine,
+            engine=self.engine_type,
             slope_floor_deg=self.slope_floor_deg,
             show_progress=self.show_progress,
             external_drift_grid=ext_drifts if len(ext_drifts) > 0 else None,

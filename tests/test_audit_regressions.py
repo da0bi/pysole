@@ -267,6 +267,62 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertEqual(len(mig_pts), 1)
         self.assertTrue(np.all(np.isfinite(mig_pts[0])))
 
+    def test_run_from_config_exports_bedrock_raster(self):
+        """13. Verifies run_from_config writes the bedrock elevation raster map to disk by default."""
+        import json
+        from pysole.solver import Solver
+        from pysole.pipeline import run_from_config
+
+        dem_file = self.output_dir / "test_dem.tif"
+        pts_file = self.output_dir / "test_picks.csv"
+        cfg_file = self.output_dir / "test_pysole.json"
+
+        # Create dummy DEM raster in projected UTM meters
+        bounds = (500000.0, 5200000.0, 500100.0, 5200100.0)
+        geom = GridGeometry.create((10, 10), dx=10.0, dy=10.0, bounds=bounds)
+        dem_data = np.full((10, 10), 1000.0)
+        raster = BedrockMap(grid=dem_data, bounds=geom.bounds, crs=32633)
+        raster.save(dem_file)
+
+        # Create dummy survey points in projected UTM meters
+        pts = np.array([[500020.0, 5200020.0, 50.0], [500050.0, 5200050.0, 60.0], [500080.0, 5200080.0, 40.0]])
+        np.savetxt(pts_file, pts, delimiter=",", header="X,Y,Picks", comments="")
+
+        # Create pysole.json
+        cfg_data = {
+            "inputs": {
+                "dem_path": str(dem_file),
+                "survey_data_path": str(pts_file),
+                "survey_data_type": "depth",
+                "show_progress": False,
+            },
+            "outputs": {
+                "output_dir": str(self.output_dir / "out"),
+                "output_format": "tif",
+                "output_prefix": "wuk_test",
+            },
+        }
+        with open(cfg_file, "w") as f:
+            json.dump(cfg_data, f)
+
+        # Run pipeline
+        res_map = run_from_config(config_path=cfg_file, is_batch=True)
+        self.assertIsNotNone(res_map)
+
+        # Verify bedrock elevation raster file was written to output_dir
+        expected_bedrock_tif = self.output_dir / "out" / "wuk_test_bedrock.tif"
+        self.assertTrue(expected_bedrock_tif.exists(), f"Bedrock raster map missing at: {expected_bedrock_tif}")
+
+    def test_kriging_engine_string_propagation(self):
+        """14. Verifies Solver propagates engine_type string cleanly to kriging_interpolation."""
+        from pysole.solver import Solver
+
+        bounds = (500000.0, 5200000.0, 500100.0, 5200100.0)
+        geom = GridGeometry.create((10, 10), dx=10.0, dy=10.0, bounds=bounds)
+        dem_data = np.full((10, 10), 1000.0)
+        solver = Solver(dem=dem_data, bounds=geom.bounds, kriging_engine="native")
+        self.assertEqual(solver.engine_type, "native")
+
 
 if __name__ == "__main__":
     unittest.main()
