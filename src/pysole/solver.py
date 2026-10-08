@@ -980,8 +980,9 @@ class Solver:
         valid_pts_val = pts[~np.isnan(pts[:, val_col]), val_col]
         max_thickness = max(float(np.max(valid_pts_val)) * 1.5, 500.0) if len(valid_pts_val) > 0 else 500.0
 
-        n_clipped_neg = int(np.sum(grid_raw < 0.0))
-        n_clipped_max = int(np.sum(grid_raw > max_thickness))
+        eval_mask = self.outline_mask if self.outline_mask is not None else np.ones_like(grid_raw, dtype=bool)
+        n_clipped_neg = int(np.sum((grid_raw < 0.0) & eval_mask))
+        n_clipped_max = int(np.sum((grid_raw > max_thickness) & eval_mask))
         if n_clipped_neg > 0 or n_clipped_max > 0:
             logger.info(
                 f"   [Thickness Clipping] Clipped {n_clipped_neg} negative cells and {n_clipped_max} excessive cells "
@@ -1076,7 +1077,7 @@ class Solver:
 
     def finalize_bedrock(
         self,
-        interactive: bool = True,
+        interactive: bool = False,
         plotit: bool = True,
         random_forest_gap_filling: bool | None = None,
         apply_margin_blend: bool | None = None,

@@ -9,7 +9,7 @@ import copy
 import json
 import os
 import numpy as np
-from .logging import logger
+from .logging import logger, setup_logging
 
 
 @dataclass
@@ -222,6 +222,16 @@ def resolve_path(
     return str(eff_dir / path_obj)
 
 
+def _deep_merge_dict(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merges source dictionary into target dictionary in-place."""
+    for k, v in source.items():
+        if k in target and isinstance(target[k], dict) and isinstance(v, dict):
+            _deep_merge_dict(target[k], v)
+        else:
+            target[k] = copy.deepcopy(v)
+    return target
+
+
 def load_config(
     config_path: str | Path | os.PathLike | dict[str, Any] = "pysole.json",
     log_level: str | None = None,
@@ -241,8 +251,6 @@ def load_config(
     -------
     config : dict
     """
-    from .logging import setup_logging
-
     config = copy.deepcopy(DEFAULT_CONFIG)
     user_config = None
     if isinstance(config_path, dict):
@@ -254,11 +262,7 @@ def load_config(
                 user_config = json.load(f)
 
     if user_config:
-        for key, section in user_config.items():
-            if key in config and isinstance(section, dict):
-                config[key].update(section)
-            else:
-                config[key] = section
+        _deep_merge_dict(config, user_config)
 
     # Automatically align Kriging defaults based on interpolation_target if method was not explicitly user-defined
     kp = config.get("kriging_parameters", {})

@@ -9,8 +9,11 @@ from pathlib import Path
 import warnings
 from typing import Any
 import matplotlib
-if not os.environ.get("DISPLAY"):
-    matplotlib.use("Agg")
+if not os.environ.get("DISPLAY") and matplotlib.get_backend().lower() not in ["agg", "module://matplotlib_inline.backend_inline"]:
+    try:
+        matplotlib.use("Agg")
+    except Exception:
+        pass
 import matplotlib.pyplot as plt
 import numpy as np
 from .logging import logger

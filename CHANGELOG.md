@@ -26,6 +26,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated `test_run_from_config_batch_false` with TTY mocking (`sys.stdin.isatty` returning `False`) for clean automated execution (`N-H1`).
   - Updated `test_pykrige.py` `setUp` DEM grid with realistic spatial slope (`1000.0 + 0.1*X + 0.2*Y`) for robust elevation drift verification.
 
+### Added / Fixed (Phase 2 Audit & Code Hardening — Medium Priority Findings)
+- **[Dynamic FFT Reflection Padding] Kernel-Scaled Padding (`src/pysole/smoothing.py`, `src/pysole/variogram.py`)**:
+  - Scaled reflection padding in `precompute_fft_grid` dynamically with Gaussian kernel size ($\text{pad\_px} = \lceil 4 \sigma_{\text{px}} \rceil$ where $\sigma_{\text{px}} = 1 / (\sqrt{2}\pi k_c \Delta x)$), eliminating 12–23m boundary distortion artifacts (`N-M3`).
+  - Updated variogram frequency sweeps to pass `kc_min_val` into `precompute_fft_grid()`, ensuring padding is pre-sized for the widest Gaussian kernel.
+- **[Kriging Solvers & Regularization] LU Decomposition & Point Covariance Regularization (`src/pysole/interpolation.py`)**:
+  - Replaced explicit $K^{-1}$ matrix inversions with LU factorizations (`scipy.linalg.lu_factor` / `lu_solve`) (`M5`).
+  - Applied relative Tikhonov regularization ($\epsilon \cdot \text{mean}(\text{diag}(K_{\text{pts}}))$) strictly to point covariance matrix `K[:N_pts, :N_pts]`, ensuring exact satisfaction of Lagrange drift constraints $F^T w = 0$ (`N3-M10`).
+- **[Thickness Clipping & Boundary Masking] Glacier-Masked Clipping Counts (`src/pysole/solver.py`)**:
+  - Evaluated negative thickness clipping count logging (`n_clipped_neg`) strictly inside the active glacier boundary outline mask when present (`N-M7`).
+  - Changed default `interactive` flag in `Solver.finalize_bedrock()` from `True` to `False`.
+- **[Machine Learning Gap Filling] Non-Negative Prediction Clamping (`src/pysole/interpolation.py`)**:
+  - Enforced strict non-negative clamping ($\ge 0$) on Random Forest thickness predictions (`N-M8`).
+  - Subsampled training point datasets ($N > 20,000$) for efficient memory-bound ML fitting.
+- **[Drift Analyzer Covariates] Curvature Alignment & Target String Indexing (`src/pysole/drift_analyzer.py`)**:
+  - Plumbed `slope_floor_deg` into `DriftAnalyzer.__init__` and updated target string indexing (`"T"` for traveltime, `"D"` for depth target) (`N-M10`).
+- **[Configuration Ingestion] Pure Deep Dictionary Merging (`src/pysole/config.py`)**:
+  - Implemented `_deep_merge_dict` in `load_config()` for pure recursive deep dictionary merging, preserving nested user configuration dictionaries (`N-M11`).
+- **[Visualization & Matplotlib] Safe Lazy Backend Selection (`src/pysole/plotting.py`)**:
+  - Replaced top-level non-interactive Matplotlib backend override with safe lazy backend selection (`N-M12`).
+
 ## [0.4.2] - 2026-10-07
 
 ### Added / Fixed (Wavelength Metric & Fallback Parameterization)
