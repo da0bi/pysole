@@ -211,7 +211,7 @@ When optional parameters are omitted, `SurveyPlanner` enforces the following def
 
 | Parameter | Identifier / Argument | Default Value | Physical / Technical Description |
 | :--- | :--- | :--- | :--- |
-| **FFT DEM Cutoff Wavelength** | `kc` / `--kc` | **`0.5`** rad/m | Corner wavenumber frequency cutoff ($k_c = 0.5\text{ rad/m}$, corresponding to cutoff wavelength $\lambda_c = 2\pi / k_c \approx 12.57\text{ m}$) applied during frequency-domain Gaussian DEM surface smoothing. |
+| **FFT DEM Cutoff Wavelength** | `kc` / `--kc` | **`0.0314`** rad/m | Corner wavenumber frequency cutoff ($k_c = 0.0314\text{ rad/m}$, corresponding to cutoff wavelength $\lambda_c = 2\pi / k_c \approx 200\text{ m}$) applied during frequency-domain Gaussian DEM surface smoothing. |
 | **Nominal Basal Shear Stress** | `tau_0` / `tau_p` / `--tau` | **`100`** kPa ($100,000\text{ Pa}$) | Target nominal basal shear stress ($\tau_0 = 100\text{ kPa}$) used in Shallow Ice Approximation (SIA) ice thickness depth modeling $D_{\text{SIA}}(x,y) = \frac{\tau_0}{\rho g \sin \alpha}$. |
 | **Total Survey Track Budget** | `max_length_km` / `max_km` / `--max-km` | **`5.0`** km ($5,000\text{ m}$) | Maximum total survey length budget ($L_{\text{max}} = 5.0\text{ km}$) allocated across longitudinal flowlines and transverse cross-profiles. |
 | **Minimum Surface Slope Floor** | `slope_floor_deg` | `5.0`° | Minimum surface slope angle threshold ($\alpha_{\text{floor}} = 5^\circ$) to prevent numerical division singularities in low-gradient accumulation basins. |
@@ -223,7 +223,7 @@ When optional parameters are omitted, `SurveyPlanner` enforces the following def
 ### 2.2 Synthetic SIA Ice Thickness Modeling
 
 #### 1. Frequency-Domain Surface DEM Smoothing
-Raw DEM elevations $Z_{\text{dem}}(x,y)$ contain high-frequency micro-topography. `PySole` applies a 2D Gaussian low-pass filter in the frequency domain using spatial corner wavenumber $k_c$ (default $k_c = 0.5\text{ rad/m}$):
+Raw DEM elevations $Z_{\text{dem}}(x,y)$ contain high-frequency micro-topography. `PySole` applies a 2D Gaussian low-pass filter in the frequency domain using spatial corner wavenumber $k_c$ (default $k_c = 0.0314\text{ rad/m}$):
 
 $$Z_{\text{smooth}, k_c}(x,y) = \text{Re}\left[ \mathcal{F}^{-1} \left( \mathcal{F}\left[ Z_{\text{dem}}(x,y) \right] \cdot \exp\left( -\frac{k_x^2 + k_y^2}{2 k_c^2} \right) \right) \right]$$
 
@@ -326,6 +326,6 @@ pysole pysole.json --drift-analyzer --profile-col line_id
 # Force non-interactive batch mode
 pysole pysole.json --batch
 
-# Standalone Survey Planning (defaults: k_c=0.5, tau=100 kPa, max-km=5.0 km)
-pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 0.5 --tau 100 --max-km 5.0 --output proposed_survey
+# Standalone Survey Planning (defaults: k_c=0.0314, tau=100 kPa, max-km=5.0 km)
+pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 0.0314 --tau 100 --max-km 5.0 --output proposed_survey
 ```

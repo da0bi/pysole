@@ -12,7 +12,8 @@ from pysole.interpolation import kriging_interpolation, KrigingResult
 class TestPyKrigeIntegration(unittest.TestCase):
     def setUp(self):
         self.geometry = GridGeometry.create(shape=(20, 20), dx=10.0, dy=10.0)
-        self.dem = np.ones((20, 20)) * 1000.0
+        xx, yy = self.geometry.meshgrid
+        self.dem = 1000.0 + 0.1 * xx + 0.2 * yy
 
         np.random.seed(42)
         x_pts = np.random.uniform(10.0, 180.0, 15)

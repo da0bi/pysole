@@ -420,7 +420,10 @@ def optimize_bss_variance(
     kc_max_val = min(kc_max_val, k_nyquist)
 
     if kc_min_val >= kc_max_val:
-        kc_min_val = 0.5 * kc_max_val
+        raise ValueError(
+            f"Invalid wavenumber search range: minimum wavenumber k_c,min ({kc_min_val:.4f} rad/m) "
+            f"must be strictly less than maximum wavenumber k_c,max ({kc_max_val:.4f} rad/m)."
+        )
 
     if n_steps is None or n_steps <= 0:
         n_modes = int(np.floor((kc_max_val - kc_min_val) * L_max / (2.0 * np.pi)))
@@ -434,8 +437,8 @@ def optimize_bss_variance(
     pts_valid_coords = survey_points[valid_pts_mask, :2]
     survey_dists = pdist(pts_valid_coords) if (len(pts_valid_coords) >= 2 and len(pts_valid_coords) <= 5000) else None
 
-    # Pre-compute 2D Forward FFT and wavenumber grid ONCE on raw DEM elevation Z_surf
-    A_shift_dem, k_grid_dem, k_max_grid = precompute_fft_grid(dem, dx=dx, dy=dy)
+    # Pre-compute 2D Forward FFT and wavenumber grid ONCE on raw DEM elevation Z_surf with padding for lowest kc
+    A_shift_dem, k_grid_dem, k_max_grid = precompute_fft_grid(dem, dx=dx, dy=dy, kc=kc_min_val)
     base_slope = compute_slope_rad(dem, dx=dx, dy=dy)
 
     if survey_dists is not None and len(survey_dists) > 0:
@@ -551,7 +554,7 @@ def optimize_bss_variance(
                 kc_val, kc_key, smoothed_dem, smoothed_slope, var_result, mean_product = first_eval
                 if len(var_result["val"]) > 0:
                     a_range, sill, nugget, model_curve = fit_variogram_model(
-                        var_result["distance"], var_result["val"], model_type="spherical"
+                        var_result["distance"], var_result["val"], counts=var_result.get("np"), model_type="spherical"
                     )
                     fitted_var_params = {"range": float(a_range), "sill": float(sill), "nugget": float(nugget)}
 
@@ -583,7 +586,7 @@ def optimize_bss_variance(
                                                 _, _, _, _, var_result, _ = first_eval
                                                 if len(var_result["val"]) > 0:
                                                     a_range, sill, nugget, model_curve = fit_variogram_model(
-                                                        var_result["distance"], var_result["val"], model_type="spherical"
+                                                        var_result["distance"], var_result["val"], counts=var_result.get("np"), model_type="spherical"
                                                     )
                                                     plot_unfiltered_product_variogram(
                                                         distances=var_result["distance"],

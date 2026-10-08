@@ -787,13 +787,23 @@ def load_survey_points(
     dem_grid: np.ndarray | None = None,
     x_coords: np.ndarray | None = None,
     y_coords: np.ndarray | None = None,
+    profile_column: str | None = None,
 ) -> np.ndarray:
     """
     Unified ingestion and validation for scattered survey point datasets.
     Loads CSV, whitespace-delimited files, or NumPy arrays, converts coordinates, and validates bounds.
     """
+    prof_arr: np.ndarray | None = None
     if isinstance(survey_input, (str, Path, os.PathLike)):
         filepath = str(survey_input)
+        if profile_column and filepath.endswith(".csv"):
+            try:
+                import pandas as pd
+                df_prof = pd.read_csv(filepath)
+                if profile_column in df_prof.columns:
+                    prof_arr = pd.to_numeric(df_prof[profile_column], errors="coerce").to_numpy(dtype=np.float64)
+            except Exception:
+                pass
         try:
             pts = np.loadtxt(filepath, delimiter="," if filepath.endswith(".csv") else None)
         except ValueError:
@@ -833,6 +843,9 @@ def load_survey_points(
         pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
         z_surf = interp_z(pts_xy)
         pts = np.column_stack((pts[:, 0], pts[:, 1], z_surf, pts[:, 2]))
+
+    if prof_arr is not None and len(prof_arr) == len(pts) and pts.shape[1] == 4:
+        pts = np.column_stack((pts, prof_arr))
 
     # Deduplicate / consolidate duplicate survey points with identical (X, Y) coordinates
     if len(pts) > 1:

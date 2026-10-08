@@ -190,8 +190,14 @@ class Solver:
         self.final_bss: np.ndarray | None = None
         self.bss_std: np.ndarray | None = None
         self.opt_variogram_params: dict[str, float] | None = None
-        self.config: dict[str, Any] = {}
-        self.config_path: str | None = None
+        if not hasattr(self, "config") or self.config is None:
+            self.config = {}
+        if self.config_path and Path(self.config_path).exists() and not self.config:
+            try:
+                from .config import load_config
+                self.config = load_config(self.config_path)
+            except Exception:
+                pass
 
     @property
     def traveltime_grid(self) -> np.ndarray | None:
@@ -566,6 +572,7 @@ class Solver:
         )
         solver.config = cfg
         solver.config_path = str(config_path)
+        solver.drift_analyzer = bool(inputs.get("drift_analyzer", False))
         return solver
 
     def get_sample_points(self, stage: str, target_type: str = "P") -> np.ndarray:
@@ -749,6 +756,7 @@ class Solver:
             dem_grid=self.dem_grid,
             x_coords=self.x_coords,
             y_coords=self.y_coords,
+            profile_column=self.survey_profile_column or self._cfg_get("inputs", "survey_profile_column"),
         )
 
         pts_minx, pts_miny = float(pts[:, 0].min()), float(pts[:, 1].min())
@@ -1335,13 +1343,13 @@ class Solver:
             bounds=self.bounds,
             alpha_opt_deg=opt_alpha,
             variogram_model="spherical",
-            variogram_params={"range": 100.0, "sill": 1.0, "nugget": 0.0},
+            variogram_params=self.opt_variogram_params if getattr(self, "opt_variogram_params", None) is not None else {"range": 100.0, "sill": 1.0, "nugget": 0.0},
             interactive=interactive,
         )
 
     def plan_survey(
         self,
-        kc: float = 0.5,
+        kc: float = 0.0314,
         tau_0: float = 100e3,
         max_length_km: float = 5.0,
         output_prefix: str | None = None,

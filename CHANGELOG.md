@@ -5,6 +5,27 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-10-08
+
+### Added / Fixed (Phase 1 Audit & Code Hardening — High Priority Findings)
+- **[Parameter Standard] Corner Wavenumber Standardized to $k_c = 0.0314\text{ rad/m}$ ($\lambda_c \approx 200\text{ m}$) (`src/pysole/survey_planner.py`, `src/pysole/config.py`, `src/pysole/solver.py`, `docs/drift_analyzer_&_survey_planner.md`)**:
+  - Replaced legacy default $k_c = 0.5\text{ rad/m}$ ($\lambda_c \approx 12.57\text{ m}$) with $k_c = 0.0314\text{ rad/m}$ ($\lambda_c = 2\pi / k_c \approx 200\text{ m}$) across `SurveyPlanner.plan_survey()`, `Solver.plan_survey()`, CLI `--kc` option, and user manual documentation (`N-H7`).
+- **[Pipeline Orchestration] Interactive Flags Plumbing & Output Prefix Standard (`src/pysole/pipeline.py`)**:
+  - Forwarded `interactive_optimization` and `interactive_migration` configuration flags cleanly into `run_from_config()`, ensuring terminal prompts respect non-interactive environments (`N-H2`).
+  - Aligned default predicted bedrock map export file path with canonical `<prefix>_bedrock_elevation_map.tif`.
+- **[Survey Planner & Spatial Resolution] Native Spatial Resolution Preservation (`src/pysole/survey_planner.py`)**:
+  - Updated `SurveyPlanner.__init__` `dx`/`dy` parameters to default to `None`, ensuring resolution scaling directly preserves native DEM GeoTIFF pixel dimensions instead of falling back to 10m grid spacing.
+- **[Solver State & Variogram Plumbing] Configuration Preservation & Profile Column Support (`src/pysole/solver.py`, `src/pysole/raster.py`)**:
+  - Prevented `Solver.__init__` from overwriting `self.config` and `self.config_path` to `None` (`N-H5`).
+  - Added support for `survey_profile_column` in `load_survey_points()` to extract and retain string/integer profile IDs in column 4 (`pts[:, 4]`) for Leave-One-Profile-Out (LOPO) cross-validation.
+  - Plumbed CLI `--drift-analyzer` flag to set active drift analyzer state in `Solver.from_config()`.
+  - Dynamically passed fitted variogram parameters (`range`, `sill`) from `self.opt_variogram_params` into `recommend_drift_model()` in `DriftAnalyzer` (`H6`).
+- **[Matrix Conditioning & Numerical Stability] Zero-Variance External Drift Filtering (`src/pysole/interpolation.py`)**:
+  - Implemented zero-variance spatial check (`u_std < 1e-12`) for external drift rasters in `built_in_kriging_interpolation()`. Flat external grids trigger an explicit warning and skip redundant constant drift column assembly, preventing rank-deficient matrix singular errors and `NaN` outputs in Universal Kriging.
+- **[Test Suite & Benchmarking] Non-Interactive TTY Mocking & Test Rigor (`tests/test_audit_regressions.py`, `tests/test_pykrige.py`)**:
+  - Updated `test_run_from_config_batch_false` with TTY mocking (`sys.stdin.isatty` returning `False`) for clean automated execution (`N-H1`).
+  - Updated `test_pykrige.py` `setUp` DEM grid with realistic spatial slope (`1000.0 + 0.1*X + 0.2*Y`) for robust elevation drift verification.
+
 ## [0.4.2] - 2026-10-07
 
 ### Added / Fixed (Wavelength Metric & Fallback Parameterization)

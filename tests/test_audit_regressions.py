@@ -1,5 +1,5 @@
 """
-Audit Regression Unit Test Suite for PySole v0.4.2.
+Audit Regression Unit Test Suite for PySole v0.4.3.
 Verifies all 7 audit regression test cases and Phase 1 / Phase 2 code review fixes.
 """
 
@@ -179,7 +179,9 @@ class TestAuditRegressions(unittest.TestCase):
         with open(cfg_path, "w") as f:
             json.dump(cfg, f)
 
-        res = run_from_config(cfg_path, is_batch=True)
+        from unittest.mock import patch
+        with patch("sys.stdin.isatty", return_value=False):
+            res = run_from_config(cfg_path, is_batch=False)
         self.assertIsNotNone(res)
 
     def test_fft_normalized_convolution_nan(self):

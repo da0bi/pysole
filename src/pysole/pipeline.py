@@ -178,16 +178,18 @@ def run_from_config(
         if survey_profile_column is not None:
             solver.survey_profile_column = survey_profile_column
 
-        interactive_flag = not is_batch and sys.stdin.isatty()
-
         mig_cfg = cfg.get("migration_parameters", {})
+        opt_cfg = cfg.get("optimization_parameters", {})
         fin_cfg = cfg.get("finalization_parameters", {})
 
-        solver.migrate_eikonal(velocity=mig_cfg.get("velocity", 0.16), interactive=interactive_flag)
-        solver.optimize_bss(interactive=interactive_flag)
-        solver.calculate_bedrock(interactive=interactive_flag)
+        interactive_mig = not is_batch and sys.stdin.isatty() and bool(mig_cfg.get("interactive_migration", True))
+        interactive_opt = not is_batch and sys.stdin.isatty() and bool(opt_cfg.get("interactive_optimization", True))
+
+        solver.migrate_eikonal(velocity=mig_cfg.get("velocity", 0.16), interactive=interactive_mig)
+        solver.optimize_bss(interactive=interactive_opt)
+        solver.calculate_bedrock(interactive=interactive_opt)
         final_raster = solver.finalize_bedrock(
-            interactive=interactive_flag,
+            interactive=interactive_opt,
             random_forest_gap_filling=fin_cfg.get("random_forest_gap_filling"),
             apply_margin_blend=fin_cfg.get("apply_margin_blend"),
             min_gap_dist=fin_cfg.get("min_gap_dist"),

@@ -294,8 +294,11 @@ def built_in_kriging_interpolation(
 
         for _, grid in ext_dict.items():
             if grid is not None and grid.shape == (M, N):
+                u_std = float(np.nanstd(grid))
+                if u_std < 1e-12:
+                    logger.warning("External drift raster has zero spatial variance (flat). Skipping redundant constant drift column.")
+                    continue
                 u_mean = float(np.nanmean(grid))
-                u_std = max(float(np.nanstd(grid)), 1e-6)
                 u_grid_norm = (grid - u_mean) / u_std
                 u_flat = u_grid_norm.ravel()
 
@@ -360,8 +363,8 @@ def built_in_kriging_interpolation(
             K[N_pts + curr_col, :N_pts] = pts_x_norm * pts_y_norm
             curr_col += 1
 
-    reg_val = max(1e-6 * float(sill), 1e-6)
-    K += np.eye(K.shape[0]) * reg_val
+    reg_val = 1e-6 * max(float(sill), float(np.mean(np.diag(K_sample))))
+    K[:N_pts, :N_pts] += np.eye(N_pts) * reg_val
     logger.info(f"   [Dual Kriging Engine] Applied {reg_val:.1e} Tikhonov matrix regularization (N={N_pts} points, n_drift={n_drift})")
 
     z_aug = np.zeros(N_pts + n_drift, dtype=np.float64)
@@ -799,8 +802,14 @@ def random_forest_hole_filling(
     thickness_target = dem.ravel() - bedrock_flat
     valid_train = mask_flat & ~np.isnan(bedrock_flat) & (thickness_target > 0.1) & (dist_flat > margin_threshold)
 
-    if np.sum(valid_train) < 10:
+    n_valid = int(np.sum(valid_train))
+    if n_valid < 10:
         return bedrock_grid.copy()
+
+    train_indices = np.where(valid_train)[0]
+    if n_valid > 20000:
+        np.random.seed(42)
+        train_indices = np.random.choice(train_indices, size=20000, replace=False)
 
     effective_n_cores = (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
 
@@ -811,7 +820,7 @@ def random_forest_hole_filling(
         disable=not show_progress,
     ) as pbar:
         rf = RandomForestRegressor(n_estimators=100, max_depth=15, random_state=42, n_jobs=effective_n_cores)
-        rf.fit(features[valid_train], thickness_target[valid_train])
+        rf.fit(features[train_indices], thickness_target[train_indices])
         pbar.update(50)
 
         logger.info("   [RF Gap Filling] Finished learning Random Forest regression model")

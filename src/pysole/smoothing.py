@@ -3,6 +3,8 @@ Surface Gradient, Slope, and Frequency Domain FFT Smoothing for PySole.
 Ported from MATLAB scripts GradRad.m and FFTSmooth.m by Daniel Binder (2011).
 """
 
+from dataclasses import dataclass
+from typing import Any
 import numpy as np
 from scipy.fft import fft2, ifft2, fftshift, ifftshift, fftfreq
 
@@ -13,21 +15,6 @@ def compute_surface_curvature(
     """
     Computes 2D surface Laplacian curvature kappa = d2Z/dx2 + d2Z/dy2
     using 2nd-order central finite differences.
-
-    Parameters
-    ----------
-    dem : 2D np.ndarray
-        Surface elevation grid.
-    dx : float
-        Grid spacing along X (columns).
-    dy : float
-        Grid spacing along Y (rows).
-
-    Returns
-    -------
-    curvature : 2D np.ndarray
-        Laplacian surface curvature grid [1/m]. Positive values indicate convex shapes (peaks/ridges),
-        negative values indicate concave shapes (troughs/bowls/valleys).
     """
     slope_y, slope_x = np.gradient(dem, dy, dx)
     d2z_dy2, _ = np.gradient(slope_y, dy, dx)
@@ -47,31 +34,7 @@ def compute_gradients(
     """
     Computes spatial slope gradients, surface curvature, and surface normal trigonometric grids.
     Ported from GradRad.m.
-
-    Parameters
-    ----------
-    dem : 2D np.ndarray
-        Surface elevation grid.
-    dx : float
-        Grid spacing along X (columns).
-    dy : float
-        Grid spacing along Y (rows).
-
-    Returns
-    -------
-    dict containing:
-        - 'slope_rad': slope angle in radians
-        - 'slope_grad': slope angle in degrees
-        - 'slope_x': gradient in X direction
-        - 'slope_y': gradient in Y direction
-        - 'cos_alpha_x_grid': cos(atan(Slope_x))
-        - 'cos_alpha_y_grid': cos(atan(Slope_y))
-        - 'sin_alpha_x_grid': sin(atan(Slope_x))
-        - 'sin_alpha_y_grid': sin(atan(Slope_y))
-        - 'sinus_alpha_grid': sin(Slope_rad)
-        - 'curvature': Laplacian surface curvature (d2Z/dx2 + d2Z/dy2)
     """
-    # np.gradient returns gradients along axis 0 (rows/y) then axis 1 (cols/x)
     slope_y, slope_x = np.gradient(dem, dy, dx)
 
     slope_sq = slope_x**2 + slope_y**2
@@ -79,7 +42,6 @@ def compute_gradients(
     slope_rad = np.arctan(slope)
     slope_grad = np.degrees(slope_rad)
 
-    # Compute 2nd spatial derivatives for Laplacian curvature
     d2z_dy2, _ = np.gradient(slope_y, dy, dx)
     _, d2z_dx2 = np.gradient(slope_x, dy, dx)
     curvature = d2z_dx2 + d2z_dy2
@@ -108,10 +70,6 @@ def compute_gradients(
     }
 
 
-from dataclasses import dataclass
-from typing import Any
-
-
 @dataclass
 class FFTSpectrum:
     """Encapsulates pre-computed 2D FFT spectra with boundary padding and mask metadata."""
@@ -129,28 +87,6 @@ def precompute_fft_grid(
 ) -> tuple[FFTSpectrum, np.ndarray, float]:
     """
     Pre-computes 2D Forward FFT spectra with reflect boundary padding and spatial wavenumber grid.
-    Calling this ONCE before an optimization loop (e.g., kc frequency sweeps) eliminates
-    redundant N-D Fourier Transforms inside the loop, accelerating execution by 10x-50x.
-
-    Parameters
-    ----------
-    grid : 2D np.ndarray
-        Input surface grid to smooth.
-    dx : float
-        Grid spacing along X (columns).
-    dy : float
-        Grid spacing along Y (rows).
-    kc : float, optional
-        Filter corner frequency [rad/m] for dynamic padding calculation.
-
-    Returns
-    -------
-    spectrum : FFTSpectrum
-        Encapsulated shifted 2D Forward FFT spectra and padding metadata.
-    k_grid : 2D np.ndarray
-        2D spatial wavenumber magnitude grid [rad/m] for the padded spectrum.
-    k_max : float
-        Maximum grid wavenumber.
     """
     M, N = grid.shape
     nan_mask = np.isnan(grid)
@@ -200,21 +136,6 @@ def fft_gaussian_smooth_precomputed(
 ) -> np.ndarray:
     """
     Fast Gaussian low-pass filtering using pre-computed FFT spectra.
-    Applies Gaussian low-pass transfer function in frequency domain and unpads back to original grid shape.
-
-    Parameters
-    ----------
-    spectrum : FFTSpectrum or 2D np.ndarray
-        Pre-computed 2D FFT spectrum or FFTSpectrum object.
-    k_grid : 2D np.ndarray
-        Pre-computed 2D wavenumber magnitude grid.
-    kc : float
-        Filter corner frequency.
-
-    Returns
-    -------
-    grid_filtered : 2D np.ndarray
-        Smoothed surface grid in original spatial dimensions.
     """
     if isinstance(spectrum, FFTSpectrum):
         data_fft = spectrum.data_fft
@@ -265,29 +186,8 @@ def fft_gaussian_smooth(
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """
     Performs 2D spatial smoothing in the frequency domain using a Gaussian low-pass filter.
-    Ported from FFTSmooth.m.
-
-    Parameters
-    ----------
-    grid : 2D np.ndarray
-        Input surface grid to smooth.
-    dx : float
-        Grid spacing along X (columns).
-    dy : float
-        Grid spacing along Y (rows).
-    kc : float
-        Corner frequency for the Gaussian low-pass filter.
-
-    Returns
-    -------
-    grid_filtered : 2D np.ndarray
-        Smoothed surface grid.
-    k_grid : 2D np.ndarray
-        Wavenumber magnitude grid.
-    k_max : float
-        Maximum wavenumber.
     """
-    A_shift, k_grid, k_max = precompute_fft_grid(grid, dx=dx, dy=dy)
+    A_shift, k_grid, k_max = precompute_fft_grid(grid, dx=dx, dy=dy, kc=kc)
     grid_filtered = fft_gaussian_smooth_precomputed(A_shift, k_grid, kc=kc)
     return grid_filtered, k_grid, k_max
 

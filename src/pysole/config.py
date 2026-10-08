@@ -403,7 +403,7 @@ def main_cli() -> None:
     plan_parser = subparsers.add_parser("plan-survey", help="Run the unprobed glacier survey planner.")
     plan_parser.add_argument("--dem", required=True, help="Path to surface DEM raster.")
     plan_parser.add_argument("--outline", default=None, help="Path to glacier boundary outline.")
-    plan_parser.add_argument("--kc", type=float, default=0.5, help="DEM smoothing parameter k_c.")
+    plan_parser.add_argument("--kc", type=float, default=0.0314, help="FFT corner wavenumber cutoff k_c [rad/m] (default: 0.0314 rad/m, cutoff wavelength lambda_c ≈ 200m).")
     plan_parser.add_argument("--tau", type=float, default=100.0, help="Target basal shear stress tau_0 in kPa.")
     plan_parser.add_argument("--max-km", type=float, default=5.0, help="Maximum total survey length budget in km.")
     plan_parser.add_argument("--prefix", default="final", help="Output prefix.")

@@ -52,8 +52,8 @@ class SurveyPlanner:
         self,
         dem: np.ndarray | str | Path,
         outline: np.ndarray | str | Path | None = None,
-        dx: float = 10.0,
-        dy: float = 10.0,
+        dx: float | None = None,
+        dy: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         crs: Any = None,
         ice_density: float = 900.0,
@@ -64,11 +64,13 @@ class SurveyPlanner:
         else:
             self.dem = np.asarray(dem)
             ny, nx = self.dem.shape
-            computed_bounds = bounds or (0.0, 0.0, float(nx * dx), float(ny * dy))
-            self.meta = {"dx": dx, "dy": dy, "bounds": computed_bounds, "crs": crs}
+            eff_dx = dx if dx is not None else 10.0
+            eff_dy = dy if dy is not None else 10.0
+            computed_bounds = bounds or (0.0, 0.0, float(nx * eff_dx), float(ny * eff_dy))
+            self.meta = {"dx": eff_dx, "dy": eff_dy, "bounds": computed_bounds, "crs": crs}
 
-        self.dx = float(self.meta.get("dx", dx))
-        self.dy = float(self.meta.get("dy", dy))
+        self.dx = float(self.meta.get("dx", 10.0 if dx is None else dx))
+        self.dy = float(self.meta.get("dy", 10.0 if dy is None else dy))
         self.bounds = self.meta.get("bounds", bounds or (0.0, 0.0, float(self.dem.shape[1] * self.dx), float(self.dem.shape[0] * self.dy)))
         self.crs = self.meta.get("crs", crs)
 
@@ -232,7 +234,7 @@ class SurveyPlanner:
 
     def plan_survey(
         self,
-        kc: float = 0.5,
+        kc: float = 0.0314,
         tau_0: float = 100e3,
         max_length_km: float = 5.0,
         output_prefix: str = "final",

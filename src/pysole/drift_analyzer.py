@@ -64,6 +64,7 @@ class DriftAnalyzer:
         include_zero_boundary: bool = True,
         survey_profile_column: str | None = None,
         vif_threshold: float = 10.0,
+        slope_floor_deg: float = 5.0,
     ):
         self.mode = mode
         self.target_name = target_name
@@ -71,6 +72,7 @@ class DriftAnalyzer:
         self.include_zero_boundary = include_zero_boundary
         self.survey_profile_column = survey_profile_column
         self.vif_threshold = vif_threshold
+        self.slope_floor_deg = slope_floor_deg
 
     def calculate_vif(self, X_drift: np.ndarray) -> tuple[float, list[float]]:
         """
@@ -374,7 +376,8 @@ class DriftAnalyzer:
         """
         Executes complete diagnostic pipeline and handles interactive terminal session.
         """
-        target_descr = f"Product P(x,y) = {self.target_name[0].upper()}*sin(alpha)" if self.interpolation_target == "P" else f"Direct Field {self.interpolation_target}(x,y)"
+        t_char = "T" if "travel" in str(self.target_name).lower() else "D"
+        target_descr = f"Product P(x,y) = {t_char}*sin(alpha)" if self.interpolation_target == "P" else f"Direct Field {self.interpolation_target}(x,y)"
         logger.info(f"[INFO] DriftAnalyzer initialized (Mode: {self.mode.title()}, Target: {self.target_name} [{target_descr}], Boundary Conditions: {self.include_zero_boundary}).")
         logger.info(f"[INFO] Extracting spatial covariates (Z_dem, C_kc, sin(alpha_opt)^-1, X, Y) at N = {len(z_values)} sample locations...")
 
