@@ -95,6 +95,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enforced explicit `ValueError` validation when `lambda_min <= 0`, `lambda_max <= 0`, $k_{c,\text{min}} \le 0$, or $k_{c,\text{min}} \ge k_{c,\text{max}}$ (`N3-M7`).
   - Clamped $n_{\text{steps}}$ floor/ceiling to $[3, 50]$ (`N3-M6`).
 
+### Added / Fixed (Phase 7 Audit & Code Hardening — Pass 3 Low-Severity Findings)
+- **[Documentation & Schema Alignment] (`src/pysole/variogram.py`, `README.md`, `pysole.json`)**:
+  - Synchronized `calculate_variogram()` docstring to document `warn_low_pairs` default value as `True` (`N3-L1`).
+  - Updated `README.md` parameter table descriptions for `survey_data_path`, `fft_filter_metric`, and $n_{\text{steps}}$ (`np.geomspace` sampling).
+- **[Interactive CLI Test Rigor] (`tests/test_audit_regressions.py`)**:
+  - Renamed `test_run_from_config_batch_false` to `test_run_from_config_interactive_mode`, asserting non-TTY execution safety when `is_batch=False` (`N3-L2`).
+- **[Matplotlib Non-Interactive Backend Safeguards] (`src/pysole/plotting.py`)**:
+  - Added helper `_safe_interactive_pause()` in `src/pysole/plotting.py` wrapping `plt.draw()` and `plt.pause()`, preventing `UserWarning` / backend exceptions on non-GUI backends (`Agg`) (`N3-L3`).
+- **[Export Filename Prefix Cleaning] (`src/pysole/pipeline.py`)**:
+  - Cleaned redundant `"final_"` prefix additions in `PipelineExporter.export_raster()`, preventing duplicate `"final_final_..."` output filenames when `output_prefix` is `"final"` (`N3-L4`).
+
+
 
 
 ## [0.4.2] - 2026-10-07

@@ -35,7 +35,8 @@ class PipelineExporter:
         if grid is None:
             return None
         base_prefix = self.get_resolved_output_prefix()
-        filepath = f"{base_prefix}_{suffix}"
+        clean_suffix = suffix[6:] if (suffix.startswith("final_") and Path(base_prefix).name.lower().endswith("final")) else suffix
+        filepath = f"{base_prefix}_{clean_suffix}"
         fmt = self.outputs_cfg.output_format
         raster = BedrockMap(
             grid=grid,

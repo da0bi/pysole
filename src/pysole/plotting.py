@@ -31,6 +31,16 @@ def _save_figure(plt_obj, plots_dir: str | Path | os.PathLike | None, filename: 
     return target_path
 
 
+def _safe_interactive_pause(plt_obj: Any, duration: float = 0.5) -> None:
+    """Safe wrapper for interactive Matplotlib rendering that avoids warnings on Agg backend."""
+    try:
+        if str(matplotlib.get_backend()).lower() != "agg":
+            plt_obj.draw()
+            plt_obj.pause(duration)
+    except Exception:
+        pass
+
+
 def _get_transparent_cmap(cmap_name: str):
     """Returns a Matplotlib colormap with transparent NaN background."""
     cmap = plt.get_cmap(cmap_name).copy()
@@ -85,8 +95,7 @@ def plot_unfiltered_product_variogram(
         _save_figure(plt, plots_dir, f"{prefix}01_bss_{stage_name}_unfiltered_product_variogram.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.1)
+            _safe_interactive_pause(plt, 0.1)
 
         plt.close("Isotropic Variogram Analysis")
     except Exception as e:
@@ -141,8 +150,7 @@ def plot_bss_kc_optimization_variograms(
         _save_figure(plt, plots_dir, f"{prefix}02_bss_{stage_name}_kc_optimization_variograms.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.5)
+            _safe_interactive_pause(plt, 0.5)
 
         plt.close(fig)
     except Exception as e:
@@ -261,8 +269,7 @@ def plot_migration_displacement_vectors(
         _save_figure(plt, plots_dir, "02_01_eikonal_migration_displacement_vectors.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.5)
+            _safe_interactive_pause(plt, 0.5)
 
         plt.close(fig)
     except Exception as e:
@@ -321,8 +328,7 @@ def plot_kriging_bedrock_and_uncertainty(
         _save_figure(plt, plots_dir, "04_01_kriging_bedrock_elevation_and_uncertainty.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.5)
+            _safe_interactive_pause(plt, 0.5)
 
         plt.close(fig)
     except Exception as e:
@@ -396,8 +402,7 @@ def plot_calculated_bedrock_map(
         _save_figure(plt, plots_dir, "05_01_calculated_bedrock_map.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.5)
+            _safe_interactive_pause(plt, 0.5)
 
         plt.close(fig)
     except Exception as e:
@@ -426,8 +431,7 @@ def plot_final_blended_bedrock_map(
         _save_figure(plt, plots_dir, "06_01_final_blended_bedrock_map.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.5)
+            _safe_interactive_pause(plt, 0.5)
 
         plt.close(fig)
     except Exception as e:
@@ -500,8 +504,7 @@ def plot_final_ice_thickness_and_uncertainty(
         _save_figure(plt, plots_dir, "07_01_final_ice_thickness_map.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.5)
+            _safe_interactive_pause(plt, 0.5)
 
         plt.close(fig)
     except Exception as e:
@@ -564,8 +567,7 @@ def plot_final_ice_thickness_histogram(
         _save_figure(plt, plots_dir, "07_02_final_ice_thickness_histogram.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.5)
+            _safe_interactive_pause(plt, 0.5)
 
         plt.close(fig)
     except Exception as e:
@@ -641,8 +643,7 @@ def plot_final_basal_shear_stress_and_uncertainty(
         _save_figure(plt, plots_dir, "08_01_final_basal_shear_stress_map.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.5)
+            _safe_interactive_pause(plt, 0.5)
 
         plt.close(fig)
     except Exception as e:
@@ -705,8 +706,7 @@ def plot_final_basal_shear_stress_histogram(
         _save_figure(plt, plots_dir, "08_02_final_basal_shear_stress_histogram.png")
 
         if interactive:
-            plt.draw()
-            plt.pause(0.5)
+            _safe_interactive_pause(plt, 0.5)
 
         plt.close(fig)
     except Exception as e:

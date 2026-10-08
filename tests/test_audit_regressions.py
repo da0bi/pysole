@@ -149,8 +149,8 @@ class TestAuditRegressions(unittest.TestCase):
         np.testing.assert_allclose(a1, a2, rtol=1e-2)
         np.testing.assert_allclose(s1 * 100.0, s2, rtol=1e-2)
 
-    def test_run_from_config_batch_false(self):
-        """8. Verifies run_from_config(is_batch=False) does not raise NameError on sys."""
+    def test_run_from_config_interactive_mode(self):
+        """8. Verifies run_from_config(is_batch=False) in non-TTY mode automatically bypasses interactive prompts safely."""
         import json
         dem = np.full((20, 20), 2000.0)
         dem_path = self.output_dir / "dem.tif"

@@ -143,7 +143,7 @@ def calculate_variogram(
     precomputed_dists : np.ndarray, optional
         Pre-calculated pdist(coords) array to avoid redundant distance calculations.
     warn_low_pairs : bool, optional
-        If True, logs a warning if avg point pairs per bin is under 30. Defaults to False.
+        If True (default), logs a warning if avg point pairs per bin is under 30.
 
     Returns
     -------
