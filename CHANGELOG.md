@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.3] - 2026-10-08
 
+### Added / Fixed (Task C Release Preparation — Documentation & Examples Alignment)
+- **[Documentation & Examples Alignment — Bedrock Export & Schema Consistency] (`pysole.json`, `examples/wuk/pysole_wuk.json`, `examples/gok/pysole_gok.json`, `README.md`, `docs/drift_analyzer_&_survey_planner.md`)**:
+  - Synchronized JSON configuration templates and example benchmarks (`pysole.json`, `pysole_wuk.json`, `pysole_gok.json`) to explicitly include `"save_bedrock_elevation_map": true` under `"outputs"`.
+  - Updated `README.md` Parameter Reference table and JSON configuration snippet to document `save_bedrock_elevation_map` (`bool`, default `true`).
+  - Corrected parameter reference table descriptions for `post_migration.interpolation_target` (`"D"` for direct migrated depths) and `post_migration.drift_terms` (`"sia"` drift default for target `"D"`).
+  - Cleaned duplicate section entries in `README.md` parameter reference table.
+
 ### Added / Fixed (Task B Release Preparation — Profile Column LOPO & Model Standards)
 - **[Profile ID Ingestion & Factorization for LOPO-CV] (`src/pysole/raster.py`, `src/pysole/solver.py`, `src/pysole/migration.py`)**:
   - Enhanced `load_survey_points()` in `src/pysole/raster.py` using `pd.factorize()` to ingest string profile IDs (e.g., `"Line_1"`, `"track_A"`) as well as numeric profile IDs, cleanly encoding them into integer profile indices in column 4 (`pts[:, 4]`).

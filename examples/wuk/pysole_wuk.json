@@ -68,6 +68,7 @@
         "output_format": "tif",
         "output_prefix": "wuk_final",
         "plots_dir": "figures",
+        "save_bedrock_elevation_map": true,
         "save_traveltime_grid": false,
         "save_migrated_points": false,
         "save_thickness_grid": false,
