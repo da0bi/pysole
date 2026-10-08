@@ -1,0 +1,15 @@
+include LICENSE
+include README.md
+include CHANGELOG.md
+include pyproject.toml
+recursive-include src/pysole *.py py.typed
+
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude scratch *
+recursive-exclude logo *
+recursive-exclude matlab *
+recursive-exclude scripts *
+exclude git_token.txt
+exclude pypi_request.txt
+exclude pysole.log
