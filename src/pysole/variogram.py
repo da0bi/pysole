@@ -431,9 +431,14 @@ def optimize_bss_variance(
     else:
         n_steps_val = max(3, int(n_steps))
 
-    # Pre-filter valid survey points ONCE and compute distance matrix ONCE (only for N <= 5000 to avoid O(N^2) RAM footprint)
+    if survey_points is None or len(survey_points) == 0:
+        raise ValueError("Cannot optimize BSS variance: no survey points provided.")
+
     val_col = 3 if survey_points.shape[1] >= 4 else 2
     valid_pts_mask = ~np.isnan(survey_points[:, 0]) & ~np.isnan(survey_points[:, 1]) & (survey_points[:, val_col] > 0)
+    if not np.any(valid_pts_mask):
+        raise ValueError("Cannot optimize BSS variance: no valid positive survey points found in dataset.")
+
     pts_valid_coords = survey_points[valid_pts_mask, :2]
     survey_dists = pdist(pts_valid_coords) if (len(pts_valid_coords) >= 2 and len(pts_valid_coords) <= 5000) else None
 

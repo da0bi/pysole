@@ -175,7 +175,9 @@ class Solver:
 
         # Internal state
         self.survey_points: np.ndarray | None = None
+        self.pre_kriging_points: np.ndarray | None = None
         self.migrated_points: np.ndarray | None = None
+        self.drift_analyzer: bool = False
         self._traveltime_grid: np.ndarray | None = None
         self.opt_kc: float | None = None
         self.opt_slope: np.ndarray | None = None
@@ -592,12 +594,12 @@ class Solver:
         if cache_key in self._sample_pts_cache:
             return self._sample_pts_cache[cache_key]
 
-        pts = self.migrated_points if (stage_key == "post_migration" and self.migrated_points is not None) else getattr(self, "pre_kriging_points", None)
+        pts = self.migrated_points if (stage_key == "post_migration" and self.migrated_points is not None) else self.pre_kriging_points
         if pts is None:
             if stage_key == "post_migration" and self.migrated_points is not None:
                 pts = self.migrated_points
             else:
-                pts = getattr(self, "survey_points", None)
+                pts = self.survey_points
 
         if pts is None:
             raise ValueError(f"No survey/migrated points available to create sample points for stage '{stage_key}'.")

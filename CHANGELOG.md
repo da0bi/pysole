@@ -46,6 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[Visualization & Matplotlib] Safe Lazy Backend Selection (`src/pysole/plotting.py`)**:
   - Replaced top-level non-interactive Matplotlib backend override with safe lazy backend selection (`N-M12`).
 
+### Added / Fixed (Phase 3 Audit & Code Hardening — Low & Design Findings)
+- **[Solver State Plumbing] Explicit Attribute Initializations (`src/pysole/solver.py`)**:
+  - Initialized `self.pre_kriging_points`, `self.migrated_points`, and `self.drift_analyzer` explicitly in `Solver.__init__`, replacing dynamic `getattr` calls with direct attribute access (`N-L2`).
+- **[Code Purge] Legacy Dead Code Cleanup (`src/pysole/interpolation.py`, `src/pysole/drift_analyzer.py`)**:
+  - Removed unused function `get_drift_functions` from `interpolation.py` and purged its import from `drift_analyzer.py` (`N-L3`).
+- **[Input Ingestion & Validation] Strict Outline Validation & Empty Survey Point Guards (`src/pysole/raster.py`, `src/pysole/variogram.py`)**:
+  - Updated `load_outline()` to raise an explicit `ValueError` when `outline_path` does not exist or fails to parse (`N-L8`).
+  - Added explicit `ValueError` checks in `optimize_bss_variance()` when `survey_points` is empty or contains no valid positive depth measurements (`N-L5`).
+- **[Export Formats & Anisotropic Rasters] Automatic GeoTIFF Fallback for Anisotropic ESRI ASCII Grids (`src/pysole/raster.py`)**:
+  - Automatically converted `.asc` export requests to GeoTIFF (`.tif`) format with an explanatory warning when raster grid cells are anisotropic ($dx \neq dy$), preventing GIS spatial warping and coordinate distortion.
+- **[Spatial Interpolation & Margin Blending] 2D Anisotropic Sigma Tuple (`src/pysole/interpolation.py`)**:
+  - Scaled `gaussian_filter` `sigma` as a cell-size scaled 2D tuple `sigma=(sigma_y/dy, sigma_x/dx)` in `blend_margin_topography()`, preserving spatial smoothing geometry across anisotropic pixels (`M11`).
+
 ## [0.4.2] - 2026-10-07
 
 ### Added / Fixed (Wavelength Metric & Fallback Parameterization)

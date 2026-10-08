@@ -200,7 +200,41 @@ class BedrockMap:
             elif fmt in ["asc", "txt"]:
                 height, width = self.shape
                 minx, miny, maxx, maxy = self.bounds
-                cellsize = (maxx - minx) / float(width)
+                cellsize_x = (maxx - minx) / float(width)
+                cellsize_y = (maxy - miny) / float(height)
+
+                if abs(cellsize_x - cellsize_y) > 1e-4:
+                    tif_target_path = str(Path(abs_target_path).with_suffix(".tif"))
+                    logger.warning(
+                        f"ESRI ASCII grid (.asc) format requires square pixels (dx == dy), but raster is anisotropic "
+                        f"(dx = {cellsize_x:.2f}m, dy = {cellsize_y:.2f}m). Automatically converting export format "
+                        f"to GeoTIFF ('{tif_target_path}') to preserve 2D affine spatial transform and prevent GIS distortion."
+                    )
+                    import rasterio
+                    from rasterio.transform import from_bounds
+
+                    transform = self.transform
+                    if transform is None:
+                        transform = from_bounds(*self.bounds, width, height)
+                    if self.crs is None:
+                        logger.warning(f"Exporting GeoTIFF '{tif_target_path}' without Coordinate Reference System (CRS) metadata.")
+
+                    grid_export = self.grid[::-1, :]
+                    with rasterio.open(
+                        tif_target_path,
+                        "w",
+                        driver="GTiff",
+                        height=height,
+                        width=width,
+                        count=1,
+                        dtype=self.grid.dtype,
+                        crs=self.crs,
+                        transform=transform,
+                        nodata=np.nan,
+                    ) as dst:
+                        dst.write(grid_export, 1)
+                    saved_files.append(tif_target_path)
+                    continue
 
                 grid_asc = np.nan_to_num(self.grid[::-1, :], nan=-9999.0)
                 header = (
@@ -208,7 +242,7 @@ class BedrockMap:
                     f"nrows         {height}\n"
                     f"xllcorner     {minx:.6f}\n"
                     f"yllcorner     {miny:.6f}\n"
-                    f"cellsize      {cellsize:.6f}\n"
+                    f"cellsize      {cellsize_x:.6f}\n"
                     f"NODATA_value  -9999"
                 )
                 np.savetxt(abs_target_path, grid_asc, header=header, comments="", fmt="%.4f")
@@ -689,7 +723,12 @@ def load_outline(
     height, width = dem_grid.shape
     bounds = meta.get("bounds", (0.0, 0.0, float(width), float(height)))
 
-    ext = Path(outline_input).suffix.lower()
+    if isinstance(outline_input, (str, Path, os.PathLike)):
+        p = Path(outline_input).expanduser()
+        if not p.exists():
+            raise ValueError(f"Boundary outline file does not exist: {p.resolve()}")
+
+    ext = Path(outline_input).suffix.lower() if isinstance(outline_input, (str, Path, os.PathLike)) else ""
 
     # 1. Shapefile / GeoJSON / GeoPackage vector polygons with interior holes (nunataks)
     if ext in [".shp", ".geojson", ".gpkg"]:
@@ -722,7 +761,7 @@ def load_outline(
         except ValueError:
             raise
         except Exception as e:
-            logger.warning(f"Vector outline parsing failed for '{outline_input}': {e}. Falling back to text coordinate parser.")
+            raise ValueError(f"Vector outline parsing failed for '{outline_input}': {e}")
 
     # 2. Text / CSV polygon coordinates (supports NaN-separated exterior and interior hole rings & text headers)
     try:
@@ -776,7 +815,7 @@ def load_outline(
 
                 return outer_mask & ~hole_mask
     except Exception as e:
-        logger.warning(f"Text/CSV outline parsing failed for '{outline_input}': {e}. Defaulting to DEM NaN boundary.")
+        raise ValueError(f"Outline parsing failed for '{outline_input}': {e}")
 
     return ~np.isnan(dem_grid)
 

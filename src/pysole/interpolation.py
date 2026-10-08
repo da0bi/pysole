@@ -199,8 +199,8 @@ def blend_margin_topography(
     weight = np.clip(dist_from_margin / max(margin_width, 1e-6), 0.0, 1.0)
     weight = 0.5 * (1.0 - np.cos(np.pi * weight))
 
-    tapered_thickness = thickness_grid * weight
-    smoothed_thickness = gaussian_filter(tapered_thickness, sigma=1.0)
+    sigma_px = (max(margin_width / (3.0 * abs(dy)), 0.5), max(margin_width / (3.0 * abs(dx)), 0.5))
+    smoothed_thickness = gaussian_filter(tapered_thickness, sigma=sigma_px)
     final_thickness = weight * thickness_grid + (1.0 - weight) * smoothed_thickness
     final_thickness[~boundary_mask] = 0.0
 
@@ -972,26 +972,7 @@ class DriftBasis:
         return np.column_stack(cols)
 
 
-def get_drift_functions(drift_terms: list[str]) -> list[Any]:
-    """
-    Returns spatial drift basis functions for given drift term keywords.
-    Each function has signature fn(x_pts, y_pts, dem_grid, dx, dy, bounds, alpha_opt_deg).
-    """
-    basis_temp = DriftBasis(
-        drift_terms=drift_terms,
-        x_ref=np.array([0.0, 100.0]),
-        y_ref=np.array([0.0, 100.0]),
-    )
-    funcs = []
-    for idx, fn in enumerate(basis_temp.evaluators):
-        def _make_eval(i):
-            return lambda x, y, dem, dx, dy, b, a: fn(x, y)
-        funcs.append(_make_eval(idx))
 
-    if not funcs:
-        funcs.append(lambda x, y, dem, dx, dy, b, a: (x - np.mean(x)) / max(np.ptp(x), 1.0))
-
-    return funcs
 
 
 class DualKrigingSolver:

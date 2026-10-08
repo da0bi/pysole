@@ -11,11 +11,10 @@ import sys
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.linalg import LinAlgError
 from sklearn.ensemble import RandomForestRegressor
 
 from .logging import logger
-from .interpolation import DriftBasis, DualKrigingSolver, get_drift_functions
+from .interpolation import DriftBasis, DualKrigingSolver
 
 
 @dataclass
