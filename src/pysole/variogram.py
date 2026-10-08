@@ -405,19 +405,37 @@ def optimize_bss_variance(
         f"k_Nyquist = {k_nyquist:.4f} rad/m, λ_Nyquist = {lambda_nyquist:.1f} m"
     )
 
-    use_wavelength = (
-        str(fft_filter_metric).lower().strip() == "wavelength"
-        or lambda_min is not None
-        or lambda_max is not None
-    )
+    use_wavelength = (str(fft_filter_metric).lower().strip() == "wavelength")
+
+    if lambda_min is not None and float(lambda_min) <= 0:
+        raise ValueError(f"Minimum cutoff wavelength lambda_min ({lambda_min}) must be strictly positive (> 0).")
+    if lambda_max is not None and float(lambda_max) <= 0:
+        raise ValueError(f"Maximum cutoff wavelength lambda_max ({lambda_max}) must be strictly positive (> 0).")
 
     kc_max_default = float(kc_max) if kc_max is not None else k_nyquist
     kc_min_default = float(kc_min) if kc_min is not None else (4.0 * np.pi / L_max)
 
-    kc_max_val = (2.0 * np.pi / float(lambda_min)) if lambda_min is not None else kc_max_default
-    kc_min_val = (2.0 * np.pi / float(lambda_max)) if lambda_max is not None else kc_min_default
+    if use_wavelength:
+        if (kc_max is not None or kc_min is not None) and (lambda_min is not None or lambda_max is not None):
+            logger.info("   [BSS Optimization] fft_filter_metric is 'wavelength'. Using lambda_min/lambda_max parameters for cutoff frequency search bounds.")
+        kc_max_val = (2.0 * np.pi / float(lambda_min)) if lambda_min is not None else kc_max_default
+        kc_min_val = (2.0 * np.pi / float(lambda_max)) if lambda_max is not None else kc_min_default
+    else:
+        if (lambda_min is not None or lambda_max is not None) and (kc_max is not None or kc_min is not None):
+            logger.info("   [BSS Optimization] fft_filter_metric is 'wavenumber'. Using kc_max/kc_min parameters for cutoff frequency search bounds.")
+        kc_max_val = float(kc_max) if kc_max is not None else ((2.0 * np.pi / float(lambda_min)) if lambda_min is not None else kc_max_default)
+        kc_min_val = float(kc_min) if kc_min is not None else ((2.0 * np.pi / float(lambda_max)) if lambda_max is not None else kc_min_default)
+
+    if lambda_min is not None and (2.0 * np.pi / float(lambda_min)) > k_nyquist:
+        logger.warning(
+            f"   [BSS Optimization Warning] Minimum cutoff wavelength lambda_min ({float(lambda_min):.1f} m) "
+            f"is smaller than grid Nyquist wavelength ({lambda_nyquist:.1f} m). Clamping kc_max to Nyquist limit ({k_nyquist:.4f} rad/m)."
+        )
 
     kc_max_val = min(kc_max_val, k_nyquist)
+
+    if kc_min_val <= 0:
+        raise ValueError(f"Minimum corner frequency kc_min ({kc_min_val:.4f} rad/m) must be strictly positive (> 0).")
 
     if kc_min_val >= kc_max_val:
         raise ValueError(
@@ -429,7 +447,7 @@ def optimize_bss_variance(
         n_modes = int(np.floor((kc_max_val - kc_min_val) * L_max / (2.0 * np.pi)))
         n_steps_val = int(np.clip(n_modes, 10, 50))
     else:
-        n_steps_val = max(3, int(n_steps))
+        n_steps_val = int(np.clip(n_steps, 3, 50))
 
     if survey_points is None or len(survey_points) == 0:
         raise ValueError("Cannot optimize BSS variance: no survey points provided.")
@@ -543,7 +561,7 @@ def optimize_bss_variance(
             except Exception as e:
                 logger.warning(f"Input error, using defaults: {e}")
 
-        kc_values = np.linspace(kc_max_val, kc_min_val, n_steps_val)
+        kc_values = np.geomspace(kc_max_val, kc_min_val, n_steps_val)
 
         step_variances = []
         evaluated_variograms = []
@@ -711,6 +729,12 @@ def optimize_bss_variance(
         best_key = round(float(best_kc), 6)
         all_smoothed_dems = {best_key: best_dem_grid} if best_dem_grid is not None else {}
         all_smoothed_slopes = {best_key: best_slope_grid} if best_slope_grid is not None else {}
+
+    if best_kc is not None and (np.isclose(best_kc, kc_max_val, rtol=1e-3) or np.isclose(best_kc, kc_min_val, rtol=1e-3)):
+        logger.warning(
+            f"   [BSS Optimization Warning] Optimal corner frequency k_c = {best_kc:.4f} rad/m "
+            f"reached search boundary [{kc_min_val:.4f}, {kc_max_val:.4f}] rad/m. Consider expanding search range."
+        )
 
     opt_wl = compute_cutoff_wavelength(best_kc)
     logger.info(f"   Optimal Corner Frequency k_c = {best_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")

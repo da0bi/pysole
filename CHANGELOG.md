@@ -81,6 +81,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Expanded compound drift aliases (`sia_space`, `full_spatial_physical`, `sia_z_dem`, `sia_curvature_dem`, `z_dem_curvature_dem`, `full_physical`) into explicit primitive basis terms (`drift_terms=list(expanded_primitives)`) when invoking `built_in_kriging_interpolation()`, ensuring spatial polynomial terms (`linear_xy`) are explicitly assembled in the Kriging system (`N3-H2`).
   - Enforced explicit `ValueError` guards when required external drift rasters (surface DEM `dem_grid` or slope grid `opt_slope_grid`) are missing under Universal/SIA/Elevation Kriging modes, or when `drift_terms` is empty, eliminating silent fallbacks to quadratic spatial drift.
 
+### Added / Fixed (Phase 6 Audit & Code Hardening — Pass 3 Medium-Severity Findings)
+- **[Wavelength Metric Precedence & Wavenumber Conversions] (`src/pysole/variogram.py`)**:
+  - Retained user-facing cutoff wavelength parameters (`lambda_min`, `lambda_max` in meters) as intuitive user abstractions, converting them to angular spatial wavenumbers ($k_c = 2\pi / \lambda$) immediately upon ingestion for FFT filtering (`N3-M1`).
+  - Implemented explicit fallback to baseline $k_c$ defaults when `fft_filter_metric == "wavelength"` and `lambda_min`/`lambda_max` are omitted (`None`), and logged informational precedence warnings when conflicting bounds are supplied.
+- **[Log-Uniform Wavenumber Sampling & Boundary Warning] (`src/pysole/variogram.py`)**:
+  - Replaced linear $k_c$ search grid (`np.linspace`) with geometric spacing (`np.geomspace`), providing uniform sampling density across logarithmic wavelength space ($\log \lambda_c$) (`N3-M2`).
+  - Added warning logging when optimal corner frequency $k_c$ lands on a search boundary ($k_{c,\text{min}}$ or $k_{c,\text{max}}$).
+- **[Output Directory Resolution Plumbing] (`src/pysole/pipeline.py`)**:
+  - Corrected `resolve_output_dir()` argument resolution to read `outputs.output_dir` from configuration schema, ensuring `pysole.log` and figure outputs are written strictly to the designated output folder (`N3-M3`).
+- **[Low-Pass Filter Semantics & Boundary Validation] (`src/pysole/smoothing.py`, `src/pysole/variogram.py`)**:
+  - Enforced strict validation on $k_c$: raises `ValueError` for $k_c < 0$ and extracts spatial mean DC field for $k_c = 0$ (`N3-M4`).
+  - Enforced explicit `ValueError` validation when `lambda_min <= 0`, `lambda_max <= 0`, $k_{c,\text{min}} \le 0$, or $k_{c,\text{min}} \ge k_{c,\text{max}}$ (`N3-M7`).
+  - Clamped $n_{\text{steps}}$ floor/ceiling to $[3, 50]$ (`N3-M6`).
+
+
 
 ## [0.4.2] - 2026-10-07
 

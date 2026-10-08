@@ -139,7 +139,7 @@ def run_from_config(
 
     log_lvl = log_level if log_level is not None else inputs_cfg.get("log_level", "INFO")
 
-    output_dir = resolve_output_dir(inputs_cfg.get("output_dir"), config_file)
+    output_dir = resolve_output_dir(outputs_cfg.get("output_dir") or inputs_cfg.get("output_dir"), config_file)
     log_file = output_dir / "pysole.log"
 
     setup_logging(log_file=log_file, log_level=log_lvl)

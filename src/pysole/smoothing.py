@@ -152,8 +152,11 @@ def fft_gaussian_smooth_precomputed(
         has_nans = False
         nan_mask = None
 
-    if kc <= 0:
-        filt = np.ones_like(k_grid, dtype=np.float64)
+    if kc < 0:
+        raise ValueError(f"Invalid corner frequency kc={kc}. Corner frequency must be non-negative (kc >= 0).")
+    elif kc == 0:
+        filt = np.zeros_like(k_grid, dtype=np.float64)
+        filt[k_grid == 0] = 1.0
     else:
         filt = np.exp(-(k_grid**2) / (2.0 * (kc**2)))
 
