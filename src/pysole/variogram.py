@@ -139,7 +139,7 @@ def calculate_variogram(
         Maximum lag distance. Defaults to half the maximum pairwise distance.
     nrbins : int, optional
         Number of distance lag bins. If None, dynamically calculated as
-        max(3, N_pairs // 30) (~30 point pairs per bin, floor of 3 bins).
+        min(30, max(3, in_range_pairs // 30)) (~30 point pairs per bin, floor of 3, cap of 30).
     precomputed_dists : np.ndarray, optional
         Pre-calculated pdist(coords) array to avoid redundant distance calculations.
     warn_low_pairs : bool, optional
@@ -162,7 +162,7 @@ def calculate_variogram(
         calc_maxdist = 0.5 * float(np.max(sub_dists)) if (maxdist is None or maxdist <= 0) else float(maxdist)
 
         n_pairs = (n_pts * (n_pts - 1)) // 2
-        max_bins_for_30_pairs = max(3, n_pairs // 30)
+        max_bins_for_30_pairs = min(30, max(3, n_pairs // 30))
         actual_nrbins = max_bins_for_30_pairs if (nrbins is None or nrbins <= 0) else max(3, int(nrbins))
 
         bins = np.linspace(0, calc_maxdist, actual_nrbins + 1)

@@ -665,10 +665,10 @@ def kriging_interpolation(
             f"Invalid Kriging engine '{engine}'. Supported engines: 'native', 'pykrige'."
         )
 
-    valid_variogram_models = {"spherical", "exponential", "gaussian"}
+    valid_variogram_models = {"spherical", "exponential", "gaussian", "linear"}
     if var_model_clean not in valid_variogram_models:
         raise ValueError(
-            f"Invalid variogram model '{variogram_model}'. Supported models: 'spherical', 'exponential', 'gaussian'."
+            f"Invalid variogram model '{variogram_model}'. Supported models: 'spherical', 'exponential', 'gaussian', 'linear'."
         )
 
     external_drift_grids: dict[str, np.ndarray] = {}

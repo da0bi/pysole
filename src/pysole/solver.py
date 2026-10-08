@@ -613,6 +613,7 @@ class Solver:
             self.optimize_bss(prefix=prefix)
 
         val_col = 3 if pts.shape[1] >= 4 else 2
+        has_prof = (pts.shape[1] >= 5)
 
         if target_upper == "P":
             opt_slope_sin = np.sin(self.opt_slope)
@@ -623,9 +624,15 @@ class Solver:
             slopes_pts = np.maximum(np.nan_to_num(slopes_pts, nan=min_slope_sin), min_slope_sin)
 
             product_values = pts[:, val_col] * slopes_pts
-            sample_pts = np.column_stack((pts[:, 0], pts[:, 1], product_values))
+            if has_prof:
+                sample_pts = np.column_stack((pts[:, 0], pts[:, 1], product_values, pts[:, 4]))
+            else:
+                sample_pts = np.column_stack((pts[:, 0], pts[:, 1], product_values))
         else:
-            sample_pts = np.column_stack((pts[:, 0], pts[:, 1], pts[:, val_col]))
+            if has_prof:
+                sample_pts = np.column_stack((pts[:, 0], pts[:, 1], pts[:, val_col], pts[:, 4]))
+            else:
+                sample_pts = np.column_stack((pts[:, 0], pts[:, 1], pts[:, val_col]))
 
         self._sample_pts_cache[cache_key] = sample_pts
         return sample_pts
@@ -660,7 +667,7 @@ class Solver:
                 )
 
         pass_cfg = self.config.get("kriging_parameters", {}).get(stage_key, {})
-        run_analyzer = pass_cfg.get("drift_analyzer", False)
+        run_analyzer = bool(pass_cfg.get("drift_analyzer", False) or getattr(self, "drift_analyzer", False))
 
         if krig_method.lower() == "ordinary":
             if run_analyzer:
@@ -687,7 +694,7 @@ class Solver:
 
             var_params = {"nugget": 0.0, "sill": 1.0, "range": a_0}
             alpha_deg = np.degrees(self.opt_slope) if self.opt_slope is not None else np.zeros_like(self.dem_grid)
-            prof_data = sample_pts[:, 4] if (prof_col and sample_pts is not None and sample_pts.shape[1] >= 5) else None
+            prof_data = sample_pts[:, 3] if (sample_pts is not None and sample_pts.shape[1] >= 4) else None
 
             diag = analyzer.run_diagnostics(
                 x_pts=sample_pts[:, 0],

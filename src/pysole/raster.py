@@ -840,7 +840,11 @@ def load_survey_points(
                 import pandas as pd
                 df_prof = pd.read_csv(filepath)
                 if profile_column in df_prof.columns:
-                    prof_arr = pd.to_numeric(df_prof[profile_column], errors="coerce").to_numpy(dtype=np.float64)
+                    s_prof = df_prof[profile_column]
+                    if s_prof.dtype == object or any(isinstance(v, str) for v in s_prof.dropna().head(10)):
+                        prof_arr = pd.factorize(s_prof)[0].astype(np.float64)
+                    else:
+                        prof_arr = pd.to_numeric(s_prof, errors="coerce").to_numpy(dtype=np.float64)
             except Exception:
                 pass
         try:
@@ -877,11 +881,15 @@ def load_survey_points(
             raise ValueError(err_msg)
 
     # 3-column point set [X, Y, value] -> sample surface DEM elevation Z for column 3
-    if pts.shape[1] == 3 and dem_grid is not None and x_coords is not None and y_coords is not None:
-        interp_z = RegularGridInterpolator((y_coords, x_coords), dem_grid, bounds_error=False, fill_value=np.nan)
-        pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
-        z_surf = interp_z(pts_xy)
-        pts = np.column_stack((pts[:, 0], pts[:, 1], z_surf, pts[:, 2]))
+    if pts.shape[1] == 3:
+        if dem_grid is not None and x_coords is not None and y_coords is not None:
+            interp_z = RegularGridInterpolator((y_coords, x_coords), dem_grid, bounds_error=False, fill_value=np.nan)
+            pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
+            z_surf = interp_z(pts_xy)
+            pts = np.column_stack((pts[:, 0], pts[:, 1], z_surf, pts[:, 2]))
+        else:
+            z_surf = np.full(len(pts), np.nan)
+            pts = np.column_stack((pts[:, 0], pts[:, 1], z_surf, pts[:, 2]))
 
     if prof_arr is not None and len(prof_arr) == len(pts) and pts.shape[1] == 4:
         pts = np.column_stack((pts, prof_arr))
@@ -902,7 +910,10 @@ def load_survey_points(
                 mask = (inverse_indices == idx)
                 consolidated[idx, :2] = pts[mask, :2].mean(axis=0)
                 for col in range(2, n_cols):
-                    consolidated[idx, col] = np.nanmean(pts[mask, col])
+                    if col == 4:  # discrete profile ID
+                        consolidated[idx, col] = pts[mask, col][0]
+                    else:
+                        consolidated[idx, col] = np.nanmean(pts[mask, col])
             pts = consolidated
 
     return pts

@@ -219,7 +219,10 @@ def migrate_eikonal_points(
     nan_z = np.isnan(z_surf_mig)
     z_surf_mig[nan_z] = survey_points[nan_z, 2]
 
-    migrated_points = np.column_stack((x_mig, y_mig, z_surf_mig, d_mig))
+    if survey_points.shape[1] >= 5:
+        migrated_points = np.column_stack((x_mig, y_mig, z_surf_mig, d_mig, survey_points[:, 4]))
+    else:
+        migrated_points = np.column_stack((x_mig, y_mig, z_surf_mig, d_mig))
 
     # 6. Plot 3D Migration Displacement Vectors matching MIG.m
     should_plot = interactive or (plots_dir is not None)

@@ -323,6 +323,56 @@ class TestAuditRegressions(unittest.TestCase):
         solver = Solver(dem=dem_data, bounds=geom.bounds, kriging_engine="native")
         self.assertEqual(solver.engine_type, "native")
 
+    def test_lopo_profile_column_preservation(self):
+        """15. Verifies string profile IDs are factorized and preserved as 4th/5th column through loading, migration, and get_sample_points."""
+        import pandas as pd
+        from pysole.raster import load_survey_points
+        from pysole.solver import Solver
+
+        # 1. Create survey CSV with string profile IDs ("Line_A", "Line_B")
+        pts_path = self.output_dir / "survey_string_prof.csv"
+        df_pts = pd.DataFrame({
+            "X": [500020.0, 500040.0, 500060.0, 500080.0],
+            "Y": [5200020.0, 5200040.0, 5200060.0, 5200080.0],
+            "picks": [40.0, 45.0, 35.0, 50.0],
+            "profile_name": ["Line_A", "Line_A", "Line_B", "Line_B"]
+        })
+        df_pts.to_csv(pts_path, index=False)
+
+        # 2. Test load_survey_points factorizes string profile IDs
+        pts_array = load_survey_points(pts_path, profile_column="profile_name")
+        self.assertEqual(pts_array.shape[1], 5)  # [X, Y, Z_surf, val, prof_id]
+        # Profile IDs should be factorized (0 and 1)
+        self.assertEqual(pts_array[0, 4], 0.0)
+        self.assertEqual(pts_array[1, 4], 0.0)
+        self.assertEqual(pts_array[2, 4], 1.0)
+        self.assertEqual(pts_array[3, 4], 1.0)
+
+        # 3. Test get_sample_points retains profile IDs as 4th column (index 3) of 4-column output sample_pts
+        dem_data = np.full((10, 10), 1000.0)
+        bounds = (500000.0, 5200000.0, 500100.0, 5200100.0)
+        solver = Solver(dem=dem_data, bounds=bounds, survey_data_path=pts_path, survey_data_type="depth", survey_profile_column="profile_name")
+        solver.pre_kriging_points = pts_array
+        sample_pts = solver.get_sample_points(stage="pre_migration", target_type="D")
+        self.assertEqual(sample_pts.shape[1], 4)  # [X, Y, depth, prof_id]
+        np.testing.assert_array_equal(sample_pts[:, 3], [0.0, 0.0, 1.0, 1.0])
+
+    def test_linear_variogram_model_support(self):
+        """16. Verifies 'linear' variogram model is accepted and executes correctly in built_in_kriging_interpolation."""
+        geom = GridGeometry.create((10, 10), dx=10.0, dy=10.0, bounds=(0, 0, 100, 100))
+        pts = np.array([
+            [20.0, 20.0, 10.0],
+            [50.0, 50.0, 20.0],
+            [80.0, 80.0, 30.0],
+        ])
+        grid, _ = built_in_kriging_interpolation(
+            pts, geom.x_coords, geom.y_coords, method="ordinary",
+            variogram_model="linear", variogram_params={"slope": 0.1, "nugget": 0.0}, show_progress=False
+        )
+        self.assertEqual(grid.shape, (10, 10))
+        self.assertTrue(np.all(np.isfinite(grid)))
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.3] - 2026-10-08
 
+### Added / Fixed (Task B Release Preparation — Profile Column LOPO & Model Standards)
+- **[Profile ID Ingestion & Factorization for LOPO-CV] (`src/pysole/raster.py`, `src/pysole/solver.py`, `src/pysole/migration.py`)**:
+  - Enhanced `load_survey_points()` in `src/pysole/raster.py` using `pd.factorize()` to ingest string profile IDs (e.g., `"Line_1"`, `"track_A"`) as well as numeric profile IDs, cleanly encoding them into integer profile indices in column 4 (`pts[:, 4]`).
+  - Preserved profile IDs during spatial point deduplication (`col == 4`).
+  - Retained profile IDs in `Solver.get_sample_points()` as the 4th column (`sample_pts[:, 3]`) when `survey_profile_column` is specified.
+  - Retained 5th column profile IDs through `migrate_eikonal_points()` and 3D ray migration.
+  - Enabled Leave-One-Profile-Out (LOPO) cross-validation for arbitrary string profile column identifiers in `recommend_drift_model()`.
+- **[Linear Variogram Model Support] (`src/pysole/interpolation.py`)**:
+  - Added `"linear"` to `valid_variogram_models` in `built_in_kriging_interpolation()`.
+- **[Variogram Binning Formula Standardization] (`src/pysole/variogram.py`)**:
+  - Standardized `nrbins` default formula to `min(30, max(3, in_range_pairs // 30))` in docstrings and $N > 5000$ chunked distance calculation routines.
+- **[CLI Parameter & Logging Precedence] (`src/pysole/config.py`)**:
+  - Verified `main_cli()` log level override ensuring command-line flags (`--verbose`, `--debug`) strictly supersede configuration file settings.
+- **[Documentation Typo Alignment] (`README.md`)**:
+  - Corrected `post_migration.interpolation_target` parameter reference description to `"D"` (thickness target).
+- **[Task B Unit Tests] (`tests/test_audit_regressions.py`)**:
+  - Added regression test cases `test_lopo_profile_column_preservation` and `test_linear_variogram_model_support`.
+
 ### Added / Fixed (Task A Release Preparation — Core Export & Engine Plumbing)
 - **[Default Bedrock Elevation Raster Export] (`src/pysole/pipeline.py`, `src/pysole/solver.py`, `src/pysole/config.py`)**:
   - Wired `run_from_config()` and `Solver.export_outputs("finalization")` to export the predicted bedrock elevation raster `<output_prefix>_bedrock.<ext>` by default when `save_bedrock_elevation_map` is `True` (`B1`).
