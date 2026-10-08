@@ -71,8 +71,12 @@ class EikonalMigrator:
 
     def migrate_points(self, points: np.ndarray, velocity: float = 0.16) -> np.ndarray:
         """Alias method for 3D Eikonal ray migration on a survey point set."""
-        tt_dummy = np.zeros_like(self.dem)
-        res = self.migrate(travel_time_grid=tt_dummy, survey_points=points, velocity=velocity, show_progress=False)
+        if len(points) > 0 and points.shape[1] >= 4 and not np.all(np.isnan(points[:, 3])):
+            mean_tt = float(np.nanmean(points[:, 3]))
+            tt_grid = np.full_like(self.dem, mean_tt)
+        else:
+            tt_grid = np.zeros_like(self.dem)
+        res = self.migrate(travel_time_grid=tt_grid, survey_points=points, velocity=velocity, show_progress=False)
         return res.migrated_points
 
 

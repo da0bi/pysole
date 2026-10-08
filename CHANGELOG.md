@@ -59,6 +59,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[Spatial Interpolation & Margin Blending] 2D Anisotropic Sigma Tuple (`src/pysole/interpolation.py`)**:
   - Scaled `gaussian_filter` `sigma` as a cell-size scaled 2D tuple `sigma=(sigma_y/dy, sigma_x/dx)` in `blend_margin_topography()`, preserving spatial smoothing geometry across anisotropic pixels (`M11`).
 
+### Added / Fixed (Phase 4 Audit & Code Hardening — Regression Tests)
+- **[Analytical 3D Eikonal Ray Migration Test Suite] Plane-over-Plane Solutions (`tests/test_eikonal_migration_plane.py`)**:
+  - Created a dedicated unit test suite validating 3D Eikonal ray displacement vectors against 6 closed-form analytical plane-over-plane geometries:
+    - **Case 1**: Flat Horizontal Surface & Flat Bedrock (Pure Vertical Displacement)
+    - **Case 2**: X-Inclined Surface & Parallel Bedrock
+    - **Case 3**: Y-Inclined Surface & Parallel Bedrock
+    - **Case 4**: Oblique ($X+Y$) Inclined Surface & Parallel Bedrock
+    - **Case 5**: Non-Parallel Plane (Diverging Bedrock Slope)
+    - **Case 6**: Non-Parallel Plane (Opposite Bedrock Slope)
+- **[Audit Regression Test Suite Hardening] (`tests/test_audit_regressions.py`, `src/pysole/migration.py`)**:
+  - Updated `EikonalMigrator.migrate_points()` to construct non-zero traveltime grids from scattered point observations, enabling direct ray displacement calculations on point sets.
+  - Strengthened `test_run_from_config_batch_false` with TTY stdin mocking.
+  - Refined multi-drift compound expansion and ray migration assertions across `test_audit_regressions.py`.
+
 ## [0.4.2] - 2026-10-07
 
 ### Added / Fixed (Wavelength Metric & Fallback Parameterization)
