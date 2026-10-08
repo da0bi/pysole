@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.3] - 2026-10-08
 
+### Added / Fixed (Task D Release Preparation — Code Quality & Deprecation Hardening)
+- **[Code Quality & NumPy 2.5 Deprecation Fixes] (`src/pysole/raster.py`)**:
+  - Replaced `np.ascontiguousarray(src.read(1), dtype=np.float64)` with `np.array(src.read(1), dtype=np.float64)` in `load_dem()`, eliminating the NumPy 2.5 shape assignment deprecation warning (`DeprecationWarning: Setting the shape on a NumPy array has been deprecated`).
+  - Audited codebase across all 11 core modules, confirming 100% clean Python bytecode compilation (`py_compile`) and test suite execution.
+
 ### Added / Fixed (Task C Release Preparation — Documentation & Examples Alignment)
 - **[Documentation & Examples Alignment — Bedrock Export & Schema Consistency] (`pysole.json`, `examples/wuk/pysole_wuk.json`, `examples/gok/pysole_gok.json`, `README.md`, `docs/drift_analyzer_&_survey_planner.md`)**:
   - Synchronized JSON configuration templates and example benchmarks (`pysole.json`, `pysole_wuk.json`, `pysole_gok.json`) to explicitly include `"save_bedrock_elevation_map": true` under `"outputs"`.
