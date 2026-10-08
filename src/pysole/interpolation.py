@@ -697,6 +697,9 @@ def kriging_interpolation(
             else:
                 raise ValueError(f"Unknown drift term '{term}'. Supported terms: {sorted(DriftBasis.SUPPORTED_TERMS)}")
 
+    if method_clean == "sia":
+        expanded_primitives.add("sia")
+
     is_sia_mode = "sia" in expanded_primitives
     is_z_dem_mode = "z_dem" in expanded_primitives
     is_curvature_mode = "curvature_dem" in expanded_primitives
@@ -715,12 +718,23 @@ def kriging_interpolation(
             min_slope_sin = np.sin(np.radians(slope_floor_deg))
             safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
             external_drift_grids["sia"] = 1.0 / safe_slope_grid
+        else:
+            raise ValueError("Universal Kriging with 'sia' drift requested, but neither surface DEM grid nor slope grid was provided.")
 
-    if is_z_dem_mode and "z_dem" not in external_drift_grids and dem_grid is not None and dem_grid.shape == (M, N):
-        external_drift_grids["z_dem"] = dem_grid
+    if is_z_dem_mode and "z_dem" not in external_drift_grids:
+        if dem_grid is not None and dem_grid.shape == (M, N):
+            external_drift_grids["z_dem"] = dem_grid
+        else:
+            raise ValueError("Universal Kriging with 'z_dem' elevation drift requested, but surface DEM grid was not provided.")
 
-    if is_curvature_mode and "curvature_dem" not in external_drift_grids and dem_grid is not None and dem_grid.shape == (M, N):
-        external_drift_grids["curvature_dem"] = compute_surface_curvature(dem_grid, dx=geometry.dx, dy=geometry.dy)
+    if is_curvature_mode and "curvature_dem" not in external_drift_grids:
+        if dem_grid is not None and dem_grid.shape == (M, N):
+            external_drift_grids["curvature_dem"] = compute_surface_curvature(dem_grid, dx=geometry.dx, dy=geometry.dy)
+        else:
+            raise ValueError("Universal Kriging with 'curvature_dem' drift requested, but surface DEM grid was not provided.")
+
+    if method_clean in ["universal", "universal_kriging"] and drift_terms is not None and len(drift_terms) == 0 and not external_drift_grids:
+        raise ValueError("Universal Kriging requested with empty drift_terms and no external drift grids.")
 
     has_ext_drifts = len(external_drift_grids) > 0
 
@@ -742,7 +756,7 @@ def kriging_interpolation(
             method="sia" if has_ext_drifts else method_clean,
             variogram_model=variogram_model,
             external_drift_grid=external_drift_grids if has_ext_drifts else None,
-            drift_terms=drift_terms,
+            drift_terms=list(expanded_primitives) if expanded_primitives else drift_terms,
             variogram_params=variogram_params,
             n_cores=n_cores,
             show_progress=show_progress,

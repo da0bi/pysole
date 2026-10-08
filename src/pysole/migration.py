@@ -127,10 +127,10 @@ def migrate_eikonal_points(
     x_coords = geometry.x_coords
     y_coords = geometry.y_coords
 
-    # 1. Calculate horizontal slownesses s1 = \partial T / \partial x and s2 = \partial T / \partial y
+    # 1. Calculate horizontal slownesses s1 = -\partial T / \partial x and s2 = -\partial T / \partial y
     tt_grads = compute_gradients(travel_time_grid, dx=dx, dy=dy)
-    s1_grid = tt_grads["slope_x"]  # \partial T / \partial x
-    s2_grid = tt_grads["slope_y"]  # \partial T / \partial y
+    s1_grid = -tt_grads["slope_x"]  # -\partial T / \partial x
+    s2_grid = -tt_grads["slope_y"]  # -\partial T / \partial y
 
     # 2. Retrieve pre-computed surface DEM directional slope components zx = \partial Z / \partial x, zy = \partial Z / \partial y
     if dem_grads is None:

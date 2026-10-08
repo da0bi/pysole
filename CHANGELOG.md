@@ -73,6 +73,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Strengthened `test_run_from_config_batch_false` with TTY stdin mocking.
   - Refined multi-drift compound expansion and ray migration assertions across `test_audit_regressions.py`.
 
+### Added / Fixed (Phase 5 Audit & Code Hardening — Pass 3 High-Severity Findings)
+- **[3D Eikonal Ray Migration Sign Error] Corrected Horizontal Slowness Sign (`src/pysole/migration.py`, `tests/test_eikonal_migration_plane.py`)**:
+  - Corrected horizontal slowness signs ($u = -\partial T/\partial x$, $w = -\partial T/\partial y$) in `perform_3d_eikonal_migration()`, ensuring rays relocate towards up-dip reflectors along the negative traveltime gradient vector (`N3-H1`).
+  - Added test case `test_inclined_bed_traveltime_gradient` in `tests/test_eikonal_migration_plane.py` verifying exact ray relocation direction and magnitude ($dx = -7.92\text{ m}$) for non-zero traveltime gradients.
+- **[Compound Drift Basis Expansion & Engine Validation] Expanded Primitive Basis Plumbing & Grid Validation (`src/pysole/interpolation.py`)**:
+  - Expanded compound drift aliases (`sia_space`, `full_spatial_physical`, `sia_z_dem`, `sia_curvature_dem`, `z_dem_curvature_dem`, `full_physical`) into explicit primitive basis terms (`drift_terms=list(expanded_primitives)`) when invoking `built_in_kriging_interpolation()`, ensuring spatial polynomial terms (`linear_xy`) are explicitly assembled in the Kriging system (`N3-H2`).
+  - Enforced explicit `ValueError` guards when required external drift rasters (surface DEM `dem_grid` or slope grid `opt_slope_grid`) are missing under Universal/SIA/Elevation Kriging modes, or when `drift_terms` is empty, eliminating silent fallbacks to quadratic spatial drift.
+
+
 ## [0.4.2] - 2026-10-07
 
 ### Added / Fixed (Wavelength Metric & Fallback Parameterization)

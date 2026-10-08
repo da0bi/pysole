@@ -81,6 +81,33 @@ class TestEikonalMigrationPlane(unittest.TestCase):
         """Case 6: Non-Parallel Plane (Opposite Slope Orientation)."""
         self._run_plane_test(A_s=0.12, B_s=-0.08, C_s=2000.0, thickness_m=90.0, sample_x=150.0, sample_y=150.0)
 
+    def test_inclined_bed_traveltime_gradient(self):
+        """
+        Verifies sign of traveltime gradients (N3-H1):
+        Flat surface DEM, bed dip b_x = 0.1.
+        Traveltime increases with x (dT/dx > 0), so u = -dT/dx < 0, ray relocates in -X direction.
+        For sample_x = 150, thickness = 80m, expected dx = -7.92m (towards up-dip bed).
+        """
+        dem = np.full_like(self.xx, 2000.0)
+        bx = 0.1
+        h_0 = 80.0
+        # Thickness normal distance H(x) = (h_0 + bx * (xx - 150)) / sqrt(1 + bx^2)
+        H_grid = (h_0 + bx * (self.xx - 150.0)) / np.sqrt(1.0 + bx**2)
+        T_grid = H_grid / self.v
+
+        migrator = EikonalMigrator(dem, geometry=self.geometry)
+        sample_x, sample_y = 150.0, 150.0
+        sample_pts = np.array([[sample_x, sample_y, 2000.0, T_grid[30, 30]]])
+        res = migrator.migrate(travel_time_grid=T_grid, survey_points=sample_pts, velocity=self.v, show_progress=False)
+        mig_pts = res.migrated_points
+
+        x_mig, y_mig = mig_pts[0, 0], mig_pts[0, 1]
+        dx_mig = x_mig - sample_x
+        expected_dx = -bx * h_0 / (1.0 + bx**2)  # -0.1 * 80 / 1.01 = -7.92 m
+
+        np.testing.assert_allclose(dx_mig, expected_dx, atol=0.1)
+
 
 if __name__ == "__main__":
     unittest.main()
+
