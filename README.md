@@ -563,17 +563,17 @@ Kriging spatial interpolation natively evaluates the 2D estimation variance fiel
 The exact calculation of the estimation variance depends on the selected `interpolation_target`:
 
 - **Direct Target Interpolation (`interpolation_target`: `"D"` or `"T"`)**:
-  When directly interpolating migrated depths $D_i$ or signal traveltimes $T_i$, the Kriging estimation variance field ($\sigma_{\text{D}}^2(x,y)$ $[\text{m}^2]$ or $\sigma_{\text{T}}^2(x,y)$ $[\text{ns}^2]$) is evaluated directly. Taking the square root yields the standard error in physical units:
+  When directly interpolating migrated depths $D_i$ or signal traveltimes $T_i$, the Kriging estimation variance field ($\sigma_{\text{D}}^2(x,y)$ $[\text{m}^2]$ or $\sigma_{\text{T}}^2(x,y)$ $[\text{s}^2]$) is evaluated directly. Taking the square root yields the standard error in physical units:
 
   <p align="center">
-  $$\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}] \qquad \text{or} \qquad \sigma_{\text{T}}(x,y) = \sqrt{\sigma_{\text{T}}^2(x,y)} \quad [\pm\,\text{ns}]$$
+  $$\sigma_{\text{D or T}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m or s}]$$
   </p>
 
 - **BSS-derived Product Target Interpolation (`interpolation_target`: `"P"`)**:
   When interpolating the BSS product field $P(x,y) = D \cdot \sin(\alpha_{\text{opt}})$ (or $P(x,y) = T \cdot \sin(\alpha_{\text{opt}})$), Kriging calculates the product variance $\sigma_{\text{P}}^2(x,y)$. The 2D estimation variance is derived via linear error propagation with the optimal surface slope field $\sin(\alpha_{\text{opt}}(x,y))$:
 
   <p align="center">
-  $$\sigma_{\text{D or T}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m² or s²}]
+  $$\sigma_{\text{D or T}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m² or s²}]$$
   </p>
 
   Taking the square root converts the propagated variance field into the **Kriging Standard Error $\sigma_{\text{D}}(x,y)$ in meters** (or $\sigma_{\text{T}}(x,y)$ in traveltime units):
