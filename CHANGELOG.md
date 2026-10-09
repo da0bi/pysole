@@ -17,18 +17,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed deprecated dataclass property aliases `save_ice_thickness_map` and `save_basal_shear_stress_map` from `OutputsConfig`.
   - Removed legacy `outputs_cfg.get("output_bedrock_map")` string export block from `run_from_config()`.
 - **[Solver Optimization & Clean Signatures] (`src/pysole/solver.py`)**:
-  - Added cached `safe_slope_sin` property to `Solver`, eliminating redundant trigonometric grid evaluations.
+  - Added `safe_slope_sin` property to `Solver` (cached per slope source and `slope_floor_deg`), eliminating redundant trigonometric grid evaluations.
   - Centralized Eikonal ray migration output exports via `self.export_outputs("migration")` in `migrate_eikonal()`.
-  - Used `self.safe_slope_sin` in `get_sample_points()`, `_execute_kriging_pass()`, and `finalize_bedrock()` for basal shear stress calculation.
+  - Used `self.safe_slope_sin` in `get_sample_points()` and `_execute_kriging_pass()`; `finalize_bedrock()` uses the unfloored `self.slope_sin` for basal shear stress (see Review Fixes).
   - Removed obsolete `plotit` parameter from `finalize_bedrock()` signature.
   - Removed legacy method alias `finalize_topography()`.
   - Updated `run_pipeline()` to call canonical `calculate_bedrock()` and `finalize_bedrock()`.
 - **[Interpolation Subsystem Streamlining] (`src/pysole/interpolation.py`)**:
   - Added static `COMPOUND_DRIFT_MAP` dictionary constant to simplify compound drift term expansion in `kriging_interpolation()` and `DriftBasis.__init__()`.
-  - Centralized entry guard for `"linear"` variogram model in `built_in_kriging_interpolation()`.
+  - Centralized the `"linear"` variogram handling for the native engine in `resolve_native_variogram_model()`.
 - **[Test Suite Hygiene] (`tests/test_solver.py`, `tests/test_curvature.py`, `tests/__init__.py`)**:
   - Updated unit tests calling legacy methods or obsolete parameter flags to use canonical API methods.
   - Added `tests/__init__.py` to enforce headless `matplotlib.use("Agg")` backend during test execution.
+  - New `tests/test_review_v044.py` covers the review fixes below; `tests/test_audit_regressions.py` was adapted to the removed option and the new guard.
+
+### Review Fixes (`review/v044`)
+- **[BSS uses the unfloored slope] (`src/pysole/solver.py`)**: `Solver.slope_sin` (unfloored) and `Solver.safe_slope_sin` (floored at `slope_floor_deg`) are separate. The final basal shear stress and its standard deviation use the unfloored slope again (the floor only protects divisions and drift terms); the floored slope was silently lowering `τ_b` in cells below the floor.
+- **[Variance propagation for `save_traveltime_uncertainty`]**: for the target `"P"`, `σ_T² = σ_P² / sin²α_opt` with the *floored* slope; target `"T"` is passed through; two-way data are halved first, so the raster is in one-way traveltime units. If migration is skipped or the data are depths, one warning covers both traveltime exports.
+- **[`linear` variogram resolved once] (`src/pysole/variogram.py`, `src/pysole/interpolation.py`, `src/pysole/solver.py`)**: new `resolve_native_variogram_model()` is the single place that maps `"linear"` to `"spherical"` (one warning, not one per pass). It is applied only for `engine="native"` with non-regression methods; `engine="pykrige"` keeps the native 2-D linear model. The dead `linear_variogram` function and the `"lin"` branches are removed, and the Drift Analyzer receives the resolved model.
+- **[Memory guard] (new `src/pysole/memory.py`, `src/pysole/interpolation.py`, `src/pysole/solver.py`)**: new `kriging_parameters.max_memory_fraction` (default `0.5`, `0 < f ≤ 0.9`, also `Solver(max_memory_fraction=...)`) limits the estimated peak memory of the native Kriging solver to a fraction of the available RAM (`psutil`, cgroup v1/v2 limits respected; the guard is off if the RAM cannot be determined). The plan is: run as requested; else reduce threads; else skip the variance (NaN σ, uncertainty exports skipped with an "[Export Skipped]" warning); else continue with one thread and no variance. `psutil>=5.9.0` is now a required dependency. `memory.py` also hosts the shared `kriging_chunk_size()` and `resolve_threads()` helpers used by the native solver.
+- **[Lower peak memory, no explicit inverse] (`src/pysole/interpolation.py`)**: the native engine no longer forms `K⁻¹`. The variance uses per-chunk `lu_solve` against the retained LU factors; the sample distance and covariance matrices are freed after assembly and `K` after the factorization; the LU is dropped when no variance is requested. Results agree with a dense-inverse reference to ~1e-14. Measured peaks (300×300 grid, N = 3000): 326 MB (1 thread), 1034 MB (4 threads), 1838 MB (8 threads). The variance now costs only about one additional N² matrix, which is below the assembly peak, so skipping it rarely helps; reducing threads is the effective lever.
+- **[Uncertainty is always computed] (`src/pysole/config.py`, `src/pysole/solver.py`, `src/pysole/plotting.py`, `README.md`, `pysole*.json`)**: **Breaking:** `outputs.compute_uncertainty` and `Solver(compute_uncertainty=...)` are removed (this supersedes the 0.4.3 notes below). The post-migration σ is always computed and always shown in the diagnostic figures; the `save_*_uncertainty` flags only control the export. The traveltime σ is never plotted. The PyKrige regression variance is NaN (not zero). If the variance is unavailable the panels show "Uncertainty not available (see log)" and no NaN raster is written.
+- **[Unknown configuration keys warn and are pruned] (`src/pysole/config.py`, `src/pysole/solver.py`)**: `load_config()`, `Solver(config=dict)` and `OutputsConfig.from_dict()` report unknown keys (with "did you mean" hints) in one warning and drop them; a run is never stopped by a stale key. Only a section that must be an object but is not raises `ConfigError`. `inputs.drift_analyzer` is now part of `DEFAULT_CONFIG` and the shipped JSON templates, and `max_memory_fraction` is validated.
+- **[Docs] (`README.md`, `docs/`)**: removed `compute_uncertainty`, documented `max_memory_fraction`, `inputs.drift_analyzer`, σ_T units, and the memory guard; the README `Solver` example uses `calculate_bedrock()` / `finalize_bedrock()`; practice guide section 6 rewritten.
 
 ## [0.4.3] - 2026-10-08
 

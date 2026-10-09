@@ -254,9 +254,11 @@ Based on theoretical derivations and empirical benchmarks on WUK and GOK, we est
 
 ---
 
-## 6. Runtime Note: Uncertainty Maps (`outputs.compute_uncertainty`)
+## 6. Runtime Note: Uncertainty Maps and the Memory Guard
 
-The post-migration Kriging variance (the uncertainty maps and the derived thickness/BSS standard deviation) costs $O(N^2 \cdot n_{\text{cells}})$ and dominates the run time on large grids (GOK: ~121 s with, ~63 s without). Set `outputs.compute_uncertainty` to `false` (or pass `compute_uncertainty=False` to `Solver`) to skip it. The bedrock and thickness fields are **bit-identical** in both modes, and the diagnostic figures are still saved (the uncertainty panels show a placeholder). If an uncertainty raster export is requested (`outputs.save_thickness_uncertainty` or `outputs.save_basal_shear_stress_uncertainty`), the evaluation is re-enabled automatically and a warning is logged.
+The post-migration Kriging variance (the uncertainty maps and the derived thickness/BSS standard deviation) is **always computed** and always shown in the diagnostic figures. Only the raster export is optional (`outputs.save_thickness_uncertainty`, `outputs.save_basal_shear_stress_uncertainty`, `outputs.save_traveltime_uncertainty`). The bedrock and thickness fields do not depend on it.
+
+The native engine evaluates the variance in grid chunks on parallel threads. The peak memory is dominated by the $(N + n_{\text{drift}})^2$ system matrix and by the per-thread working arrays. `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`, also `Solver(max_memory_fraction=...)`) limits the estimated peak to that fraction of the available RAM. If it does not fit, the number of threads is reduced first. The variance is skipped only as a last resort (the uncertainty panels then show a placeholder and uncertainty rasters are not exported, with a warning). Unknown configuration keys never stop a run; they are reported in one warning and ignored.
 
 ---
 *Report filed in PySole Documentation: [pysole_interpolation_practice_guide.md](pysole_interpolation_practice_guide.md).*

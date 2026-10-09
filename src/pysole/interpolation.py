@@ -18,6 +18,8 @@ from sklearn.ensemble import RandomForestRegressor
 from .raster import GridGeometry
 from .logging import logger, get_progress_bar
 from .smoothing import compute_gradients, compute_surface_curvature
+from .variogram import resolve_native_variogram_model
+from .memory import MAX_FRACTION_CAP, kriging_chunk_size, plan_native_kriging, resolve_threads
 
 
 @dataclass
@@ -243,6 +245,7 @@ def built_in_kriging_interpolation(
     n_cores: int = -1,
     show_progress: bool = True,
     return_variance: bool = True,
+    max_memory_fraction: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Robust native NumPy/SciPy Ordinary & Universal Kriging solver with zero-centered
@@ -279,11 +282,15 @@ def built_in_kriging_interpolation(
     show_progress : bool, default True
         Show a progress bar.
     return_variance : bool, default True
-        If True, the Kriging estimation variance is evaluated, which requires the explicit
-        inverse of the augmented Kriging matrix and an extra O((N+d)^2) work per grid cell.
-        If False, only the O(N) dual-kriging weight dot product is evaluated and the
-        returned variance grid is filled with NaN (so that it cannot be misread as zero
-        uncertainty). Use False whenever uncertainty maps are not requested.
+        If True, the Kriging estimation variance is evaluated: per grid chunk the augmented Kriging system is
+        solved with the LU factorisation (O((N+d)^2) work per cell), which keeps the factorisation in memory
+        during the grid evaluation. If False, only the O(N) dual-kriging weight dot product is evaluated and
+        the returned variance grid is filled with NaN (so that it cannot be misread as zero uncertainty).
+        The memory guard may also switch the variance off (NaN grid, warning) if it does not fit into RAM.
+    max_memory_fraction : float, default 0.5
+        Memory budget as a fraction of the currently available RAM (``0 < f <= 0.9``). If the estimated peak
+        exceeds it, the number of worker threads is reduced first; only if a single thread still does not fit
+        is the variance skipped (see :mod:`pysole.memory`).
 
     Notes
     -----
@@ -291,13 +298,9 @@ def built_in_kriging_interpolation(
     Kriging. If specified under the native engine, it automatically falls back to 'spherical' with a warning.
     To use a 2-D linear model, set engine='pykrige'.
     """
-    if str(variogram_model).lower().strip() == "linear":
-        logger.warning(
-            "   [Variogram Engine Warning] The 'linear' variogram model is a 1-D profile model and is not "
-            "valid for 2-D native spatial Kriging. Automatically falling back to 'spherical' "
-            "(which provides linear slope behavior near the origin). To use a 2-D linear model, set engine='pykrige'."
-        )
-        variogram_model = "spherical"
+    variogram_model = resolve_native_variogram_model(variogram_model)
+    if not (0.0 < float(max_memory_fraction) <= MAX_FRACTION_CAP):
+        raise ValueError(f"max_memory_fraction must satisfy 0 < f <= {MAX_FRACTION_CAP}, got {max_memory_fraction}.")
 
     valid = ~np.isnan(sample_points[:, 0]) & ~np.isnan(sample_points[:, 1]) & ~np.isnan(sample_points[:, 2])
     pts = sample_points[valid]
@@ -309,7 +312,7 @@ def built_in_kriging_interpolation(
     if N_pts == 0:
         return np.zeros((M, N)), np.zeros((M, N))
 
-    effective_n_cores = (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
+    effective_n_cores = resolve_threads(n_cores)
 
     x_mean, x_scale = float(np.mean(x_coords)), max(float(np.ptp(x_coords)), 1.0)
     y_mean, y_scale = float(np.mean(y_coords)), max(float(np.ptp(y_coords)), 1.0)
@@ -317,31 +320,8 @@ def built_in_kriging_interpolation(
     pts_x_norm = (pts[:, 0] - x_mean) / x_scale
     pts_y_norm = (pts[:, 1] - y_mean) / y_scale
 
-    sample_dists = cdist(pts[:, :2], pts[:, :2])
-    max_d = float(np.max(sample_dists)) if N_pts > 1 else 100.0
-
-    if variogram_params is not None:
-        if isinstance(variogram_params, dict):
-            range_a = float(variogram_params.get("range", max(max_d * 0.6, 1.0)))
-            sill = float(variogram_params.get("sill", np.var(pts[:, 2]) if N_pts > 1 else 1.0))
-            nugget = float(variogram_params.get("nugget", 0.0))
-        else:
-            range_a, sill, nugget = variogram_params
-    else:
-        range_a = max(max_d * 0.6, 1.0)
-        sill = float(np.var(pts[:, 2])) if N_pts > 1 else 1.0
-        if sill == 0:
-            sill = 1.0
-        nugget = 0.0
-
     from .variogram import evaluate_variogram_model
 
-    def variogram_func(h: np.ndarray) -> np.ndarray:
-        gamma = evaluate_variogram_model(h, variogram_model, range_a, sill, nugget)
-        gamma = np.where(h == 0, 0.0, gamma)
-        return gamma
-
-    K_sample = variogram_func(sample_dists)
 
     method_clean = str(method).lower().strip()
     ext_dict: dict[str, np.ndarray] = {}
@@ -400,8 +380,47 @@ def built_in_kriging_interpolation(
     else:
         n_drift = 1
 
+    # Memory guard: decided before any N x N matrix is allocated.
+    mem_plan = plan_native_kriging(
+        n_pts=N_pts,
+        n_drift=n_drift,
+        n_threads=effective_n_cores,
+        want_variance=return_variance,
+        fraction=max_memory_fraction,
+        n_grid_cells=M_grid,
+    )
+    return_variance = mem_plan.return_variance
+    effective_n_cores = mem_plan.n_threads
+
+    sample_dists = cdist(pts[:, :2], pts[:, :2])
+    max_d = float(np.max(sample_dists)) if N_pts > 1 else 100.0
+
+    if variogram_params is not None:
+        if isinstance(variogram_params, dict):
+            range_a = float(variogram_params.get("range", max(max_d * 0.6, 1.0)))
+            sill = float(variogram_params.get("sill", np.var(pts[:, 2]) if N_pts > 1 else 1.0))
+            nugget = float(variogram_params.get("nugget", 0.0))
+        else:
+            range_a, sill, nugget = variogram_params
+    else:
+        range_a = max(max_d * 0.6, 1.0)
+        sill = float(np.var(pts[:, 2])) if N_pts > 1 else 1.0
+        if sill == 0:
+            sill = 1.0
+        nugget = 0.0
+
+    def variogram_func(h: np.ndarray) -> np.ndarray:
+        gamma = evaluate_variogram_model(h, variogram_model, range_a, sill, nugget)
+        gamma = np.where(h == 0, 0.0, gamma)
+        return gamma
+
+    K_sample = variogram_func(sample_dists)
+    del sample_dists  # free one N x N matrix before the augmented matrix is allocated
+    k_diag_mean = float(np.mean(np.diag(K_sample)))
+
     K = np.zeros((N_pts + n_drift, N_pts + n_drift))
     K[:N_pts, :N_pts] = K_sample
+    del K_sample
     K[:N_pts, N_pts] = 1.0
     K[N_pts, :N_pts] = 1.0
 
@@ -436,29 +455,35 @@ def built_in_kriging_interpolation(
             K[N_pts + curr_col, :N_pts] = pts_x_norm * pts_y_norm
             curr_col += 1
 
-    reg_val = 1e-6 * max(float(sill), float(np.mean(np.diag(K_sample))))
+    reg_val = 1e-6 * max(float(sill), k_diag_mean)
     K[:N_pts, :N_pts] += np.eye(N_pts) * reg_val
     logger.info(f"   [Dual Kriging Engine] Applied {reg_val:.1e} Tikhonov matrix regularization (N={N_pts} points, n_drift={n_drift})")
 
     z_aug = np.zeros(N_pts + n_drift, dtype=np.float64)
     z_aug[:N_pts] = pts[:, 2]
 
+    # The LU factorisation is kept (read-only, thread-safe) only if the variance is evaluated; the
+    # per-chunk variance solves use it directly, so no explicit N x N inverse is ever formed.
+    lu_piv = None
     K_inv = None
     try:
         lu_piv = lu_factor(K)
         w_z = lu_solve(lu_piv, z_aug)  # Dual Kriging 1D weight vector
-        if return_variance:
-            K_inv = lu_solve(lu_piv, np.eye(N_pts + n_drift))
+        K = None  # the factorisation holds everything that is still needed
     except Exception:
+        lu_piv = None
         w_z = np.linalg.lstsq(K, z_aug, rcond=None)[0]
         if return_variance:
             K_inv = np.linalg.pinv(K)
+        K = None
+    if not return_variance:
+        lu_piv = None  # weights are known; release the factorisation before the grid evaluation
 
     xx, yy = np.meshgrid(x_coords, y_coords)
     xx_flat = xx.ravel()
     yy_flat = yy.ravel()
 
-    chunk_size = max(500, min(10000, 5000000 // max(N_pts, 1)))
+    chunk_size = kriging_chunk_size(N_pts)
     z_interp_flat = np.zeros(M_grid, dtype=np.float64)
     var_interp_flat = np.full(M_grid, np.nan, dtype=np.float64)
 
@@ -504,16 +529,19 @@ def built_in_kriging_interpolation(
         # High-performance Dual Kriging elevation prediction (O(N) 1D dot product)
         z_sub = np.dot(w_sample, K_grid_sub) + np.dot(w_drift, K_rhs_drift_sub)
 
-        if K_inv is None:
-            # Conditional variance: skip the O((N+d)^2) per-cell variance GEMM entirely
+        if not return_variance:
+            # Conditional variance: skip the O((N+d)^2) per-cell variance solve entirely
             return start_idx, end_idx, z_sub, None
 
-        # Estimation variance computation via thread-safe precomputed K_inv
+        # Estimation variance via the thread-safe, read-only LU factorisation (no explicit inverse)
         K_rhs_sub = np.zeros((N_pts + n_drift, sub_size), dtype=np.float64)
         K_rhs_sub[:N_pts, :] = K_grid_sub
         K_rhs_sub[N_pts:, :] = K_rhs_drift_sub
 
-        W_sub = np.dot(K_inv, K_rhs_sub)
+        if lu_piv is not None:
+            W_sub = lu_solve(lu_piv, K_rhs_sub)
+        else:
+            W_sub = np.dot(K_inv, K_rhs_sub)
 
         weights_sub = W_sub[:N_pts, :]
         mu_drift_sub = np.sum(W_sub[N_pts:, :] * K_rhs_drift_sub, axis=0)
@@ -600,7 +628,8 @@ def pykrige_kriging_interpolation(
         P_pred = np.column_stack((xx.ravel(), yy.ravel()))
         z_flat = rk.predict(P_pred, P_pred)
         z_b = z_flat.reshape((M, N))
-        v_b = np.zeros((M, N))
+        # RegressionKriging exposes no estimation variance: NaN (not zero!) marks it as unavailable
+        v_b = np.full((M, N), np.nan)
         return z_b, v_b
 
     elif method_clean in ["ordinary", "ordinary_kriging"]:
@@ -684,6 +713,7 @@ def kriging_interpolation(
     show_progress: bool = True,
     external_drift_grid: np.ndarray | dict[str, np.ndarray] | None = None,
     return_variance: bool = True,
+    max_memory_fraction: float = 0.5,
 ) -> KrigingResult:
     """
     Applies Kriging spatial interpolation on scattered points supporting four distinct approaches:
@@ -733,7 +763,10 @@ def kriging_interpolation(
         Additional user-supplied external drift grid(s) of the DEM shape.
     return_variance : bool, default True
         Native engine only. If False, the O(N^2) per-cell Kriging variance evaluation is skipped and
-        ``KrigingResult.variance_grid`` is filled with NaN. Set False when uncertainty maps are not needed.
+        ``KrigingResult.variance_grid`` is filled with NaN. The memory guard may also skip it (NaN, warning).
+    max_memory_fraction : float, default 0.5
+        Native engine only. RAM budget as a fraction of the available memory (``0 < f <= 0.9``); threads are
+        reduced first, the variance is skipped only as a last resort (see ``built_in_kriging_interpolation``).
 
     Notes
     -----
@@ -879,6 +912,7 @@ def kriging_interpolation(
             n_cores=n_cores,
             show_progress=show_progress,
             return_variance=return_variance,
+            max_memory_fraction=max_memory_fraction,
         )
     return KrigingResult(bedrock_grid=z_b, variance_grid=v_b)
 
@@ -1122,7 +1156,7 @@ class DualKrigingSolver:
         self.x_pts = np.asarray(x_pts, dtype=np.float64)
         self.y_pts = np.asarray(y_pts, dtype=np.float64)
         self.z_pts = np.asarray(z_pts, dtype=np.float64)
-        self.variogram_model = str(variogram_model).lower()
+        self.variogram_model = resolve_native_variogram_model(variogram_model)
         self.nugget = float(nugget)
         self.sill = float(sill) if sill > 0 else 1.0
         self.range_param = float(range_param) if range_param > 0 else 100.0
@@ -1152,8 +1186,6 @@ class DualKrigingSolver:
             K = self.nugget + self.sill * (1.0 - np.exp(-3.0 * dists / max(self.range_param, 1e-6)))
         elif "gauss" in self.variogram_model:
             K = self.nugget + self.sill * (1.0 - np.exp(-3.0 * (dists / max(self.range_param, 1e-6))**2))
-        elif "lin" in self.variogram_model:
-            K = self.nugget + self.sill * np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
         else:
             h_ratio = np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
             gamma = self.sill * (1.5 * h_ratio - 0.5 * (h_ratio**3))
@@ -1212,8 +1244,6 @@ class DualKrigingSolver:
             K_val = self.nugget + self.sill * (1.0 - np.exp(-3.0 * dists / max(self.range_param, 1e-6)))
         elif "gauss" in self.variogram_model:
             K_val = self.nugget + self.sill * (1.0 - np.exp(-3.0 * (dists / max(self.range_param, 1e-6))**2))
-        elif "lin" in self.variogram_model:
-            K_val = self.nugget + self.sill * np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
         else:
             h_ratio = np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
             gamma = self.sill * (1.5 * h_ratio - 0.5 * (h_ratio**3))

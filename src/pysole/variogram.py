@@ -267,18 +267,37 @@ def gaussian_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarra
     return n + c * (1.0 - np.exp(-3.0 * (h / a_eff)**2))
 
 
-def linear_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarray:
+def resolve_native_variogram_model(name: str, warn: bool = True) -> str:
     """
-    Bounded linear variogram model: gamma(h) = n + c * min(h/a, 1).
+    Maps a user-selected variogram model name to one valid for the native 2-D Kriging engine.
 
-    Caveat: this is a 1-D profile model (a "tent" covariance). It is not conditionally negative
-    definite in two dimensions, so a 2-D Kriging system built from it may be indefinite and the
-    resulting estimation variance may be clamped to 0. Use 'spherical', 'exponential' or
-    'gaussian' for areal (2-D) interpolation.
+    The ``"linear"`` model is a 1-D profile model (a "tent" covariance) that is not conditionally
+    negative definite in two dimensions. Under the native engine it is replaced by ``"spherical"``
+    (2-D valid, linear slope behavior near the origin) and a warning is logged. ``engine="pykrige"``
+    keeps native 2-D linear support and never calls this function.
+
+    Parameters
+    ----------
+    name : str
+        Requested variogram model name.
+    warn : bool, default True
+        Log the fallback warning (set False to avoid duplicate warnings for a second stage).
+
+    Returns
+    -------
+    str
+        Lower-cased, stripped model name; ``"spherical"`` if ``"linear"`` was requested.
     """
-    h = np.asarray(h, dtype=float)
-    a_eff = max(float(a), 1e-6)
-    return n + c * np.clip(h / a_eff, 0.0, 1.0)
+    m_type = str(name).lower().strip()
+    if m_type == "linear":
+        if warn:
+            logger.warning(
+                "   [Variogram Engine Warning] The 'linear' variogram model is a 1-D profile model and is not "
+                "valid for 2-D native spatial Kriging. Automatically falling back to 'spherical' "
+                "(which provides linear slope behavior near the origin). To use a 2-D linear model, set engine='pykrige'."
+            )
+        return "spherical"
+    return m_type
 
 
 def evaluate_variogram_model(
@@ -290,8 +309,6 @@ def evaluate_variogram_model(
         return exponential_variogram(h, a, c, n)
     elif "gauss" in m_type:
         return gaussian_variogram(h, a, c, n)
-    elif "lin" in m_type:
-        return linear_variogram(h, a, c, n)
     else:
         return spherical_variogram(h, a, c, n)
 
@@ -305,7 +322,7 @@ def fit_variogram_model(
 ) -> tuple[float, float, float, dict[str, np.ndarray]]:
     """
     Fits a theoretical variogram model to experimental variogram data.
-    Supports Spherical, Exponential, Gaussian, and Linear model functions.
+    Supports Spherical, Exponential, and Gaussian model functions.
     Scale-invariant fitting scales initial guesses and bounds relative to experimental semivariance magnitude.
 
     Returns
@@ -344,8 +361,6 @@ def fit_variogram_model(
             fit_func = exponential_variogram
         elif "gauss" in m_type:
             fit_func = gaussian_variogram
-        elif "lin" in m_type:
-            fit_func = linear_variogram
         else:
             fit_func = spherical_variogram
 

@@ -147,7 +147,8 @@ All execution options can be fully defined in a single JSON configuration file, 
         "g": 9.81,
         "n_cores": -1,
         "log_level": "INFO",
-        "show_progress": true
+        "show_progress": true,
+        "drift_analyzer": false
     },
     "spatial_parameters": {
         "dx": null,
@@ -174,6 +175,7 @@ All execution options can be fully defined in a single JSON configuration file, 
     },
     "kriging_parameters": {
         "engine": "native",
+        "max_memory_fraction": 0.5,
         "pre_migration": {
             "interpolation_target": "P",
             "method": "ordinary",
@@ -207,7 +209,6 @@ All execution options can be fully defined in a single JSON configuration file, 
         "output_prefix": "final",
         "plots_dir": "figures",
         "save_bedrock_elevation_map": true,
-        "compute_uncertainty": true,
         "save_traveltime_grid": false,
         "save_migrated_points": false,
         "save_thickness_grid": false,
@@ -235,6 +236,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
 | | `log_level` | `str` | `"INFO"` | Package logging level verbosity: `"INFO"` (default), `"DEBUG"`, `"WARNING"`, `"ERROR"`, or `"CRITICAL"`. Appends timestamped logs to `pysole.log`. |
 | | `show_progress` | `bool` | `true` | If `true` (default), displays terminal progress bars during heavy processing steps. Set to `false` if running `PySole` in batch processing scripts. |
+| | `drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` for both Kriging passes (same as the `--drift-analyzer` CLI flag or the pass-level `drift_analyzer` options below). |
 | **`spatial_parameters`** | `dx` | `float` | `null` | Target grid resolution along X in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `dy` | `float` | `null` | Target grid resolution along Y in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `bounds` | `list[float]` | `null` | Optional spatial bounding box `[minx, miny, maxx, maxy]`. Leave `null` by default. Use only to manually override invalid or missing spatial bounds in DEM raster headers (`.asc`, `.tif`). `bounds` are automatically calculated from `origin`, `dx`, `dy`, and grid dimensions for headerless DEMs (`.csv`, `.npy`). |
@@ -253,6 +255,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `slope_floor_deg` | `float` | `5.0` | Minimum surface slope angle threshold in degrees [°] enforced during surface slope optimization to prevent numerical division singularities. |
 | | `interactive_optimization` | `bool` | `false` | If `true`, enables interactive CLI prompt to inspect BSS variance curve and adjust corner frequency spectrum parameters (`kc_min`, `kc_max`, `lambda_min`, `lambda_max`, `n_steps`), lag distance bin count (`nrbins`), and correlation range (`a_range`). |
 | **`kriging_parameters`** | `engine` | `str` | `"native"` | Kriging calculation engine: `"native"` (default, high-performance Dual Kriging solver) or `"pykrige"` (uses external [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package - optional dependency in `pyproject.toml`). |
+| | `max_memory_fraction` | `float` | `0.5` | Fraction of the available RAM (`0 < f ≤ 0.9`) that the native Kriging solver may use. If the estimate exceeds it, the worker threads are reduced first; the Kriging variance is skipped only as a last resort. Also available as `Solver(max_memory_fraction=...)`. See [Memory guard and uncertainty](#memory-guard-and-uncertainty). |
 | | `pre_migration` | `dict` | *Sub-section* | Configuration for pre-migration traveltime field, <i>T</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `pre_migration.interpolation_target` | `str` | `"P"` | Pre-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>T</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct signal traveltimes (<i>T</i><sub>i</sub>). |
 | | `pre_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (the default for `pre_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
@@ -280,14 +283,13 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `output_prefix` | `str` | `"final"` | Filename prefix or absolute filepath prefix used to construct export filenames. Absolute filepath prefix overrides `output_dir` and diagnostic figures are written beside it in a `figures/` subfolder. |
 | | `plots_dir` | `str` | `"figures"` | Diagnostic figures are always saved - `plots_dir` controls *where*. `null` is equivalent to `"figures"`. A relative path is resolved inside `output_dir`, or absolute `output_prefix`. `PySole` data products and figures always share the same location, except an absolute `plots_dir` is defined. |
 | | `save_bedrock_elevation_map` | `bool` | `true` | If `true` (default), exports the predicted bedrock elevation raster grid <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) to `<output_prefix>_bedrock.<ext>`. |
-| | `compute_uncertainty` | `bool` | `true` | If `true` (default), the Kriging estimation variance is evaluated and shown in the diagnostic figures. If `false`, this step is skipped which is typically faster (3–11× faster Kriging for N = 1 000–6 000 points on a 160 000-cell grid). |
 | | `save_traveltime_grid` | `bool` | `false` | If `true`, exports the pre-migration interpolated traveltime raster grid, <i>T</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_traveltime.<ext>`. |
-| | `save_traveltime_uncertainty` | `bool` | `false` | If `true`, exports the Kriging traveltime uncertainty raster grid, <i>σ<sub>T</sub></i>(<i>x</i>,<i>y</i>), in traveltime units, masked by the creeping body outline to `<output_prefix>_traveltime_uncertainty.<ext>`. Overrides `compute_uncertainty: false` with a warning. |
+| | `save_traveltime_uncertainty` | `bool` | `false` | If `true`, exports the Kriging traveltime uncertainty raster grid, <i>σ<sub>T</sub></i>(<i>x</i>,<i>y</i>), in one-way traveltime units (two-way data is halved first), masked by the creeping body outline to `<output_prefix>_traveltime_uncertainty.<ext>`. For `interpolation_target: "P"` the variance is propagated as σ<sub>T</sub>² = σ<sub>P</sub>² / sin²α<sub>opt</sub>. Not shown in the diagnostic figures. Unavailable (with a warning) if migration is skipped or the survey data are depths. |
 | | `save_migrated_points` | `bool` | `false` | If `true`, exports the 3D ray-migrated survey points to `<output_prefix>_migrated_points.csv` (`x, y, z_surface, depth_migrated`). If migration is skipped, it is automatically set to `false` and a log message is printed. |
 | | `save_thickness_grid` | `bool` | `false` | If `true`, exports the final thickness raster grid, <i>D</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness.<ext>`. |
-| | `save_thickness_uncertainty` | `bool` | `false` | If `true`, exports the Kriging thickness uncertainty raster grid, <i>σ<sub>D</sub></i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness_uncertainty.<ext>`. Overrides `compute_uncertainty: false` with a warning. |
+| | `save_thickness_uncertainty` | `bool` | `false` | If `true`, exports the Kriging thickness uncertainty raster grid, <i>σ<sub>D</sub></i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness_uncertainty.<ext>`. Skipped with a warning if the [memory guard](#memory-guard-and-uncertainty) had to skip the variance. |
 | | `save_basal_shear_stress` | `bool` | `false` | If `true`, exports the final basal shear stress raster grid, <i>τ</i><sub>b</sub>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_basal_shear_stress.<ext>`. |
-| | `save_basal_shear_stress_uncertainty` | `bool` | `false` | If `true`, exports the basal shear stress Kriging uncertainty raster grid, <i>σ</i><sub><i>τ</i><sub>b</sub></sub>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_basal_shear_stress_uncertainty.<ext>`. Overrides `compute_uncertainty: false` with a warning. |
+| | `save_basal_shear_stress_uncertainty` | `bool` | `false` | If `true`, exports the basal shear stress Kriging uncertainty raster grid, <i>σ</i><sub><i>τ</i><sub>b</sub></sub>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_basal_shear_stress_uncertainty.<ext>`. Skipped with a warning if the [memory guard](#memory-guard-and-uncertainty) had to skip the variance. |
 
 ---
 
@@ -582,6 +584,18 @@ Z_{\text{bed}}(x,y) &= Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)
 
 Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual $Z_{\text{surface}} - S(Z_{\text{surface}})$ from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
+<a id="memory-guard-and-uncertainty"></a>
+#### 10. Memory Guard and Uncertainty
+The Kriging uncertainty (thickness, basal shear stress) is **always computed** in the post-migration pass and **always shown** in the diagnostic figures; the `save_*_uncertainty` options only control whether the rasters are exported. The traveltime uncertainty $\sigma_{\text{T}}$ is exported on request but never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
+
+The native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM (cgroup limits are respected). If the estimate does not fit:
+
+1. the number of worker threads is reduced first (this does not change the results),
+2. only if even a single thread with variance does not fit, the variance is skipped. The uncertainty panels then show *"Uncertainty not available"* and uncertainty rasters are not exported (a warning is logged),
+3. if nothing fits, the run continues with one thread and no variance, and a warning is logged.
+
+If the available RAM cannot be determined, the guard is disabled. Unknown keys in a configuration file never stop a run: they are reported in a single warning and ignored.
+
 ---
 
 <a id="package-architecture"></a>
@@ -748,12 +762,12 @@ bedrock_pts = model.migrate_eikonal(
 model.optimize_bss(kc_max=0.3, kc_min=0.01, n_steps=20)
 
 # 4. Primary Kriging spatial interpolation (delegates to model.kriging_engine)
-kriged_bedrock, kriged_variance = model.interpolate_kriging(
+kriged_bedrock, kriged_variance = model.calculate_bedrock(
     method="universal",
 )
 
-# 5. Finalize topography (delegates to model.finalizer for gap filling & margin blending)
-final_bedrock = model.finalize_topography(
+# 5. Finalize bedrock (delegates to model.finalizer for gap filling & margin blending)
+final_bedrock = model.finalize_bedrock(
     interactive=False,
     smooth_bedrock=True,
     smoothing_method="gaussian",

@@ -276,7 +276,7 @@ def plot_migration_displacement_vectors(
         warnings.warn(f"Plotting skipped: {e}", UserWarning)
 
 
-UNCERTAINTY_PLACEHOLDER_TEXT = "Uncertainty not computed\n(outputs.compute_uncertainty = false)"
+UNCERTAINTY_PLACEHOLDER_TEXT = "Uncertainty not available\n(see log)"
 
 
 def _uncertainty_unavailable(grid: np.ndarray | None) -> bool:

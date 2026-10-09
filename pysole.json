@@ -9,7 +9,8 @@
         "g": 9.81,
         "n_cores": -1,
         "log_level": "INFO",
-        "show_progress": true
+        "show_progress": true,
+        "drift_analyzer": false
     },
     "spatial_parameters": {
         "dx": null,
@@ -36,6 +37,7 @@
     },
     "kriging_parameters": {
         "engine": "native",
+        "max_memory_fraction": 0.5,
         "pre_migration": {
             "interpolation_target": "P",
             "method": "ordinary",
@@ -69,7 +71,6 @@
         "output_prefix": "final",
         "plots_dir": "figures",
         "save_bedrock_elevation_map": true,
-        "compute_uncertainty": true,
         "save_traveltime_grid": false,
         "save_traveltime_uncertainty": false,
         "save_migrated_points": false,

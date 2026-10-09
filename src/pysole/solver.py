@@ -10,7 +10,7 @@ import numpy as np
 import os
 from .raster import BedrockMap, load_dem, load_outline, GridGeometry, load_survey_points, save_points_csv
 from .migration import migrate_eikonal_points, EikonalMigrator
-from .variogram import BSSOptimizer, compute_cutoff_wavelength
+from .variogram import BSSOptimizer, compute_cutoff_wavelength, resolve_native_variogram_model
 from .interpolation import (
     blend_margin_topography,
     kriging_interpolation,
@@ -20,7 +20,7 @@ from .interpolation import (
     CURVATURE_DRIFT_TERMS,
 )
 from .smoothing import compute_gradients, precompute_fft_grid, fft_gaussian_smooth_precomputed, compute_surface_curvature
-from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir, resolve_plots_dir, configured_output_dir
+from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir, resolve_plots_dir, configured_output_dir, sanitize_config, warn_unknown_config_keys, validate_memory_fraction
 from .logging import logger
 from .drift_analyzer import DriftAnalyzer
 from .survey_planner import SurveyPlanner
@@ -64,7 +64,7 @@ class Solver:
         survey_profile_column: str | None = None,
         config_path: str | Path | None = None,
         show_progress: bool = True,
-        compute_uncertainty: bool | None = None,
+        max_memory_fraction: float | None = None,
         config: dict[str, Any] | None = None,
     ):
         """
@@ -135,20 +135,18 @@ class Solver:
             Path to configuration file used for resolving relative paths.
         show_progress : bool
             If True (default), displays terminal progress bars during heavy processing steps.
-        compute_uncertainty : bool, optional
-            If True, the post-migration Kriging variance (uncertainty maps) is evaluated. If False, the
-            O(N^2 * grid cells) variance evaluation is skipped; diagnostic figures are still saved, with a
-            placeholder in the uncertainty panels. It is automatically re-enabled (with a warning) if an
-            uncertainty raster export is requested. If None (default), ``outputs.compute_uncertainty`` of
-            the configuration is used (default True).
+        max_memory_fraction : float, optional
+            RAM budget of the native Kriging engine as a fraction of the currently available memory
+            (``0 < f <= 0.9``). If the estimated peak exceeds it, worker threads are reduced first; the Kriging
+            variance (uncertainty) is skipped only if a single thread still does not fit. If None (default),
+            ``kriging_parameters.max_memory_fraction`` of the configuration is used (default 0.5).
         """
         self.output_dir = output_dir
         self.survey_data_path = survey_data_path
         self.survey_profile_column = survey_profile_column
         self.config_path = str(config_path) if config_path else None
         self._raw_plots_dir = plots_dir
-        self._compute_uncertainty = None if compute_uncertainty is None else bool(compute_uncertainty)
-        self._uncertainty_override_warned = False
+        self._max_memory_fraction = None if max_memory_fraction is None else validate_memory_fraction(max_memory_fraction, "max_memory_fraction")
 
         self.dem_grid, self.meta = load_dem(
             self.resolve_input_path(dem),
@@ -189,6 +187,17 @@ class Solver:
         self.survey_data_type = survey_data_type
         self.n_cores = n_cores
         self.engine_type = str(kriging_engine).lower().strip()
+
+        # "linear" is a 1-D model: under the native engine it is replaced by "spherical" once, here,
+        # so the warning is logged a single time and every downstream consumer (kriging passes and
+        # the drift analyzer) sees a valid 2-D model. engine="pykrige" keeps native linear support.
+        pre_was_linear = str(self.pre_variogram_model).lower().strip() == "linear"
+        self.pre_variogram_model = self._resolve_variogram_for_engine(
+            self.pre_variogram_model, self.pre_kriging_method
+        )
+        self.post_variogram_model = self._resolve_variogram_for_engine(
+            self.post_variogram_model, self.post_kriging_method, warn=not pre_was_linear
+        )
         self.nrbins = int(nrbins) if nrbins is not None else None
         self.ice_density = float(ice_density)
         self.g = float(g)
@@ -228,7 +237,9 @@ class Solver:
         self.bss_std: np.ndarray | None = None
         self.opt_variogram_params: dict[str, float] | None = None
         if config is not None:
-            self.config = config
+            # Unknown (e.g. outdated) keys are dropped with one warning; see config.sanitize_config
+            self.config, _unknown_keys = sanitize_config(config)
+            warn_unknown_config_keys(_unknown_keys)
         elif not hasattr(self, "config") or self.config is None:
             self.config = {}
         if self.config_path and Path(self.config_path).exists() and not self.config:
@@ -301,15 +312,49 @@ class Solver:
         """Minimum surface slope angle threshold in degrees [°]."""
         return float(self.optimization_config.get("slope_floor_deg", 5.0))
 
+    def _resolve_variogram_for_engine(self, model: str, method: str, warn: bool = True) -> str:
+        """Applies the native-engine variogram fallback ("linear" -> "spherical") when it applies.
+
+        Regression Kriging and ``engine="pykrige"`` run on PyKrige, which supports "linear" natively.
+        """
+        engine = self.engine_type.replace("_kriging", "")
+        is_regression = str(method).lower().strip() in ("regression", "regression_kriging")
+        if engine == "native" and not is_regression:
+            return resolve_native_variogram_model(model, warn=warn)
+        return model
+
+    def _slope_source(self) -> np.ndarray:
+        """Slope angle grid [rad]: optimized slope if available, else DEM gradient slope."""
+        if self.opt_slope is not None:
+            return self.opt_slope
+        return self._get_dem_gradients()["slope_rad"]
+
+    @property
+    def slope_sin(self) -> np.ndarray:
+        """Raw sin(alpha_opt) grid without any lower bound.
+
+        Used for the basal shear stress, where flooring the slope would bias the result
+        high in cells flatter than ``slope_floor_deg``.
+        """
+        return np.sin(self._slope_source())
+
     @property
     def safe_slope_sin(self) -> np.ndarray:
-        """Returns safe sin(alpha_opt) grid bounded below by slope_floor_deg."""
-        if self.opt_slope is not None:
-            opt_slope_sin = np.sin(self.opt_slope)
-        else:
-            opt_slope_sin = np.sin(self._get_dem_gradients()["slope_rad"])
+        """Returns sin(alpha_opt) grid bounded below by slope_floor_deg.
+
+        The floor is required for the P <-> D/T conversions (division by sin(alpha)); it must
+        NOT be used for the basal shear stress (see ``slope_sin``). The result is cached and
+        invalidated when the slope grid object or the floor changes.
+        """
+        src = self._slope_source()
+        key = (id(src), self.slope_floor_deg)
+        cache = getattr(self, "_safe_slope_sin_cache", None)
+        if cache is not None and cache[0] == key and cache[1] is src:
+            return cache[2]
         min_slope_sin = np.sin(np.radians(self.slope_floor_deg))
-        return np.maximum(opt_slope_sin, min_slope_sin)
+        result = np.maximum(np.sin(src), min_slope_sin)
+        self._safe_slope_sin_cache = (key, src, result)
+        return result
 
     def _cfg_get(self, section: str, key: str, default: Any = None) -> Any:
         """Helper method for safe configuration parameter lookup."""
@@ -411,6 +456,17 @@ class Solver:
         logger.info(f"   Saved optional migrated survey points to: {saved}")
         return saved
 
+    @staticmethod
+    def _uncertainty_exportable(grid: np.ndarray | None, name: str) -> bool:
+        """False (with a warning) if an uncertainty grid holds no finite value, i.e. the variance was not computed."""
+        if grid is not None and np.any(np.isfinite(grid)):
+            return True
+        logger.warning(
+            f"   [Export Skipped] The {name} raster is not exported: the Kriging variance is unavailable "
+            "(skipped by the memory guard or not provided by the interpolation method; see the log)."
+        )
+        return False
+
     def export_outputs(self, stage: str | None = None) -> list[str]:
         """
         Exports optional spatial datasets according to configured boolean output flags.
@@ -433,10 +489,11 @@ class Solver:
                 res = self._export_optional_raster(self._traveltime_grid, suffix="traveltime", name="traveltime")
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
-            if cfg_out.save_traveltime_uncertainty and self._traveltime_std is not None:
-                res = self._export_optional_raster(self._traveltime_std, suffix="traveltime_uncertainty", name="traveltime uncertainty")
-                if res:
-                    saved.extend([res] if isinstance(res, str) else res)
+            if cfg_out.save_traveltime_uncertainty and self._traveltime_grid is not None:
+                if self._uncertainty_exportable(self._traveltime_std, "traveltime uncertainty"):
+                    res = self._export_optional_raster(self._traveltime_std, suffix="traveltime_uncertainty", name="traveltime uncertainty")
+                    if res:
+                        saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_migrated_points and self.migrated_points is not None:
                 res = self._export_optional_points_csv(self.migrated_points, suffix="migrated_points")
                 if res:
@@ -448,17 +505,19 @@ class Solver:
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_thickness_uncertainty and self.kriged_std is not None:
-                res = self._export_optional_raster(self.kriged_std, suffix="thickness_uncertainty", name="thickness uncertainty")
-                if res:
-                    saved.extend([res] if isinstance(res, str) else res)
+                if self._uncertainty_exportable(self.kriged_std, "thickness uncertainty"):
+                    res = self._export_optional_raster(self.kriged_std, suffix="thickness_uncertainty", name="thickness uncertainty")
+                    if res:
+                        saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_basal_shear_stress and self.final_bss is not None:
                 res = self._export_optional_raster(self.final_bss, suffix="basal_shear_stress", name="basal shear stress")
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_basal_shear_stress_uncertainty and self.bss_std is not None:
-                res = self._export_optional_raster(self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty")
-                if res:
-                    saved.extend([res] if isinstance(res, str) else res)
+                if self._uncertainty_exportable(self.bss_std, "basal shear stress uncertainty"):
+                    res = self._export_optional_raster(self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty")
+                    if res:
+                        saved.extend([res] if isinstance(res, str) else res)
             if getattr(cfg_out, "save_bedrock_elevation_map", True) and self.final_grid is not None:
                 res = self._export_optional_raster(self.final_grid, suffix="bedrock", name="bedrock elevation")
                 if res:
@@ -717,31 +776,12 @@ class Solver:
         return sample_pts
 
     @property
-    def compute_uncertainty(self) -> bool:
-        """Requested ``compute_uncertainty`` setting (constructor argument, else ``outputs.compute_uncertainty``)."""
-        if self._compute_uncertainty is not None:
-            return self._compute_uncertainty
-        return bool(self.outputs_config_obj.compute_uncertainty)
-
-    def _needs_uncertainty_maps(self) -> bool:
-        """
-        Returns True if the post-migration Kriging variance must be evaluated.
-
-        The variance is evaluated when ``compute_uncertainty`` is True, or when an uncertainty raster export
-        (``save_thickness_uncertainty`` / ``save_basal_shear_stress_uncertainty``) is requested; in the latter
-        case ``compute_uncertainty=False`` is overridden and a single warning is logged. Diagnostic figures
-        never force the variance: their uncertainty panels show a placeholder instead.
-        When False the O(N^2) variance evaluation is skipped entirely.
-        """
-        requested = self.compute_uncertainty
-        required = self.outputs_config_obj.uncertainty_rasters_requested
-        if required and not requested and not self._uncertainty_override_warned:
-            logger.warning(
-                "outputs.compute_uncertainty=false is ignored: save_thickness_uncertainty / "
-                "save_basal_shear_stress_uncertainty require the Kriging variance, so it is computed."
-            )
-            self._uncertainty_override_warned = True
-        return bool(requested or required)
+    def max_memory_fraction(self) -> float:
+        """RAM budget fraction of the native Kriging engine (constructor argument, else configuration, else 0.5)."""
+        if self._max_memory_fraction is not None:
+            return self._max_memory_fraction
+        cfg_val = self._cfg_get("kriging_parameters", "max_memory_fraction", 0.5)
+        return validate_memory_fraction(cfg_val)
 
     def _execute_kriging_pass(
         self,
@@ -812,7 +852,9 @@ class Solver:
                 dy=self.dy,
                 bounds=self.bounds,
                 alpha_opt_deg=alpha_deg,
-                variogram_model=var_model,
+                # The drift analyzer always runs on the native 2-D dual-kriging solver, so it never
+                # receives the 1-D "linear" model (the engine-level warning is logged elsewhere).
+                variogram_model=resolve_native_variogram_model(var_model, warn=False),
                 variogram_params=var_params,
                 profile_data=prof_data,
                 interactive=not is_batch,
@@ -845,6 +887,7 @@ class Solver:
             show_progress=self.show_progress,
             external_drift_grid=ext_drifts if len(ext_drifts) > 0 else None,
             return_variance=return_variance,
+            max_memory_fraction=self.max_memory_fraction,
         )
 
         if target_upper == "P":
@@ -854,6 +897,18 @@ class Solver:
             return KrigingResult(bedrock_grid=grid, variance_grid=var)
 
         return krig_res
+
+    def _warn_traveltime_exports_unavailable(self, reason: str) -> None:
+        """Warns once if traveltime exports are requested although no traveltime grid is computed."""
+        cfg = self.outputs_config_obj
+        flags = [
+            name for name in ("save_traveltime_grid", "save_traveltime_uncertainty") if getattr(cfg, name)
+        ]
+        if flags:
+            logger.warning(
+                f"   [Migration Skipped] {', '.join(flags)} requested, but no traveltime grid is computed "
+                f"because {reason}; nothing will be exported for it."
+            )
 
     def migrate_eikonal(
         self,
@@ -909,6 +964,7 @@ class Solver:
             self.migrated_points = pts.copy()
             if self.outputs_config.get("save_migrated_points", False):
                 logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
+            self._warn_traveltime_exports_unavailable("survey_data_type is 'depth'")
             return self.migrated_points
 
         v_eff = float(velocity) if velocity is not None else 0.16
@@ -927,6 +983,7 @@ class Solver:
             self.migrated_points = np.column_stack((pts[:, 0], pts[:, 1], pts[:, 2], unmig_depths, pts[:, 4:]))
             if self.outputs_config.get("save_migrated_points", False):
                 logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
+            self._warn_traveltime_exports_unavailable("'perform_migration' is False")
             return self.migrated_points
 
         need_tt_unc = self.outputs_config_obj.save_traveltime_uncertainty
@@ -1086,7 +1143,10 @@ class Solver:
         should_plot = interactive or (self.plots_dir is not None)
 
         krig_method = method if method is not None else self.post_kriging_method
-        var_model = variogram_model if variogram_model is not None else self.post_variogram_model
+        if variogram_model is not None:
+            var_model = self._resolve_variogram_for_engine(variogram_model, krig_method)
+        else:
+            var_model = self.post_variogram_model
 
         krig_res = self._execute_kriging_pass(
             target_type=self.post_interpolation_target,
@@ -1096,7 +1156,7 @@ class Solver:
             var_model=var_model,
             zero_boundary=self.post_zero_boundary,
             pass_name="Pass 2: Post-Migration",
-            return_variance=self._needs_uncertainty_maps(),
+            return_variance=True,  # uncertainty is always computed; the memory guard may skip it if RAM is short
         )
         grid_raw = krig_res.bedrock_grid
         prod_var = krig_res.variance_grid
@@ -1371,8 +1431,10 @@ class Solver:
             mean_thick = _safe_nanmean(self.final_thickness)
             mean_unc = _safe_nanmean(self.kriged_std)
 
-        # Basal Shear Stress Calculation (tb = rho_ice * g * D * sin(alpha) in kPa)
-        sin_alpha_opt = self.safe_slope_sin
+        # Basal Shear Stress Calculation (tb = rho_ice * g * D * sin(alpha) in kPa).
+        # Deliberately the UNFLOORED slope: the slope floor only stabilizes the P <-> D/T
+        # conversions; applying it here would bias tb high in cells flatter than the floor.
+        sin_alpha_opt = self.slope_sin
         self.final_bss = (self.ice_density * self.g * self.final_thickness * sin_alpha_opt) / 1000.0
         self.bss_std = (self.ice_density * self.g * self.kriged_std * sin_alpha_opt) / 1000.0
 

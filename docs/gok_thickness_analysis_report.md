@@ -61,7 +61,7 @@ Thus, the SIA physical drift for the product field $P(x,y)$ is **constant**. Thi
 ### 3.2 Configuration & User Control
 
 1. **User Control in `src/pysole/solver.py`**:
-   `Solver.interpolate_kriging` passes `self.post_drift_terms` directly to `kriging_interpolation` without any hardcoded programmatic overrides, leaving full control in the user's hands to configure `"ordinary"` or `"universal"` Kriging as desired.
+   `Solver.calculate_bedrock` passes `self.post_drift_terms` directly to `kriging_interpolation` without any hardcoded programmatic overrides, leaving full control in the user's hands to configure `"ordinary"` or `"universal"` Kriging as desired.
 
 2. **Updated Recommended Configurations**:
    Updated `DEFAULT_CONFIG` in `src/pysole/config.py`, `pysole.json`, `examples/gok/pysole_gok.json`, and `examples/wuk/pysole_wuk.json` to set `post_migration.method` to `"ordinary"` and `post_migration.drift_terms` to `[]`.

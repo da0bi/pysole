@@ -18,6 +18,7 @@ from pysole.interpolation import (
     random_forest_hole_filling,
     blend_margin_topography,
 )
+from pysole.memory import kriging_chunk_size
 from pysole.smoothing import fft_gaussian_smooth
 from pysole.migration import migrate_eikonal_points
 from pysole.variogram import fit_variogram_model, calculate_variogram, optimize_bss_variance
@@ -198,7 +199,6 @@ class TestAuditRegressions(unittest.TestCase):
                 "dem_path": str(dem_path),
                 "survey_data_path": str(pts_path),
                 "survey_data_type": "depth",
-                "output_dir": str(self.output_dir),
                 "show_progress": False,
             },
             "migration_parameters": {"perform_migration": False},
@@ -479,7 +479,7 @@ class TestAuditRegressions(unittest.TestCase):
         cfg = {
             "inputs": {
                 "dem_path": str(dem_path), "survey_data_path": str(pts_path), "survey_data_type": "depth",
-                "output_dir": str(self.output_dir), "show_progress": False, "log_level": "WARNING",
+                "show_progress": False, "log_level": "WARNING",
             },
             "migration_parameters": {"perform_migration": False},
             "outputs": {"output_dir": str(self.output_dir / "log_out"), "output_format": "tif"},
@@ -592,6 +592,8 @@ class TestAuditRegressions(unittest.TestCase):
             calls.append(1)
             return real_lu_solve(*a, **k)
 
+        n_chunks = -(-400 // kriging_chunk_size(25))  # 20 x 20 grid cells
+
         with patch.object(interp, "lu_solve", side_effect=counting_lu_solve):
             z_full, v_full = built_in_kriging_interpolation(pts, geom.x_coords, geom.y_coords, **kw)
             n_full = len(calls)
@@ -601,91 +603,71 @@ class TestAuditRegressions(unittest.TestCase):
             )
             n_fast = len(calls)
 
-        self.assertEqual(n_full, 2)  # dual weights + explicit K^-1 for the variance
+        self.assertEqual(n_full, 1 + n_chunks)  # dual weights + one triangular solve per chunk (no explicit K^-1)
         self.assertEqual(n_fast, 1)  # dual weights only
         np.testing.assert_array_equal(z_full, z_fast)
         self.assertTrue(np.all(np.isfinite(v_full)) and np.all(v_full >= 0.0))
         self.assertTrue(np.all(np.isnan(v_fast)))  # NaN, never a misleading 0 uncertainty
 
     def test_solver_variance_flag_wiring(self):
-        """21. N5-M7/F-M2: pass 1 never asks for variance; pass 2 asks only if compute_uncertainty / a raster needs it."""
+        """21. Uncertainty is always requested in pass 2; pass 1 only as instructed; max_memory_fraction is forwarded."""
         from pysole.interpolation import KrigingResult
 
         solver = self._make_small_solver()
         solver.config = {}
-        self.assertTrue(solver._needs_uncertainty_maps())  # default: compute_uncertainty = True
+        self.assertEqual(solver.max_memory_fraction, 0.5)  # default
+        solver.config = {"kriging_parameters": {"max_memory_fraction": 0.3}}
+        self.assertEqual(solver.max_memory_fraction, 0.3)  # configuration
 
-        solver.config = {"outputs": {"compute_uncertainty": False}}
-        self.assertFalse(solver._needs_uncertainty_maps())
-        solver.config = {"outputs": {}}
-        self.assertTrue(solver._needs_uncertainty_maps())
-
-        # constructor argument beats the config value
-        solver_off = self._make_small_solver(compute_uncertainty=False)
-        solver_off.config = {"outputs": {"compute_uncertainty": True}}
-        self.assertFalse(solver_off.compute_uncertainty)
-        self.assertFalse(solver_off._needs_uncertainty_maps())
+        solver_arg = self._make_small_solver(max_memory_fraction=0.2)
+        solver_arg.config = {"kriging_parameters": {"max_memory_fraction": 0.3}}
+        self.assertEqual(solver_arg.max_memory_fraction, 0.2)  # constructor argument beats the config value
+        with self.assertRaises(ValueError):
+            self._make_small_solver(max_memory_fraction=0.95)
 
         fake = KrigingResult(bedrock_grid=np.full((12, 12), 40.0), variance_grid=np.full((12, 12), np.nan))
         with patch("pysole.solver.kriging_interpolation", return_value=fake) as mock_krig:
-            solver._execute_kriging_pass(
-                target_type="D", points=solver.migrated_points, krig_method="ordinary", drift_terms=[],
+            solver_arg._execute_kriging_pass(
+                target_type="D", points=solver_arg.migrated_points, krig_method="ordinary", drift_terms=[],
                 var_model="spherical", zero_boundary=False, pass_name="Pass 1: Pre-Migration", return_variance=False,
             )
             self.assertFalse(mock_krig.call_args.kwargs["return_variance"])
+            self.assertEqual(mock_krig.call_args.kwargs["max_memory_fraction"], 0.2)
 
-    def test_uncertainty_raster_overrides_compute_uncertainty_once(self):
-        """24. F-M2: an uncertainty raster request overrides compute_uncertainty=false with exactly ONE warning."""
-        for key in ("save_thickness_uncertainty", "save_basal_shear_stress_uncertainty"):
-            solver = self._make_small_solver(output_dir=str(self.output_dir / f"ovr_{key}"))
-            solver.config = {"outputs": {"compute_uncertainty": False, key: True}}
-            with patch.object(pysole_logger, "warning") as mock_warn:
-                self.assertTrue(solver._needs_uncertainty_maps())
-                self.assertTrue(solver._needs_uncertainty_maps())
-            override_msgs = [c for c in mock_warn.call_args_list if "compute_uncertainty" in str(c)]
-            self.assertEqual(len(override_msgs), 1, key)
+        with patch.object(solver, "_execute_kriging_pass", wraps=solver._execute_kriging_pass) as mock_exec:
+            solver.calculate_bedrock()
+        self.assertIs(mock_exec.call_args.kwargs["return_variance"], True)  # pass 2 always evaluates sigma
 
-        # end-to-end: the variance is really evaluated and finite
-        solver = self._make_small_solver(output_dir=str(self.output_dir / "ovr_e2e"))
-        solver.config = {"outputs": {"compute_uncertainty": False, "save_thickness_uncertainty": True}}
-        solver.calculate_bedrock()
+    def test_memory_guard_skips_variance_end_to_end(self):
+        """24. A RAM shortage yields NaN uncertainty with a warning, and the NaN raster is never exported."""
+        solver = self._make_small_solver(output_dir=str(self.output_dir / "guard_e2e"))
+        solver.config = {"outputs": {"save_thickness_uncertainty": True}}
+        with patch("pysole.memory.available_memory_bytes", return_value=1000):  # 1 kB: nothing fits
+            with self.assertLogs("pysole", level="WARNING") as cm:
+                solver.calculate_bedrock()
+        self.assertTrue(any("[Memory Guard]" in m for m in cm.output), cm.output)
+        self.assertTrue(np.all(np.isnan(solver.kriged_std)))
+
+        with self.assertLogs("pysole", level="WARNING") as cm:
+            saved = solver.export_outputs(stage="finalization")
+        self.assertFalse(any("uncertainty" in f for f in saved), saved)
+        self.assertTrue(any("[Export Skipped]" in m for m in cm.output), cm.output)
+
+    def test_variance_always_computed_and_figures_saved(self):
+        """25. The Kriging variance is always evaluated (finite inside the outline) and the figures are saved."""
+        solver = self._make_small_solver(output_dir=str(self.output_dir / "always_sigma"))
+        solver.config = {}
+        _, variance = solver.calculate_bedrock()
+        self.assertTrue(np.all(np.isfinite(variance[solver.outline_mask])))
         self.assertTrue(np.all(np.isfinite(solver.kriged_std[solver.outline_mask])))
-
-    def test_compute_uncertainty_false_skips_variance_keeps_figures(self):
-        """25. F-M2: compute_uncertainty=false drops the K^-1 solve, keeps identical bedrock and the same figures."""
-        import pysole.interpolation as interp
-
-        real_lu_solve = interp.lu_solve
-        runs = {}
-        for flag in (True, False):
-            counter = []
-
-            def counting_lu_solve(*a, _c=counter, **k):
-                _c.append(1)
-                return real_lu_solve(*a, **k)
-
-            solver = self._make_small_solver(output_dir=str(self.output_dir / f"cu_{flag}"))
-            solver.config = {"outputs": {"compute_uncertainty": flag}}
-            with patch.object(interp, "lu_solve", side_effect=counting_lu_solve):
-                bedrock, variance = solver.calculate_bedrock()
-            figs = sorted(os.listdir(solver.plots_dir))
-            runs[flag] = (len(counter), bedrock.copy(), variance.copy(), solver.kriged_std.copy(), figs)
-
-        n_on, bed_on, var_on, std_on, figs_on = runs[True]
-        n_off, bed_off, var_off, std_off, figs_off = runs[False]
-        self.assertEqual(n_on - n_off, 1)  # the explicit K^-1 solve of the variance step
-        np.testing.assert_array_equal(bed_on, bed_off)  # bitwise identical prediction
-        self.assertTrue(np.all(np.isfinite(var_on[solver.outline_mask])))
-        self.assertTrue(np.all(np.isnan(var_off)) and np.all(np.isnan(std_off)))  # NaN, never a fake 0
-        self.assertGreater(len(figs_on), 0)
-        self.assertEqual(figs_on, figs_off)  # plots are ALWAYS saved
+        self.assertGreater(len(os.listdir(solver.plots_dir)), 0)
 
     def test_uncertainty_placeholder_panel_renders(self):
-        """26. F-M2: an all-NaN uncertainty grid renders a placeholder panel without errors or warnings."""
+        """26. An all-NaN uncertainty grid renders a placeholder panel without errors or warnings."""
         import warnings
         from pysole.plotting import plot_kriging_bedrock_and_uncertainty, UNCERTAINTY_PLACEHOLDER_TEXT
 
-        self.assertIn("compute_uncertainty = false", UNCERTAINTY_PLACEHOLDER_TEXT)
+        self.assertIn("not available", UNCERTAINTY_PLACEHOLDER_TEXT)
         n = 12
         yy, xx = np.mgrid[0:n, 0:n].astype(float)
         bed = 900.0 + xx + yy
@@ -701,18 +683,19 @@ class TestAuditRegressions(unittest.TestCase):
         mock_warn.assert_not_called()
         self.assertTrue(any(f.endswith(".png") for f in os.listdir(out)))
 
-    def test_outputs_config_compute_uncertainty_roundtrip(self):
-        """27. F-M2: OutputsConfig/DEFAULT_CONFIG expose compute_uncertainty (default true) and round-trip it."""
-        from pysole.config import DEFAULT_CONFIG, OutputsConfig
+    def test_outputs_config_and_defaults_have_no_compute_uncertainty(self):
+        """27. The compute_uncertainty option is gone; max_memory_fraction and inputs.drift_analyzer are in the defaults."""
+        from pysole.config import ConfigError, DEFAULT_CONFIG, OutputsConfig, load_config
 
-        self.assertIs(DEFAULT_CONFIG["outputs"]["compute_uncertainty"], True)
-        self.assertTrue(OutputsConfig.from_dict({}).compute_uncertainty)
-        cfg = OutputsConfig.from_dict({"compute_uncertainty": False})
-        self.assertFalse(cfg.compute_uncertainty)
-        self.assertFalse(cfg.effective_compute_uncertainty)
-        self.assertIs(cfg.to_dict()["compute_uncertainty"], False)
-        cfg2 = OutputsConfig.from_dict({"compute_uncertainty": False, "save_thickness_uncertainty": True})
-        self.assertTrue(cfg2.uncertainty_rasters_requested and cfg2.effective_compute_uncertainty)
+        self.assertNotIn("compute_uncertainty", DEFAULT_CONFIG["outputs"])
+        self.assertNotIn("compute_uncertainty", OutputsConfig.__dataclass_fields__)
+        self.assertNotIn("compute_uncertainty", OutputsConfig.from_dict({}).to_dict())
+        self.assertEqual(DEFAULT_CONFIG["kriging_parameters"]["max_memory_fraction"], 0.5)
+        self.assertIs(DEFAULT_CONFIG["inputs"]["drift_analyzer"], False)
+        for bad in (0, -0.1, 0.95, "abc", None):
+            with self.assertRaises(ConfigError, msg=repr(bad)):
+                load_config({"kriging_parameters": {"max_memory_fraction": bad}})
+        self.assertEqual(load_config({"kriging_parameters": {"max_memory_fraction": 0.9}})["kriging_parameters"]["max_memory_fraction"], 0.9)
 
     def test_resolve_plots_dir_rules(self):
         """28. F-L2: figures follow the data files; absolute plots_dir wins; None == 'figures'."""
@@ -994,16 +977,17 @@ class TestAuditRegressions(unittest.TestCase):
                 coerce_bool(bad, "x", True)
         self.assertTrue(issubclass(ConfigError, ValueError))
 
-        out = OutputsConfig.from_dict({"compute_uncertainty": "false", "save_bedrock_elevation_map": "True"})
-        self.assertIs(out.compute_uncertainty, False)
-        self.assertIs(out.save_bedrock_elevation_map, True)
+        out = OutputsConfig.from_dict({"save_thickness_grid": "true", "save_bedrock_elevation_map": "False"})
+        self.assertIs(out.save_thickness_grid, True)
+        self.assertIs(out.save_bedrock_elevation_map, False)
         with self.assertRaises(ConfigError):
-            OutputsConfig.from_dict({"compute_uncertainty": "maybe"})
+            OutputsConfig.from_dict({"save_thickness_grid": "maybe"})
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = load_config(
                 {
-                    "inputs": {"output_dir": tmp, "show_progress": "false"},
+                    "inputs": {"show_progress": "false"},
+                    "outputs": {"output_dir": tmp},
                     "optimization_parameters": {"interactive_optimization": "no"},
                     "kriging_parameters": {"pre_migration": {"include_zero_boundary_condition": "False"}},
                 }
@@ -1012,7 +996,7 @@ class TestAuditRegressions(unittest.TestCase):
             self.assertIs(cfg["optimization_parameters"]["interactive_optimization"], False)
             self.assertIs(cfg["kriging_parameters"]["pre_migration"]["include_zero_boundary_condition"], False)
             with self.assertRaises(ConfigError) as ctx:
-                load_config({"inputs": {"output_dir": tmp}, "kriging_parameters": {"post_migration": {"include_zero_boundary_condition": "nope"}}})
+                load_config({"outputs": {"output_dir": tmp}, "kriging_parameters": {"post_migration": {"include_zero_boundary_condition": "nope"}}})
             self.assertIn("include_zero_boundary_condition", str(ctx.exception))
 
     def test_load_config_invalid_json_and_non_object(self):

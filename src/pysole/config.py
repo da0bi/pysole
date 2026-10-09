@@ -9,7 +9,9 @@ import copy
 import json
 import os
 import numpy as np
+from difflib import get_close_matches
 from .logging import logger, setup_logging
+from .memory import MAX_FRACTION_CAP
 
 
 class ConfigError(ValueError):
@@ -43,6 +45,17 @@ def coerce_bool(value: Any, name: str, default: bool) -> bool:
     raise ConfigError(f"Configuration parameter '{name}' must be a boolean (true/false), got {value!r}.")
 
 
+def validate_memory_fraction(value: Any, name: str = "kriging_parameters.max_memory_fraction") -> float:
+    """Returns ``value`` as float if it satisfies ``0 < value <= 0.9``, otherwise raises ``ConfigError``."""
+    try:
+        frac = float(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"Configuration parameter '{name}' must be a number, got {value!r}.") from None
+    if not (0.0 < frac <= MAX_FRACTION_CAP):
+        raise ConfigError(f"Configuration parameter '{name}' must satisfy 0 < value <= {MAX_FRACTION_CAP}, got {value!r}.")
+    return frac
+
+
 def _coerce_bool_leaves(config: dict[str, Any], defaults: dict[str, Any], prefix: str = "") -> None:
     """Validates / converts, in place, every config value whose default is a boolean."""
     for key, default in defaults.items():
@@ -54,6 +67,71 @@ def _coerce_bool_leaves(config: dict[str, Any], defaults: dict[str, Any], prefix
                 _coerce_bool_leaves(config[key], default, name + ".")
         elif isinstance(default, bool):
             config[key] = coerce_bool(config[key], name, default)
+
+
+def sanitize_config(
+    user_config: dict[str, Any] | None,
+    defaults: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """
+    Removes every key that is not part of the known configuration schema.
+
+    A configuration must not carry unknown (typically outdated or misspelled) keys, but they must also never
+    abort a run. Unknown keys are therefore dropped from the returned configuration and reported to the caller,
+    which logs a single warning (see :func:`warn_unknown_config_keys`).
+
+    Parameters
+    ----------
+    user_config : dict or None
+        User configuration (may be partial).
+    defaults : dict, optional
+        Schema to check against, ``DEFAULT_CONFIG`` by default.
+
+    Returns
+    -------
+    (cleaned, unknown) : tuple
+        ``cleaned`` is ``user_config`` itself if nothing had to be removed, otherwise a pruned copy;
+        ``unknown`` lists the removed keys as dotted paths, each with a "did you mean" hint where one is close.
+
+    Raises
+    ------
+    ConfigError
+        If a section that must be an object holds any other value (the run cannot continue meaningfully).
+    """
+    schema = DEFAULT_CONFIG if defaults is None else defaults
+    if not user_config:
+        return user_config, []
+
+    unknown: list[str] = []
+
+    def _walk(user: dict[str, Any], sch: dict[str, Any], prefix: str) -> dict[str, Any]:
+        cleaned: dict[str, Any] = {}
+        for key, value in user.items():
+            path = f"{prefix}{key}"
+            if key not in sch:
+                hint = get_close_matches(str(key), list(sch), n=1, cutoff=0.6)
+                unknown.append(f"{path} (did you mean '{prefix}{hint[0]}'?)" if hint else path)
+                continue
+            if isinstance(sch[key], dict):
+                if not isinstance(value, dict):
+                    raise ConfigError(f"Configuration section '{path}' must be a JSON object, got {value!r}.")
+                cleaned[key] = _walk(value, sch[key], path + ".")
+            else:
+                cleaned[key] = value
+        return cleaned
+
+    cleaned = _walk(user_config, schema, "")
+    if not unknown:
+        return user_config, []
+    return cleaned, unknown
+
+
+def warn_unknown_config_keys(unknown: list[str]) -> None:
+    """Logs one warning listing configuration keys that were ignored (see :func:`sanitize_config`)."""
+    if unknown:
+        logger.warning(
+            "Ignoring unknown configuration key(s) (outdated or misspelled?): " + "; ".join(unknown)
+        )
 
 
 @dataclass
@@ -71,24 +149,6 @@ class OutputsConfig:
     save_basal_shear_stress: bool = False
     save_basal_shear_stress_uncertainty: bool = False
     save_bedrock_elevation_map: bool = True
-    compute_uncertainty: bool = True
-
-    @property
-    def uncertainty_rasters_requested(self) -> bool:
-        """True if any exported uncertainty raster needs the Kriging estimation variance."""
-        return bool(
-            self.save_thickness_uncertainty
-            or self.save_basal_shear_stress_uncertainty
-            or self.save_traveltime_uncertainty
-        )
-
-    @property
-    def effective_compute_uncertainty(self) -> bool:
-        """
-        Whether the Kriging variance is evaluated. ``compute_uncertainty=False`` is overridden
-        (auto-enabled) when an uncertainty raster export is requested, since those need the variance.
-        """
-        return bool(self.compute_uncertainty or self.uncertainty_rasters_requested)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "OutputsConfig":
@@ -97,6 +157,8 @@ class OutputsConfig:
             return cls()
         valid_keys = cls.__dataclass_fields__
         filtered = {}
+        unknown = [str(k) for k in data if k not in valid_keys]
+        warn_unknown_config_keys([f"outputs.{k}" for k in unknown])
         for k, v in data.items():
             if k not in valid_keys:
                 continue
@@ -124,7 +186,6 @@ class OutputsConfig:
             "output_format": self.output_format,
             "output_prefix": self.output_prefix,
             "plots_dir": self.plots_dir,
-            "compute_uncertainty": self.compute_uncertainty,
             **self.active_exports(),
         }
 
@@ -141,6 +202,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "n_cores": -1,
         "log_level": "INFO",
         "show_progress": True,
+        "drift_analyzer": False,
     },
     "spatial_parameters": {
         "dx": None,
@@ -167,6 +229,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "kriging_parameters": {
         "engine": "native",
+        "max_memory_fraction": 0.5,
         "pre_migration": {
             "interpolation_target": "P",
             "method": "ordinary",
@@ -207,7 +270,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "save_basal_shear_stress": False,
         "save_basal_shear_stress_uncertainty": False,
         "save_bedrock_elevation_map": True,
-        "compute_uncertainty": True,
     },
 }
 
@@ -378,9 +440,15 @@ def load_config(
             if not isinstance(user_config, dict):
                 raise ConfigError(f"Configuration file '{cfg_p}' must contain a JSON object at the top level.")
 
+    unknown_keys: list[str] = []
+    if user_config:
+        user_config, unknown_keys = sanitize_config(user_config)
     if user_config:
         _deep_merge_dict(config, user_config)
     _coerce_bool_leaves(config, DEFAULT_CONFIG)
+    config["kriging_parameters"]["max_memory_fraction"] = validate_memory_fraction(
+        config["kriging_parameters"]["max_memory_fraction"]
+    )
 
     # Automatically align Kriging defaults based on interpolation_target if method was not explicitly user-defined
     kp = config.get("kriging_parameters", {})
@@ -409,6 +477,7 @@ def load_config(
 
     eff_log_level = log_level or os.environ.get("PYSOLE_LOG_LEVEL") or inputs.get("log_level", "INFO")
     setup_logging(log_file=log_file, log_level=eff_log_level)
+    warn_unknown_config_keys(unknown_keys)  # after logging setup, so the warning reaches the log file
     return config
 
 
