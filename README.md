@@ -22,7 +22,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[5. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Robust Baseline Interpolation Strategies](#interpolation-strategies)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[7. Universal Kriging Drift Models](#universal-kriging-drift-models)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[8. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[8. Kriging Uncertainty Derivation](#kriging-uncertainty-derivation)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[9. Memory Guard and Kriging Uncertainty](#memory-guard-and-uncertainty)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[10. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br><br>
 [Package Architecture](#package-architecture)<br><br>
@@ -556,25 +556,37 @@ While users can combine any available interpolation options and deploy the `Drif
 
    <i>Recommended for e.g. tilted valley glaciers governed by viscous flow physics and linear spatial trends. Use `interpolation_target`: `"T"`, or `"D"`.</i>
 
-<a id="depth-uncertainty-derivation"></a>
-#### 8. Depth Uncertainty Derivation in Meters
-Kriging interpolation provides uncertainty estimates by variance of the product field $\sigma_{\text{P}}^2(x,y)$ $[m²]$. The 2D depth estimation variance field $\sigma_{\text{D}}^2(x,y)$ $[m²]$ is obtained via linear error propagation:
+<a id="kriging-uncertainty-derivation"></a>
+#### 8. Kriging Uncertainty Derivation
+Kriging spatial interpolation natively evaluates the 2D estimation variance field $\sigma^2(x,y)$ alongside point predictions. Taking the square root converts the variance field into the **Kriging Standard Error $\sigma(x,y)$**, serving as a quantitative measure of interpolation uncertainty across unmeasured regions.
 
-<p align="center">
-$$\sigma_{\text{D}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m}^2]$$
-</p>
+The exact calculation of the estimation variance depends on the selected `interpolation_target`:
 
-Taking the square root converts the variance field into the **Kriging Standard Error $\sigma_{\text{D}}(x,y)$ in meters**:
+- **Direct Target Interpolation (`interpolation_target`: `"D"` or `"T"`)**:
+  When directly interpolating migrated depths $D_i$ or signal traveltimes $T_i$, the Kriging estimation variance field ($\sigma_{\text{D}}^2(x,y)$ $[\text{m}^2]$ or $\sigma_{\text{T}}^2(x,y)$ $[\text{ns}^2]$) is evaluated directly. Taking the square root yields the standard error in physical units:
 
-<p align="center">
-$$\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}]$$
-</p>
+  <p align="center">
+  $$\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}] \qquad \text{or} \qquad \sigma_{\text{T}}(x,y) = \sqrt{\sigma_{\text{T}}^2(x,y)} \quad [\pm\,\text{ns}]$$
+  </p>
 
-Under Gaussian linear estimation theory, $\pm 1.00$ $\sigma_{\text{D}}(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96$ $\sigma_{\text{D}}(x,y)$ represents the 95% confidence margin of error.
+- **BSS-derived Product Target Interpolation (`interpolation_target`: `"P"`)**:
+  When interpolating the BSS product field $P(x,y) = D \cdot \sin(\alpha_{\text{opt}})$ (or $P(x,y) = T \cdot \sin(\alpha_{\text{opt}})$), Kriging calculates the product variance $\sigma_{\text{P}}^2(x,y)$. The 2D estimation variance ($\sigma_{\text{D}}^2(x,y)$ $[\text{m}^2]$ or $\sigma_{\text{T}}^2(x,y)$ $[\text{ns}^2]$) is derived via linear error propagation with the optimal surface slope field $\sin(\alpha_{\text{opt}}(x,y))$:
+
+  <p align="center">
+  $$\sigma_{\text{D}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m}^2] \qquad \text{or} \qquad \sigma_{\text{T}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{ns}^2]$$
+  </p>
+
+  Taking the square root converts the propagated variance field into the **Kriging Standard Error $\sigma_{\text{D}}(x,y)$ in meters** (or $\sigma_{\text{T}}(x,y)$ in traveltime units):
+
+  <p align="center">
+  $$\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}]$$
+  </p>
+
+Under Gaussian linear estimation theory, $\pm 1.00 \, \sigma(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96 \, \sigma(x,y)$ represents the 95% confidence margin of error.
 
 <a id="memory-guard-and-uncertainty"></a>
 #### 9. Memory Guard and Kriging Uncertainty
-The Kriging uncertainty (thickness, basal shear stress) is **always computed** in the post-migration pass and **always shown** in the diagnostic figures; the `save_*_uncertainty` options only control whether the rasters are exported. The traveltime uncertainty $\sigma_{\text{T}}$ is exported on request but never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
+The Kriging uncertainty is **always computed** and **always shown** in the diagnostic figures for the post-migration products; the `save_*_uncertainty` options only control whether the rasters are exported. The traveltime uncertainty $\sigma_{\text{T}}$ is exported on request but never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
 
 The native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM (cgroup limits are respected). If the estimate does not fit:
 
