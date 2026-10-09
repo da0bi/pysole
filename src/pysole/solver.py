@@ -9,8 +9,8 @@ from typing import Any
 import numpy as np
 import os
 from .raster import BedrockMap, load_dem, load_outline, GridGeometry, load_survey_points, save_points_csv
-from .migration import migrate_eikonal_points, EikonalMigrator, MigrationResult
-from .variogram import BSSOptimizer, OptimizationResult, compute_cutoff_wavelength
+from .migration import migrate_eikonal_points, EikonalMigrator
+from .variogram import BSSOptimizer, compute_cutoff_wavelength
 from .interpolation import (
     blend_margin_topography,
     kriging_interpolation,
@@ -20,7 +20,7 @@ from .interpolation import (
     CURVATURE_DRIFT_TERMS,
 )
 from .smoothing import compute_gradients, precompute_fft_grid, fft_gaussian_smooth_precomputed, compute_surface_curvature
-from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir
+from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir, resolve_plots_dir, configured_output_dir
 from .logging import logger
 from .drift_analyzer import DriftAnalyzer
 from .survey_planner import SurveyPlanner
@@ -64,6 +64,7 @@ class Solver:
         survey_profile_column: str | None = None,
         config_path: str | Path | None = None,
         show_progress: bool = True,
+        compute_uncertainty: bool | None = None,
     ):
         """
         Parameters
@@ -90,6 +91,9 @@ class Solver:
             1st-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'.
         pre_zero_boundary : bool
             If True, enforces a zero traveltime boundary condition (T=0) on the glacier margin outline.
+        pre_interpolation_target : str
+            Quantity interpolated in the 1st pass: 'P' (default; BSS product P = T * sin(alpha_opt)) or
+            'T' (direct traveltimes), see the README parameter reference.
         post_kriging_method : str
             2nd-pass post-migration Kriging approach ('universal', 'ordinary', 'regression'). Default 'universal'.
         post_drift_terms : list of str, optional
@@ -98,6 +102,9 @@ class Solver:
             2nd-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'.
         post_zero_boundary : bool
             If True, enforces a zero thickness boundary condition (H=0) on the glacier margin outline.
+        post_interpolation_target : str
+            Quantity interpolated in the 2nd pass: 'P' (default; product P = D * sin(alpha_opt)) or
+            'D' (direct migrated depths), see the README parameter reference.
         perform_migration : bool
             If True (default), performs 3D Eikonal ray migration on travel times. If False, skips migration.
         survey_data_type : str
@@ -109,20 +116,38 @@ class Solver:
             Number of CPU cores for multi-threading/processing (-1 for all available cores).
         kriging_engine : str
             Kriging solver engine: 'native' (default, high-performance solver) or 'pykrige'.
+        nrbins : int, optional
+            Number of variogram bins. If None (default), chosen automatically as
+            ``min(30, max(3, n_pairs // 30))``.
+        ice_density : float
+            Ice density [kg/m^3] used for the basal shear stress (BSS) output and SIA depth. Default 900.0.
+        g : float
+            Gravitational acceleration [m/s^2]. Default 9.81.
         output_dir : str or Path, optional
             General workspace directory for all output files. If None, defaults to parent directory of survey_data_path.
+        survey_data_path : str or Path, optional
+            Default survey file path; used to resolve the default output folder (and figures folder) when
+            ``output_dir`` / ``plots_dir`` are not given.
         survey_profile_column : str, optional
             Column name identifying individual survey profiles in survey CSV data for LOPO spatial CV.
         config_path : str or Path, optional
             Path to configuration file used for resolving relative paths.
         show_progress : bool
             If True (default), displays terminal progress bars during heavy processing steps.
+        compute_uncertainty : bool, optional
+            If True, the post-migration Kriging variance (uncertainty maps) is evaluated. If False, the
+            O(N^2 * grid cells) variance evaluation is skipped; diagnostic figures are still saved, with a
+            placeholder in the uncertainty panels. It is automatically re-enabled (with a warning) if an
+            uncertainty raster export is requested. If None (default), ``outputs.compute_uncertainty`` of
+            the configuration is used (default True).
         """
         self.output_dir = output_dir
         self.survey_data_path = survey_data_path
         self.survey_profile_column = survey_profile_column
         self.config_path = str(config_path) if config_path else None
         self._raw_plots_dir = plots_dir
+        self._compute_uncertainty = None if compute_uncertainty is None else bool(compute_uncertainty)
+        self._uncertainty_override_warned = False
 
         self.dem_grid, self.meta = load_dem(
             self.resolve_input_path(dem),
@@ -171,6 +196,7 @@ class Solver:
         # Gradient, DEM, Feature, and Sample Points Caches
         self._gradient_cache: dict[str, np.ndarray] | None = None
         self._fft_dem_cache: tuple[np.ndarray, np.ndarray] | None = None
+        self._fft_dem_pad_kc: float = float("inf")  # k_c the cached FFT padding was sized for
         self._smoothed_dem_cache: dict[float, np.ndarray] = {}
         self._sample_pts_cache: dict[tuple[str, str], np.ndarray] = {}
 
@@ -204,7 +230,9 @@ class Solver:
         if self.config_path and Path(self.config_path).exists() and not self.config:
             try:
                 from .config import load_config
-                self.config = load_config(self.config_path)
+                # Keep an already-configured logger level (e.g. CLI --verbose/--debug set by run_from_config)
+                active_level = logger.level if (logger.handlers and logger.level) else None
+                self.config = load_config(self.config_path, log_level=active_level)
             except Exception:
                 pass
 
@@ -447,9 +475,20 @@ class Solver:
 
     @property
     def plots_dir(self) -> str:
-        """Directory where generated plots are automatically saved."""
-        target = self._raw_plots_dir if self._raw_plots_dir is not None else "figures"
-        return self.resolve_path(target)
+        """
+        Directory where diagnostic figures are saved (figures are always saved).
+
+        Absolute ``plots_dir`` is used as is; otherwise the directory is resolved next to the data files:
+        the parent folder of an absolute ``outputs.output_prefix``, else the effective ``output_dir``.
+        """
+        out_cfg = (getattr(self, "config", None) or {}).get("outputs", {})
+        return resolve_plots_dir(
+            self._raw_plots_dir,
+            output_prefix=out_cfg.get("output_prefix"),
+            output_dir=self.output_dir,
+            survey_data_path=self.survey_data_path,
+            config_path=getattr(self, "config_path", None),
+        )
 
     @plots_dir.setter
     def plots_dir(self, value: str | Path | None) -> None:
@@ -465,16 +504,26 @@ class Solver:
             self._gradient_cache = compute_gradients(self.dem_grid, dx=self.dx, dy=self.dy)
         return self._gradient_cache
 
-    def _get_fft_dem_grids(self) -> tuple[np.ndarray, np.ndarray]:
-        if self._fft_dem_cache is None:
-            A_shift_dem, k_grid_dem, _ = precompute_fft_grid(self.dem_grid, dx=self.dx, dy=self.dy)
+    def _get_fft_dem_grids(self, kc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Returns the cached padded DEM spectrum and wavenumber grid.
+
+        Reflection padding scales with the Gaussian kernel width, ``ceil(4 / (k_c * dx))`` px, so it is sized for
+        the smallest k_c requested so far (never below the default k_c = 0.01 rad/m sizing). The FFT is only
+        recomputed when a smaller k_c than any previous request needs wider padding; previously cached smoothed
+        grids (larger k_c) remain valid.
+        """
+        kc_pad = 0.01 if (kc is None or not kc > 0) else min(float(kc), 0.01)
+        if self._fft_dem_cache is None or kc_pad < self._fft_dem_pad_kc:
+            A_shift_dem, k_grid_dem, _ = precompute_fft_grid(self.dem_grid, dx=self.dx, dy=self.dy, kc=kc_pad)
             self._fft_dem_cache = (A_shift_dem, k_grid_dem)
+            self._fft_dem_pad_kc = kc_pad
         return self._fft_dem_cache
 
     def get_smoothed_dem(self, kc: float) -> np.ndarray:
         kc_key = round(float(kc), 6)
         if kc_key not in self._smoothed_dem_cache:
-            A_shift_dem, k_grid_dem = self._get_fft_dem_grids()
+            A_shift_dem, k_grid_dem = self._get_fft_dem_grids(kc)
             smoothed_dem = fft_gaussian_smooth_precomputed(A_shift_dem, k_grid_dem, kc=kc)
             self._smoothed_dem_cache[kc_key] = smoothed_dem
         return self._smoothed_dem_cache[kc_key]
@@ -577,7 +626,7 @@ class Solver:
             nrbins=nrbins,
             ice_density=ice_density,
             g=g_val,
-            output_dir=outputs.get("output_dir"),
+            output_dir=configured_output_dir(cfg),
             survey_data_path=inputs.get("survey_data_path"),
             survey_profile_column=inputs.get("survey_profile_column"),
             config_path=config_path if not isinstance(config_path, dict) else None,
@@ -644,18 +693,32 @@ class Solver:
         self._sample_pts_cache[cache_key] = sample_pts
         return sample_pts
 
-    def _needs_uncertainty_maps(self, should_plot: bool = False) -> bool:
+    @property
+    def compute_uncertainty(self) -> bool:
+        """Requested ``compute_uncertainty`` setting (constructor argument, else ``outputs.compute_uncertainty``)."""
+        if self._compute_uncertainty is not None:
+            return self._compute_uncertainty
+        return bool(self.outputs_config_obj.compute_uncertainty)
+
+    def _needs_uncertainty_maps(self) -> bool:
         """
-        Returns True if the post-migration Kriging variance is actually consumed downstream, i.e. when
-        thickness / basal-shear-stress uncertainty rasters are exported or when diagnostic uncertainty
-        figures are produced. When False the O(N^2) variance evaluation is skipped entirely.
+        Returns True if the post-migration Kriging variance must be evaluated.
+
+        The variance is evaluated when ``compute_uncertainty`` is True, or when an uncertainty raster export
+        (``save_thickness_uncertainty`` / ``save_basal_shear_stress_uncertainty``) is requested; in the latter
+        case ``compute_uncertainty=False`` is overridden and a single warning is logged. Diagnostic figures
+        never force the variance: their uncertainty panels show a placeholder instead.
+        When False the O(N^2) variance evaluation is skipped entirely.
         """
-        out_cfg = self.outputs_config_obj
-        return bool(
-            should_plot
-            or getattr(out_cfg, "save_thickness_uncertainty", False)
-            or getattr(out_cfg, "save_basal_shear_stress_uncertainty", False)
-        )
+        requested = self.compute_uncertainty
+        required = self.outputs_config_obj.uncertainty_rasters_requested
+        if required and not requested and not self._uncertainty_override_warned:
+            logger.warning(
+                "outputs.compute_uncertainty=false is ignored: save_thickness_uncertainty / "
+                "save_basal_shear_stress_uncertainty require the Kriging variance, so it is computed."
+            )
+            self._uncertainty_override_warned = True
+        return bool(requested or required)
 
     def _execute_kriging_pass(
         self,
@@ -1012,7 +1075,7 @@ class Solver:
             var_model=var_model,
             zero_boundary=self.post_zero_boundary,
             pass_name="Pass 2: Post-Migration",
-            return_variance=self._needs_uncertainty_maps(should_plot),
+            return_variance=self._needs_uncertainty_maps(),
         )
         grid_raw = krig_res.bedrock_grid
         prod_var = krig_res.variance_grid
@@ -1131,14 +1194,30 @@ class Solver:
         smoothing_kc_cutoff: float | None = None,
     ) -> BedrockMap:
         """
-        Finalizes bedrock topography by executing optional Random Forest gap filling,
-        margin blending, and spatial DEM smoothing. Returns completed BedrockMap.
-        """
-        """
-        Executes full final sequence towards continuous bedrock topography result.
+        Finalizes bedrock topography and derived products.
+
+        Executes the full final sequence towards the continuous bedrock topography result: optional
+        spatial smoothing of the Kriged depth field, optional Random Forest gap filling, optional margin
+        blending, then derivation of the final thickness, basal shear stress and their uncertainties
+        (NaN if the Kriging variance was not computed), diagnostic figures and configured exports.
+        Returns the completed BedrockMap.
 
         Parameters
         ----------
+        interactive : bool, default False
+            If True, prompts for unset gap-filling / blending options and shows figures interactively.
+        plotit : bool, default True
+            Retained for API compatibility; diagnostic figures are always saved.
+        random_forest_gap_filling : bool, optional
+            Apply Random Forest gap filling. If None, asks when interactive, otherwise False.
+        apply_margin_blend : bool, optional
+            Apply geomorphological margin blending. If None, asks when interactive, otherwise False.
+        min_gap_dist : float, optional
+            Minimum gap distance / margin width [m] for margin blending (default 50.0).
+        smooth_bedrock : bool, default False
+            Smooth the Kriged depth field before computing the bedrock grid.
+        smoothing_method : str, default "gaussian"
+            Smoothing method: 'gaussian', 'median' or 'fft_lowpass'.
         smoothing_sigma : float
             Smoothing strength (radius in pixels) for Gaussian filtering (default 1.5).
             Higher values produce smoother bedrock terrain.
@@ -1407,13 +1486,29 @@ class Solver:
     ) -> dict[str, Any]:
         """
         Executes forward survey planning for unprobed glaciers using synthetic SIA modeling.
+
+        Output locations (data files and figures always end up together):
+
+        * ``output_prefix`` relative (default from ``outputs.output_prefix``): files go to the effective
+          output directory (``output_dir`` argument, ``Solver.output_dir`` or ``outputs.output_dir``).
+        * ``output_prefix`` absolute: files are written beside it; without an explicit output directory its
+          parent folder becomes the base folder (nothing is created in the current working directory).
+        * Figures: an absolute ``plots_dir`` is used as is; a relative / unset one resolves to
+          ``<base folder>/figures``.
         """
-        cfg = getattr(self, "config", {})
+        cfg = getattr(self, "config", None) or {}
         outputs = cfg.get("outputs", {})
 
         prefix = output_prefix or outputs.get("output_prefix", "final")
-        out_d = output_dir or self.output_dir or resolve_output_dir(outputs.get("output_dir"), config_path=self.config_path)
-        plots_d = plots_dir or self.plots_dir
+        explicit_out_dir = output_dir or self.output_dir or outputs.get("output_dir")
+        if explicit_out_dir:
+            out_d = str(resolve_output_dir(explicit_out_dir, config_path=self.config_path))
+        elif Path(prefix).expanduser().is_absolute():
+            out_d = str(Path(prefix).expanduser().parent)
+        else:
+            out_d = str(resolve_output_dir(None, config_path=self.config_path))
+        raw_plots = plots_dir if plots_dir is not None else self._raw_plots_dir
+        plots_d = resolve_plots_dir(raw_plots, output_prefix=prefix, output_dir=out_d, config_path=self.config_path)
         fmt = output_format or outputs.get("output_format", "tif")
         if isinstance(fmt, list):
             fmt = fmt[0]
@@ -1463,7 +1558,6 @@ class Solver:
         migration = cfg.get("migration_parameters", {})
         opt = cfg.get("optimization_parameters", {})
         fin_cfg = cfg.get("finalization_parameters", {})
-        outputs = cfg.get("outputs", {})
 
         survey_data_path = self.survey_data_path or inputs.get("survey_data_path")
         if not survey_data_path:
@@ -1523,14 +1617,7 @@ class Solver:
             smoothing_kc_cutoff=fin_cfg.get("smoothing_kc_cutoff", None),
         )
 
-        output_format = self.outputs_config_obj.output_format
-        resolved_prefix = self._get_resolved_output_prefix()
-        bedrock_filepath = f"{resolved_prefix}_bedrock"
-        saved_res = bedrock_map.save(bedrock_filepath, formats=output_format)
-        if isinstance(saved_res, list):
-            for sf in saved_res:
-                logger.info(f"5. Saved predicted bedrock map to: {sf}")
-        else:
-            logger.info(f"5. Saved predicted bedrock map to: {saved_res}")
+        # Migration-stage outputs were exported by migrate_eikonal() (only if a migration actually ran) and
+        # finalization-stage outputs (bedrock raster, thickness, BSS, uncertainties) by finalize_bedrock().
 
         return bedrock_map

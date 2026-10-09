@@ -207,6 +207,7 @@ All execution options can be fully defined in a single JSON configuration file, 
         "output_prefix": "final",
         "plots_dir": "figures",
         "save_bedrock_elevation_map": true,
+        "compute_uncertainty": true,
         "save_traveltime_grid": false,
         "save_migrated_points": false,
         "save_thickness_grid": false,
@@ -276,9 +277,10 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `smoothing_kc_cutoff` | `float` | `null` | Corner frequency cutoff wavenumber (<i>k</i><sub>c,smooth</sub>) for `"fft_lowpass"`. If `null`, defaults to <i>k</i><sub>c,opt</sub> from the surface slope smoothing optimization. <i>Lower</i> values produce smoother bedrock terrain. |
 | **`outputs`** | `output_dir` | `str` | `null` | General workspace directory for all output files. `"."` defines `output_dir` as the parent directory of the `pysole.json` configuration file. If `null` (default), automatically creates a `pysole` folder inside the parent directory of `survey_data_path`. All relative output paths are resolved relative to `output_dir`. Absolute output paths override `output_dir`. |
 | | `output_format` | `str` / `list[str]` | `"tif"` | Desired export format(s): `"tif"`, `"asc"`, `"csv"`, `"npy"`, a list of formats (e.g. `["tif", "asc", "csv"]`), or `"all"` to export all four formats. |
-| | `output_prefix` | `str` | `"final"` | Filename prefix or absolute filepath prefix used to construct export filenames. Do not include file extensions—format extension(s) are determined by `output_format`. Relative prefix names resolve inside `output_dir`; absolute filepaths override `output_dir`. 🚨 The final bedrock grid `<output_prefix>_bedrock.<ext>` is exported by default. 🚨 |
-| | `plots_dir` | `str` | `"figures"` | Output directory for saving diagnostic figures. All generated figures are saved automatically. If `null`, figures are saved into a `"figures"` folder inside `output_dir`. An absolute path overrides `output_dir/figures`. |
+| | `output_prefix` | `str` | `"final"` | Filename prefix or absolute filepath prefix used to construct export filenames. Do not include file extensions—format extension(s) are determined by `output_format`. Relative prefix names resolve inside `output_dir`; absolute filepaths override `output_dir`. **If an absolute path is given, all outputs of the run — rasters, CSV/GPX/GeoJSON files *and the diagnostic figures* — are written beside it (figures in a `figures/` subfolder, unless `plots_dir` is absolute).** 🚨 The final bedrock grid `<output_prefix>_bedrock.<ext>` is exported by default. 🚨 |
+| | `plots_dir` | `str` | `"figures"` | Where diagnostic figures are saved (figures are **always** saved; this setting controls *where*, not *whether*). `null` is equivalent to `"figures"`. A relative path is resolved **next to the data files**: inside `output_dir`, or — if `output_prefix` is an absolute path — in that path's folder, so data and figures always end up together. An absolute `plots_dir` is used as is. |
 | | `save_bedrock_elevation_map` | `bool` | `true` | If `true` (default), exports the predicted bedrock elevation raster grid, $Z_{\text{bed}}(x,y) = Z_{\text{surf}}(x,y) - D(x,y)$, to `<output_prefix>_bedrock.<ext>`. |
+| | `compute_uncertainty` | `bool` | `true` | If `true` (default), the post-migration Kriging estimation variance is evaluated, giving the uncertainty maps $\sigma_D(x,y)$ and $\sigma_{\tau_b}(x,y)$ shown in the diagnostic figures. If `false`, this O(N²·G) step is skipped (N survey points, G grid cells; typically 3–11× faster Kriging for N = 1 000–6 000 points on a 160 000-cell grid, identical bedrock result). The figures are still saved, with an *"Uncertainty not computed"* placeholder in the uncertainty panels. 🚨 If `save_thickness_uncertainty` or `save_basal_shear_stress_uncertainty` is `true`, the variance is needed: `compute_uncertainty: false` is then overridden with a warning. 🚨 |
 | | `save_traveltime_grid` | `bool` | `false` | If `true`, exports the pre-migration interpolated traveltime raster grid, <i>T</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_traveltime.<ext>`. |
 | | `save_migrated_points` | `bool` | `false` | If `true`, exports the 3D ray-migrated survey points to `<output_prefix>_migrated_points.csv` (`x, y, z_surface, depth_migrated`). If migration is skipped, it is automatically set to `false` and a log message is printed. |
 | | `save_thickness_grid` | `bool` | `false` | If `true`, exports the final thickness raster grid, <i>D</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness.<ext>`. |
@@ -665,12 +667,20 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole plan-survey --dem dem.tif --outline outline.geojson --kc 0.0314 --tau 100 --max-km 5 --out-dir results --format tif
   ```
-  *Computes the shallow-ice-approximation (SIA) thickness model and proposes survey tracks within a length budget. Options: `--dem` (required), `--outline`, `--kc` (FFT corner wavenumber in rad/m, default `0.0314`), `--tau` (target basal shear stress $\tau_0$ in kPa, default `100`), `--max-km` (survey length budget in km, default `5.0`), `--prefix` (output prefix, default `final`), `--out-dir`, `--plots-dir` and `--format` (`tif` or `asc`, default `tif`).*
+  *Computes the shallow-ice-approximation (SIA) thickness model and proposes survey tracks within a length budget. Options: `--dem` (required), `--outline`, `--kc` (FFT corner wavenumber in rad/m, default `0.0314`), `--tau` (target basal shear stress $\tau_0$ in kPa, default `100`), `--max-km` (survey length budget in km, default `5.0`), `--prefix` (output prefix, default `final`), `--out-dir`, `--plots-dir` and `--format` (`tif` or `asc`, default `tif`). Outputs are kept together: files go to `--out-dir` (current directory if omitted); an absolute `--prefix` places all files beside it; figures are saved in `figures/` next to the data files unless `--plots-dir` is an absolute path.*
+
+* **Show the Installed Version:**
+  ```bash
+  pysole --version
+  ```
+  *Prints `PySole <version>` and exits (`-V` is equivalent). `python -m pysole ...` is also supported.*
 
 * **Display CLI Help & Usage Options:**
   ```bash
   pysole --help
   ```
+
+> **Error handling:** a missing configuration file, invalid JSON, or an invalid configuration value (e.g. a non-boolean value such as `"maybe"` for a boolean parameter) is reported as a single `pysole: error: ...` line on stderr with exit status 1. Add `-v` / `--debug` to get the full traceback. Boolean parameters accept JSON `true`/`false` (also `0`/`1` and the strings `"true"`/`"false"`, `"yes"`/`"no"`, `"on"`/`"off"`, case-insensitive); `null` falls back to the default.
 
 ---
 
@@ -807,9 +817,9 @@ blended_bedrock = finalizer.blend_margin(rf_filled, min_gap_dist=50.0)
 <a id="real-world-example-wurtenkees-glacier"></a>
 ## Real-World Example: Wurtenkees Glacier
 
-You can run a complete real-world demonstration on the **Wurtenkees Glacier** dataset (Hohe Tauern, Eastern Alps, Austria) using the provided configuration file [`examples/wuk/pysole_wuk.json`](file:///home/db/Software/pysole/examples/wuk/pysole_wuk.json).
+You can run a complete real-world demonstration on the **Wurtenkees Glacier** dataset (Hohe Tauern, Eastern Alps, Austria) using the provided configuration file [`examples/wuk/pysole_wuk.json`](./examples/wuk/pysole_wuk.json).
 
-An executable example script is provided in [`examples/wuk/run_wuk_example.py`](file:///home/db/Software/pysole/examples/wuk/run_wuk_example.py):
+An executable example script is provided in [`examples/wuk/run_wuk_example.py`](./examples/wuk/run_wuk_example.py):
 
 ```bash
 python examples/wuk/run_wuk_example.py

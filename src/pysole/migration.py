@@ -8,7 +8,6 @@ computing non-orthogonal slowness vector components (sx, sy, sz) and horizontal/
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator
 from .smoothing import compute_gradients
 from .raster import GridGeometry
 from .logging import logger, get_progress_bar
@@ -116,6 +115,8 @@ def migrate_eikonal_points(
         Whether to display interactive Matplotlib figures.
     dem_grads : dict, optional
         Pre-computed surface DEM gradients dict to avoid redundant gradient calculations.
+    show_progress : bool, default True
+        Show a progress bar for the point-wise ray tracing.
 
     Returns
     -------

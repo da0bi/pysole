@@ -4,16 +4,15 @@ Handles configuration ingestion, workspace path resolution, output export manage
 and high-level execution wrappers.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
 import os
 import sys
 from typing import Any
 import numpy as np
 
-from .config import load_config, resolve_path, resolve_input_path, resolve_output_dir, OutputsConfig
+from .config import load_config, resolve_path, resolve_output_dir, configured_output_dir
 from .logging import logger, setup_logging
-from .raster import BedrockMap, save_points_csv
+from .raster import BedrockMap
 
 
 class PipelineExporter:
@@ -86,7 +85,7 @@ def run_from_config(
     log_lvl = log_level or os.environ.get("PYSOLE_LOG_LEVEL") or inputs_cfg.get("log_level", "INFO")
 
     output_dir = resolve_output_dir(
-        output_dir=outputs_cfg.get("output_dir") or inputs_cfg.get("output_dir"),
+        output_dir=configured_output_dir(cfg),
         survey_data_path=inputs_cfg.get("survey_data_path"),
         config_path=config_file,
     )
@@ -150,8 +149,8 @@ def run_from_config(
             smoothing_kc_cutoff=fin_cfg.get("smoothing_kc_cutoff"),
         )
 
-        exporter = PipelineExporter(solver)
-        exporter.export_all()
+        # Migration-stage outputs are exported inside migrate_eikonal() (only when a migration actually ran) and
+        # finalization-stage outputs inside finalize_bedrock(); nothing is exported twice here.
 
         output_bedrock_file = outputs_cfg.get("output_bedrock_map")
         if output_bedrock_file:

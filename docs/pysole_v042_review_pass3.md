@@ -1,5 +1,7 @@
 # PySole v0.4.2 — Third-Pass Code Review (read-only)
 
+> **Historical document.** This report was written against an earlier development state of PySole and is kept for traceability only. Findings listed here were addressed in later releases (see [CHANGELOG](../CHANGELOG.md) and [pysole_v043_final_audit.md](pysole_v043_final_audit.md)); line numbers and parameter names may no longer match the current code.
+
 Scope: `src/pysole/` at `/home/db/Software/pysole-review`. Baseline: `docs/pysole_v042_code_review.md`.
 
 **Method and limits**

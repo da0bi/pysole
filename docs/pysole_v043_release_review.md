@@ -1,5 +1,7 @@
 # PySole post-v0.4.2 Review — Release Readiness for v0.4.3 (read-only)
 
+> **Historical document.** This report was written against an earlier development state of PySole and is kept for traceability only. Findings listed here were addressed in later releases (see [CHANGELOG](../CHANGELOG.md) and [pysole_v043_final_audit.md](pysole_v043_final_audit.md)); line numbers and parameter names may no longer match the current code.
+
 Scope: `src/pysole/` (14 modules, ~7,000 lines), `tests/`, `README.md`, `pysole.json`, `examples/`, `docs/`.
 Baselines: `claude_codebase_audit.md` (A1) → `pysole_v042_code_review.md` (A2) → `pysole_v042_review_pass3.md` (A3).
 
@@ -364,7 +366,7 @@ Sources: `config.py` `DEFAULT_CONFIG` (L69-146), `pysole.json`, `README.md` (JSO
   - The drift doc says 14 candidate models; the code has 12.
   - The practice guide uses ρ = 917 vs 900 in code.
   - `kriging_performance_report.md` uses removed keys (`built_in_kriging`, `d_kc`) and a Tikhonov 1e-8 that is not what the code uses.
-  - README L790/L792 and the practice guide L256 have absolute `file:///home/db/Software/pysole/...` links.
+  - README L790/L792 and the practice guide L256 have absolute `../...` links.
 - **Examples directory:**
   - `examples/pysole_quickstart.ipynb` cell 3 calls `solver.recommend_drift_model(stage=..., cv_mode="lopo")`. The signature is `(stage, interactive)` → `TypeError`.
   - Cells 2-3 use `"wuk/pysole_wuk.json"`, which only works when cwd is `examples/`.
@@ -381,8 +383,8 @@ IDs: N4 = new in this pass.
 ### [High]
 
 **N4-H1 — The main entry point never writes the final bedrock raster** [V]
-- [pipeline.py L148-162](file:///home/db/Software/pysole-review/src/pysole/pipeline.py#L148-L162): `export_all()` only exports optional grids. The bedrock map is saved only when the undocumented key `outputs.output_bedrock_map` is present.
-- README L278 claims `<output_prefix>_bedrock.<ext>` is exported by default. CHANGELOG L15 claims `<prefix>_bedrock_elevation_map.tif`. `OutputsConfig.save_bedrock_elevation_map` ([config.py L28](file:///home/db/Software/pysole-review/src/pysole/config.py#L28)) is dead.
+- [pipeline.py L148-162](../src/pysole/pipeline.py#L148-L162): `export_all()` only exports optional grids. The bedrock map is saved only when the undocumented key `outputs.output_bedrock_map` is present.
+- README L278 claims `<output_prefix>_bedrock.<ext>` is exported by default. CHANGELOG L15 claims `<prefix>_bedrock_elevation_map.tif`. `OutputsConfig.save_bedrock_elevation_map` ([config.py L28](../src/pysole/config.py#L28)) is dead.
 - [V] The e2e output folder held `res_thickness.npy`, `res_thickness_uncertainty.npy`, `res_basal_shear_stress*.npy`, `res_traveltime.npy` and `res_migrated_points.csv`, but **no bedrock file**. The function returned the grid in memory only.
 - The CLI (`pysole pysole.json`) and both example scripts leave users without the primary product.
 - Fix:
@@ -392,50 +394,50 @@ IDs: N4 = new in this pass.
 
 ### [Medium]
 
-**N4-M1 — `kriging_parameters.engine` is ignored** — [solver.py L723](file:///home/db/Software/pysole-review/src/pysole/solver.py#L723), [L173](file:///home/db/Software/pysole-review/src/pysole/solver.py#L173)
+**N4-M1 — `kriging_parameters.engine` is ignored** — [solver.py L723](../src/pysole/solver.py#L723), [L173](../src/pysole/solver.py#L173)
 - `kriging_interpolation(engine=self.kriging_engine)` passes the `KrigingEngine` *object* (L173). The string is stored in `self.engine_type` (L158).
 - `interpolation.py` L649-652 treats any non-string as "native". `"pykrige"` is therefore unreachable from JSON.
 - Fix: `engine=self.engine_type`.
 
-**N4-M2 — Output directory / log resolution still wrong** [V] — [pipeline.py L87](file:///home/db/Software/pysole-review/src/pysole/pipeline.py#L87)
+**N4-M2 — Output directory / log resolution still wrong** [V] — [pipeline.py L87](../src/pysole/pipeline.py#L87)
 - `resolve_output_dir(outputs.output_dir or inputs.output_dir, config_file)` passes the config file as `survey_data_path`.
 - A relative `output_dir` resolves against the **cwd** here, but against the config directory in `Solver`. [V] My run left a stray `pysole.log` at `<cwd>/out/pysole.log`.
 - With `output_dir: null`, the log goes to `<cfg_dir>/pysole/`, while outputs go to `<survey_dir>/pysole/` (confirmed with `resolve_output_dir`: `cfg/../data/pysole` vs `cfg/pysole`).
 - Fix: `resolve_output_dir(output_dir=outputs.get("output_dir"), survey_data_path=inputs.get("survey_data_path"), config_path=config_file)`.
 
 **N4-M3 — LOPO cross-validation is still dead; the profile column is lossy**
-- [solver.py L622-624](file:///home/db/Software/pysole-review/src/pysole/solver.py#L622-L624): `get_sample_points` returns 3 columns, so `prof_data` at [L686](file:///home/db/Software/pysole-review/src/pysole/solver.py#L686) is always `None`. `recommend_drift_model` passes none either.
+- [solver.py L622-624](../src/pysole/solver.py#L622-L624): `get_sample_points` returns 3 columns, so `prof_data` at [L686](../src/pysole/solver.py#L686) is always `None`. `recommend_drift_model` passes none either.
 - `migrate_eikonal_points` returns 4 columns, so the profile column is lost after migration.
-- [raster.py L843](file:///home/db/Software/pysole-review/src/pysole/raster.py#L843): string IDs → NaN. Duplicate consolidation `nanmean`s the ID column (L905).
+- [raster.py L843](../src/pysole/raster.py#L843): string IDs → NaN. Duplicate consolidation `nanmean`s the ID column (L905).
 - README's `[(profile_id), X, Y, value]` layout is not what the loader accepts.
 
 **N4-M4 — CLI `--drift-analyzer` is a no-op; CLI `--verbose` is overridden**
-- `solver.drift_analyzer` is set ([pipeline.py L121-122](file:///home/db/Software/pysole-review/src/pysole/pipeline.py#L121-L122)) but never read; the per-stage JSON flag is used (`solver.py` L659). `Solver.is_batch_mode` (L667) is never set.
-- `--debug` sets `log_level` (L90). `Solver.from_config` then calls `load_config(..., log_level=None)` ([solver.py L502](file:///home/db/Software/pysole-review/src/pysole/solver.py#L502)), which re-initialises logging from the config/env ([config.py L293-294](file:///home/db/Software/pysole-review/src/pysole/config.py#L293-L294)). README L648 claims the CLI wins.
+- `solver.drift_analyzer` is set ([pipeline.py L121-122](../src/pysole/pipeline.py#L121-L122)) but never read; the per-stage JSON flag is used (`solver.py` L659). `Solver.is_batch_mode` (L667) is never set.
+- `--debug` sets `log_level` (L90). `Solver.from_config` then calls `load_config(..., log_level=None)` ([solver.py L502](../src/pysole/solver.py#L502)), which re-initialises logging from the config/env ([config.py L293-294](../src/pysole/config.py#L293-L294)). README L648 claims the CLI wins.
 
 **N4-M5 — Python-API defaults differ from the config defaults**
 - `Solver.__init__` defaults to `universal` + `["sia"]` (`solver.py` L37, L42, L144, L150) with target "P". The config defaults are `ordinary` + `[]`.
 - The README's Python example (L690-697) therefore runs the SIA-drift-on-product combination that README L420 and `solver.py` L652-656 warn about.
 
-**N4-M6 — `variogram_model="linear"` documented but rejected** — [interpolation.py L668-672](file:///home/db/Software/pysole-review/src/pysole/interpolation.py#L668-L672); docs in `solver.py` L83/L91 and README L259/L266.
+**N4-M6 — `variogram_model="linear"` documented but rejected** — [interpolation.py L668-672](../src/pysole/interpolation.py#L668-L672); docs in `solver.py` L83/L91 and README L259/L266.
 
 **N4-M7 — Compound drifts use raw-DEM curvature; solver FFT cache lacks `kc`**
-- [solver.py L707](file:///home/db/Software/pysole-review/src/pysole/solver.py#L707): only the literal `"curvature_dem"` triggers the smoothed curvature. `sia_curvature_dem`, `z_dem_curvature_dem`, `full_physical`, `full_spatial_physical` fall back to raw curvature (`interpolation.py` L730-732). That is a noisy second-difference field.
-- [solver.py L459](file:///home/db/Software/pysole-review/src/pysole/solver.py#L459): `precompute_fft_grid` is called without `kc`. The 40 px default pad gives up to 12 m error at σ_px = 32 [V].
+- [solver.py L707](../src/pysole/solver.py#L707): only the literal `"curvature_dem"` triggers the smoothed curvature. `sia_curvature_dem`, `z_dem_curvature_dem`, `full_physical`, `full_spatial_physical` fall back to raw curvature (`interpolation.py` L730-732). That is a noisy second-difference field.
+- [solver.py L459](../src/pysole/solver.py#L459): `precompute_fft_grid` is called without `kc`. The 40 px default pad gives up to 12 m error at σ_px = 32 [V].
 
-**N4-M8 — Lag-bin documentation / log mismatch** [V] — section 3.4. Also the N > 5000 chunked branch ([variogram.py L158-196](file:///home/db/Software/pysole-review/src/pysole/variogram.py#L158-L196)).
+**N4-M8 — Lag-bin documentation / log mismatch** [V] — section 3.4. Also the N > 5000 chunked branch ([variogram.py L158-196](../src/pysole/variogram.py#L158-L196)).
 
-**N4-M9 — Tikhonov sign convention** [V] — section 3.2, item 1 ([interpolation.py L366-367](file:///home/db/Software/pysole-review/src/pysole/interpolation.py#L366-L367)).
+**N4-M9 — Tikhonov sign convention** [V] — section 3.2, item 1 ([interpolation.py L366-367](../src/pysole/interpolation.py#L366-L367)).
 
 **N4-M10 — Memory and cost**
-- The kc sweep keeps every smoothed DEM and slope (`.copy()` and the materialised `executor.map` list, [variogram.py L644-661](file:///home/db/Software/pysole-review/src/pysole/variogram.py#L644-L661)). That is O(n_kc·M·N). For a 2000² DEM at 50 steps it is about 3 GB.
+- The kc sweep keeps every smoothed DEM and slope (`.copy()` and the materialised `executor.map` list, [variogram.py L644-661](../src/pysole/variogram.py#L644-L661)). That is O(n_kc·M·N). For a 2000² DEM at 50 steps it is about 3 GB.
 - Explicit `K_inv`. Variance always computed at O(N²) per cell.
 - `load_survey_points` de-duplication loop is O(N·U) in Python.
 
 **N4-M11 — Interactive scope narrower than documented**
-- Stage-1 BSS optimisation is invoked inside `get_sample_points` with `interactive=False` ([solver.py L607-609](file:///home/db/Software/pysole-review/src/pysole/solver.py#L607-L609)).
+- Stage-1 BSS optimisation is invoked inside `get_sample_points` with `interactive=False` ([solver.py L607-609](../src/pysole/solver.py#L607-L609)).
 - The velocity prompt (L795) is unreachable from the pipeline, since the velocity is always passed.
-- `.get("interactive_*", True)` ([pipeline.py L130-131](file:///home/db/Software/pysole-review/src/pysole/pipeline.py#L130-L131)) contradicts the schema default False (dead after the merge).
+- `.get("interactive_*", True)` ([pipeline.py L130-131](../src/pysole/pipeline.py#L130-L131)) contradicts the schema default False (dead after the merge).
 - `Solver.run_pipeline` uses `show_progress` as a batch flag (L1447).
 - `_sample_pts_cache` is not invalidated when `optimize_bss` or `migrate_eikonal` is re-run via the API.
 
@@ -451,7 +453,7 @@ IDs: N4 = new in this pass.
 - **N4-L4** `np.random.seed(42)` mutates global RNG state (`interpolation.py` L825). Use `np.random.default_rng(42)`.
 - **N4-L5** `unmig_depths` unit heuristic (`solver.py` L805) when migration is skipped. `valid_d = d_mig > 0` (`migration.py` L205).
 - **N4-L6** `plotting.py` L12-16 still switches the backend at import. `[INFO]` doubled prefixes remain.
-- **N4-L7** `from_config` stores `str(dict)` as `config_path` for dict configs ([solver.py L576](file:///home/db/Software/pysole-review/src/pysole/solver.py#L576)). Resolvers then treat it as a file path.
+- **N4-L7** `from_config` stores `str(dict)` as `config_path` for dict configs ([solver.py L576](../src/pysole/solver.py#L576)). Resolvers then treat it as a file path.
 - **N4-L8** Unused imports (section 2.1). `finalize_bedrock`/`smooth_bedrock_dem` smooth in pixel units (σ in px) on anisotropic grids.
 - **N4-L9** CHANGELOG internal contradictions and the wrong σ_px formula (L31). `release_guide.md` L45 calls WUK "Weighted Universal Kriging" (README: Wurtenkees). `pysole --init` overwrites an existing config silently. README CLI section incomplete.
 - **N4-L10** Tests: no tests for `fft_filter_metric` precedence beyond the basics, `engine` honouring, or bedrock-file output. `test_compound_drift_expansion` asserts "not None". `test_eikonal_migration_oblique_slope` asserts finiteness. The Eikonal "non-parallel" cases are parallel.

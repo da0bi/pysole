@@ -14,7 +14,6 @@ from pathlib import Path
 from scipy.spatial.distance import pdist
 from scipy.optimize import curve_fit
 from .smoothing import (
-    compute_gradients,
     compute_slope_rad,
     precompute_fft_grid,
     fft_gaussian_smooth_precomputed,
@@ -396,8 +395,6 @@ def optimize_bss_variance(
     """
     dx = geometry.dx
     dy = geometry.dy
-    x_coords = geometry.x_coords
-    y_coords = geometry.y_coords
 
     effective_n_cores = (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
 
@@ -468,7 +465,7 @@ def optimize_bss_variance(
     survey_dists = pdist(pts_valid_coords) if (len(pts_valid_coords) >= 2 and len(pts_valid_coords) <= 5000) else None
 
     # Pre-compute 2D Forward FFT and wavenumber grid ONCE on raw DEM elevation Z_surf with padding for lowest kc
-    A_shift_dem, k_grid_dem, k_max_grid = precompute_fft_grid(dem, dx=dx, dy=dy, kc=kc_min_val)
+    A_shift_dem, k_grid_dem, _ = precompute_fft_grid(dem, dx=dx, dy=dy, kc=kc_min_val)
     base_slope = compute_slope_rad(dem, dx=dx, dy=dy)
 
     actual_nrbins_calc: int | None = None

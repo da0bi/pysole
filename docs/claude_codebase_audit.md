@@ -1,5 +1,7 @@
 # PySole Codebase Audit (read-only)
 
+> **Historical document.** This report was written against an earlier development state of PySole and is kept for traceability only. Findings listed here were addressed in later releases (see [CHANGELOG](../CHANGELOG.md) and [pysole_v043_final_audit.md](pysole_v043_final_audit.md)); line numbers and parameter names may no longer match the current code.
+
 **Scope:** `/home/db/Software/pysole/src/pysole/` (13 modules, ~6,550 lines). Source folder verified before starting.
 **Mode:** Read-only. No source file was modified. Verification scripts live in `scratch/audit_verify.py` and `scratch/audit_verify2.py` in the artifacts folder.
 **Reviewer stance:** Senior code reviewer and applied mathematician.
@@ -37,7 +39,7 @@ H1 and H2 together mean the v0.4.0 DriftAnalyzer headline feature currently rank
 ## HIGH severity
 
 ### H1. `coords_to_grid_indices` is Y-mirrored **[VERIFIED]**
-[raster.py:73-95](file:///home/db/Software/pysole/src/pysole/raster.py#L73-L95)
+[raster.py:73-95](../src/pysole/raster.py#L73-L95)
 
 The grid is bottom-up. `y_coords` is ascending and `load_dem` flips files on load. The method nevertheless computes `rows = (maxy - y) / dy`, which assumes a top-down grid.
 
@@ -46,14 +48,14 @@ Evidence on a 4x3 grid with `bounds=(0,0,3,4)`:
 y=0.5 -> row 3   (bottom-up grid needs row 0)
 y=3.5 -> row 0   (bottom-up grid needs row 3)
 ```
-**Impact:** every `z_dem`, `sia` and `curvature_dem` drift covariate in `get_drift_functions` ([interpolation.py:818-847](file:///home/db/Software/pysole/src/pysole/interpolation.py#L818-L847)) is sampled at the Y-mirrored location. This affects VIF, CV and the recommended model. The production kriging path uses `RegularGridInterpolator` and is **not** affected, so analyzer and production disagree.
+**Impact:** every `z_dem`, `sia` and `curvature_dem` drift covariate in `get_drift_functions` ([interpolation.py:818-847](../src/pysole/interpolation.py#L818-L847)) is sampled at the Y-mirrored location. This affects VIF, CV and the recommended model. The production kriging path uses `RegularGridInterpolator` and is **not** affected, so analyzer and production disagree.
 
 **Fix:** `rows = clip(((y - miny) / dy).astype(int), 0, M-1)`. Prefer `np.floor`, since `.astype(int)` truncates toward zero for negatives.
 
 ---
 
 ### H2. Drift features are normalised per call, which invalidates CV **[VERIFIED]**
-[interpolation.py:811-852](file:///home/db/Software/pysole/src/pysole/interpolation.py#L811-L852), [interpolation.py:960-967](file:///home/db/Software/pysole/src/pysole/interpolation.py#L960-L967)
+[interpolation.py:811-852](../src/pysole/interpolation.py#L811-L852), [interpolation.py:960-967](../src/pysole/interpolation.py#L960-L967)
 
 Every drift lambda standardises with statistics of **the points passed in**: `np.mean(x)`, `np.ptp(x)`, `np.nanmean(vals)`, `np.nanstd(vals)`.
 - At fit time the statistics come from the training set.
@@ -71,9 +73,9 @@ LOO RMSE = 163.66   (expected ~1)
 ---
 
 ### H3. Vector outline mask is vertically mirrored vs the DEM **[VERIFIED]**
-[raster.py:688-701](file:///home/db/Software/pysole/src/pysole/raster.py#L688-L701)
+[raster.py:688-701](../src/pysole/raster.py#L688-L701)
 
-`features.rasterize` with `from_bounds(...)` or the file transform returns a **top-down** array. The DEM was flipped to bottom-up in `load_dem` ([raster.py:557-558](file:///home/db/Software/pysole/src/pysole/raster.py#L557-L558)), and the returned mask is never flipped. The CSV-polygon branch uses `ensure_spatial_coords` (bottom-up) and is consistent, so the two outline paths disagree.
+`features.rasterize` with `from_bounds(...)` or the file transform returns a **top-down** array. The DEM was flipped to bottom-up in `load_dem` ([raster.py:557-558](../src/pysole/raster.py#L557-L558)), and the returned mask is never flipped. The CSV-polygon branch uses `ensure_spatial_coords` (bottom-up) and is consistent, so the two outline paths disagree.
 
 Evidence: a polygon covering the **south** half (y in 0..100) of a 20x20 grid:
 ```
@@ -89,7 +91,7 @@ mask True rows: 10..19    (bottom-up grid => should be 0..9)
 ---
 
 ### H4. NaN-separated ring outlines are silently ignored **[VERIFIED]**
-[raster.py:716-756](file:///home/db/Software/pysole/src/pysole/raster.py#L716-L756)
+[raster.py:716-756](../src/pysole/raster.py#L716-L756)
 
 The rasterisation block (`MplPath ... return outer_mask & ~hole_mask`) is indented **inside the `else:`** branch, which is taken only when there are no NaN rows. When NaN separators are present (outer ring plus nunatak holes, the feature documented), `rings` is built and then discarded. The function falls through to `return ~np.isnan(dem_grid)`.
 
@@ -97,14 +99,14 @@ Evidence: outer square plus hole, expected True fraction ~0.60:
 ```
 mask True fraction: 1.0   (outline silently ignored)
 ```
-Compounding this, the surrounding `except Exception: pass` blocks ([raster.py:704](file:///home/db/Software/pysole/src/pysole/raster.py#L704), [raster.py:757](file:///home/db/Software/pysole/src/pysole/raster.py#L757)) turn *any* failure (missing geopandas, bad file, CRS mismatch) into "whole DEM is the glacier" with no log line.
+Compounding this, the surrounding `except Exception: pass` blocks ([raster.py:704](../src/pysole/raster.py#L704), [raster.py:757](../src/pysole/raster.py#L757)) turn *any* failure (missing geopandas, bad file, CRS mismatch) into "whole DEM is the glacier" with no log line.
 
 **Fix:** de-indent the rasterisation block. Replace the blanket `pass` with `logger.error` plus `raise`, or at least a prominent warning.
 
 ---
 
 ### H5. SurveyPlanner tracks are mirrored; budget not enforced **[VERIFIED + CODE]**
-[survey_planner.py:102-103](file:///home/db/Software/pysole/src/pysole/survey_planner.py#L102-L103), [survey_planner.py:118](file:///home/db/Software/pysole/src/pysole/survey_planner.py#L118), [survey_planner.py:130-132](file:///home/db/Software/pysole/src/pysole/survey_planner.py#L130-L132)
+[survey_planner.py:102-103](../src/pysole/survey_planner.py#L102-L103), [survey_planner.py:118](../src/pysole/survey_planner.py#L118), [survey_planner.py:130-132](../src/pysole/survey_planner.py#L130-L132)
 
 **(a) Mirroring [VERIFIED]:** `y_coords = np.linspace(maxy, miny, ny)` is **descending**, but `d_sia` is bottom-up (row 0 = Y_min) and the figure uses `origin="lower"`. Evidence: glacier mask in rows 5-25 (y = 50-250 m), yet:
 ```
@@ -120,7 +122,7 @@ T1_transverse   y=508 ;  T2_transverse y=366
 ---
 
 ### H6. Kriging variogram is a heuristic, not fitted **[CODE]**
-[interpolation.py:244-250](file:///home/db/Software/pysole/src/pysole/interpolation.py#L244-L250)
+[interpolation.py:244-250](../src/pysole/interpolation.py#L244-L250)
 
 `built_in_kriging_interpolation` ignores the fitted variogram: `range_a = 0.6 * max pairwise distance`, `sill = var(z)`, `nugget = 0`. `variogram_model` is only a shape name.
 - For non-stationary targets (bedrock with a trend), `var(z)` includes trend variance, so the sill is inflated.
@@ -133,7 +135,7 @@ T1_transverse   y=508 ;  T2_transverse y=366
 ---
 
 ### H7. Product-target slope clamping is asymmetric (low-slope bias) **[CODE]**
-[solver.py:604-606](file:///home/db/Software/pysole/src/pysole/solver.py#L604-L606) vs [solver.py:711-715](file:///home/db/Software/pysole/src/pysole/solver.py#L711-L715)
+[solver.py:604-606](../src/pysole/solver.py#L604-L606) vs [solver.py:711-715](../src/pysole/solver.py#L711-L715)
 
 - Forward: `P = D * max(sin α, 1e-4)`. NaN slope falls back to an arbitrary `0.1`.
 - Inverse: `D = P / max(sin α, sin(slope_floor_deg))`, with the floor defaulting to 5 degrees.
@@ -143,7 +145,7 @@ At a data point with α = 2 degrees, the kriged P honours `D·sin 2°`, but the 
 ---
 
 ### H8. GPX/GeoJSON written in projected coordinates **[CODE + log evidence]**
-[survey_planner.py:154-197](file:///home/db/Software/pysole/src/pysole/survey_planner.py#L154-L197)
+[survey_planner.py:154-197](../src/pysole/survey_planner.py#L154-L197)
 
 GPX `lat`/`lon` are filled with raw projected X/Y (the test log shows e.g. `[424843.37, 210813.23]`). That is invalid GPX (|lat| > 90) and useless on a handheld GPS, which is the stated use. GeoJSON (RFC 7946) must be WGS84; projected coordinates will be misplaced by GIS tools. Reproject with `pyproj` from `self.crs` to EPSG:4326 and warn if `crs is None`.
 
@@ -152,7 +154,7 @@ GPX `lat`/`lon` are filled with raw projected X/Y (the test log shows e.g. `[424
 ## MEDIUM severity
 
 ### M1. `kc` is not in rad/m; it scales with dx² **[VERIFIED]**
-[smoothing.py:134-135](file:///home/db/Software/pysole/src/pysole/smoothing.py#L134-L135), [variogram.py:25-32](file:///home/db/Software/pysole/src/pysole/variogram.py#L25-L32)
+[smoothing.py:134-135](../src/pysole/smoothing.py#L134-L135), [variogram.py:25-32](../src/pysole/variogram.py#L25-L32)
 
 `kx = fftshift(fftfreq(N)) * 2π|dx|` multiplies by dx, where a physical wavenumber requires `2π·fftfreq(N, d=dx)` (division). The code is internally consistent with `compute_cutoff_wavelength`, but `kc` has implicit units that depend on dx. Docstrings and logs say rad/m.
 
@@ -164,12 +166,12 @@ dx=10 m -> 1257 m    dx=20 m -> 5027 m
 The same default smooths over very different physical scales. `SurveyPlanner`'s default `kc=0.5` with `dx=10` gives a 1.26 km cutoff. This is presumably the legacy MATLAB convention, but it should be a deliberate, documented choice. Since backward compatibility is no longer a constraint, I suggest specifying the cutoff **as a wavelength in metres**.
 
 ### M2. FFT smoothing boundary handling [CODE]
-[smoothing.py:131-143](file:///home/db/Software/pysole/src/pysole/smoothing.py#L131-L143)
+[smoothing.py:131-143](../src/pysole/smoothing.py#L131-L143)
 - FFT implies periodic boundaries, so opposite DEM edges bleed into each other. Use reflect/edge padding (e.g. pad by ~3σ).
 - NaNs are mean-filled (a step edge at the glacier/rock boundary, producing ringing and slope artefacts near the margin), and NaN positions are not restored afterwards. Prefer normalised convolution (smooth `data·mask` and `mask` separately, then divide).
 
 ### M3. `fit_variogram_model` issues **[VERIFIED]**
-[variogram.py:199-251](file:///home/db/Software/pysole/src/pysole/variogram.py#L199-L251)
+[variogram.py:199-251](../src/pysole/variogram.py#L199-L251)
 - `var_val = np.var(semivars)` has units of value⁴ while the sill has units value². Sill bounds `[1e-6, 10*var_val]` are scale-dependent. Same shaped variogram, three scales:
   ```
   scale 1e+00: true sill~45     fitted 40
@@ -181,12 +183,12 @@ The same default smooths over very different physical scales. `SurveyPlanner`'s 
 - Bare `except Exception` falls back silently; log the failure.
 
 ### M4. `calculate_variogram` is O(N²) in memory [CODE]
-[variogram.py:145-177](file:///home/db/Software/pysole/src/pysole/variogram.py#L145-L177)
+[variogram.py:145-177](../src/pysole/variogram.py#L145-L177)
 
 Holds `pdist` (float64), `sq_diffs` (float64) and `bin_indices` (int64), each `N(N-1)/2` long. For N = 20,000 picks that is ~2·10⁸ pairs, roughly 1.6 GB per array and ~5 GB peak. Compute in row blocks with `np.bincount` accumulation, or randomly subsample pairs. Along-track picks also make the first lag bin dominated by near-duplicate neighbours; consider a minimum-lag or per-profile declustering.
 
 ### M5. Dual-Kriging variance cost [CODE]
-[interpolation.py:366-432](file:///home/db/Software/pysole/src/pysole/interpolation.py#L366-L432)
+[interpolation.py:366-432](../src/pysole/interpolation.py#L366-L432)
 - An explicit inverse `K_inv = lu_solve(lu, eye)` is formed even when only the mean is needed, and every chunk does `K_inv @ K_rhs_sub`. Total cost is O(M_grid·N²), and the inverse is O(N³) and N² memory.
 - Prefer `lu_solve(lu, K_rhs_sub)` per chunk (better conditioned) and make variance optional (`return_variance=True`).
 - `scipy.linalg.lu_factor` only **warns** on exact singularity; it does not raise. The `except Exception` fallback is therefore rarely reached. Check `np.isfinite` on `w_z` or use `cho`/`lstsq` on a conditioned matrix.
@@ -194,7 +196,7 @@ Holds `pdist` (float64), `sq_diffs` (float64) and `bin_indices` (int64), each `N
 - `var_sub` is clamped with `np.maximum(…, 0)`, which hides negative-variance (ill-conditioning) signals; log how many cells were clamped.
 
 ### M6. DriftAnalyzer recomputes the full DEM curvature per call [CODE]
-[interpolation.py:837-847](file:///home/db/Software/pysole/src/pysole/interpolation.py#L837-L847), [interpolation.py:902-908](file:///home/db/Software/pysole/src/pysole/interpolation.py#L902-L908), [interpolation.py:960-965](file:///home/db/Software/pysole/src/pysole/interpolation.py#L960-L965)
+[interpolation.py:837-847](../src/pysole/interpolation.py#L837-L847), [interpolation.py:902-908](../src/pysole/interpolation.py#L902-L908), [interpolation.py:960-965](../src/pysole/interpolation.py#L960-L965)
 
 `eval_curvature_dem` runs `compute_surface_curvature(dem)` (4 `np.gradient` over M×N) and builds a `GridGeometry` on every invocation. `get_drift_functions` is called in `__init__` **and** in every `predict()`. With 12 candidates x ≤100 LOO points x 2 calls, that is thousands of full-grid evaluations. This explains the ~225 s for the drift-analyzer and interpolation tests. `DriftBasis` (D1) fixes it.
 
@@ -202,47 +204,47 @@ Holds `pdist` (float64), `sq_diffs` (float64) and `bin_indices` (int64), each `N
 
 | Aspect | DriftAnalyzer | Production kriging |
 |---|---|---|
-| SIA slope floor | `max(α,1°)`, `max(sin,1e-3)` ([interpolation.py:833-834](file:///home/db/Software/pysole/src/pysole/interpolation.py#L833-L834)) | `slope_floor_deg` (default 5°) ([interpolation.py:666](file:///home/db/Software/pysole/src/pysole/interpolation.py#L666)) |
-| Curvature | raw DEM | `kc`-smoothed ([solver.py:689-691](file:///home/db/Software/pysole/src/pysole/solver.py#L689-L691)) |
-| Variogram | `sill=1`, `nugget=0`, range from BSS fit; `recommend_drift_model` hard-codes **range=100 m** ([solver.py:1315](file:///home/db/Software/pysole/src/pysole/solver.py#L1315)) | heuristic (H6) |
+| SIA slope floor | `max(α,1°)`, `max(sin,1e-3)` ([interpolation.py:833-834](../src/pysole/interpolation.py#L833-L834)) | `slope_floor_deg` (default 5°) ([interpolation.py:666](../src/pysole/interpolation.py#L666)) |
+| Curvature | raw DEM | `kc`-smoothed ([solver.py:689-691](../src/pysole/solver.py#L689-L691)) |
+| Variogram | `sill=1`, `nugget=0`, range from BSS fit; `recommend_drift_model` hard-codes **range=100 m** ([solver.py:1315](../src/pysole/solver.py#L1315)) | heuristic (H6) |
 | Z-scoring | per-point-set statistics (H2) | whole-grid statistics |
 
 The model ranked #1 is therefore not the model that will actually run.
 
 ### M8. AICc comparability [CODE]
-[drift_analyzer.py:274-306](file:///home/db/Software/pysole/src/pysole/drift_analyzer.py#L274-L306)
+[drift_analyzer.py:274-306](../src/pysole/drift_analyzer.py#L274-L306)
 
 AICc is computed on CV residuals with a different `n_valid` per candidate, because LOPO/buffer skips differ. AIC/AICc are comparable only on the same data. Evaluate every model on the common set of successfully predicted indices. Also `k_param = n_drift + 1` excludes the constant term. State the convention in the docs.
 
 ### M9. RF importance is MDI, but docs say "Permutation" [CODE]
-[drift_analyzer.py:125-129](file:///home/db/Software/pysole/src/pysole/drift_analyzer.py#L125-L129)
+[drift_analyzer.py:125-129](../src/pysole/drift_analyzer.py#L125-L129)
 
 `rf.feature_importances_` is impurity-based (MDI), which is biased toward high-variance continuous features and unstable under collinearity. `CHANGELOG.md` and the docs describe it as *Permutation* importance. Either use `sklearn.inspection.permutation_importance` (preferably on out-of-bag or held-out data) or correct the text. The docstring also says "Partial Correlations" but computes marginal Pearson/Spearman and omits Spearman. NaN rows are not masked: `pearsonr` returns NaN and RF may raise.
 
 ### M10. Migration edge cases [CODE]
-[migration.py:141-212](file:///home/db/Software/pysole/src/pysole/migration.py#L141-L212), [solver.py:785](file:///home/db/Software/pysole/src/pysole/solver.py#L785)
+[migration.py:141-212](../src/pysole/migration.py#L141-L212), [solver.py:785](../src/pysole/solver.py#L785)
 - `tt_grid[~outline_mask] = nan` followed by `np.gradient` spreads NaN one cell into the glacier. Interpolated `dz` is NaN there, so `d_mig = max(-nan,0)` falls back to the **unmigrated** depth with no log line. Picks near the margin silently skip migration. Log the fallback count.
 - `d_mig = max(-dzi, 0)` then `valid_d = d_mig > 0`: any legitimate zero or positive `dz` is also replaced by unmigrated depth, which is discontinuous. Distinguish NaN from ≤0.
 - `s3 = sqrt(max(1/v² − |s_h|², 0))`: the clamp hides evanescent cells (|s_h| > 1/v), i.e. kriged traveltime gradients inconsistent with the velocity. Count and warn.
 - `inv_v_sq` uses `max(velocity,1e-4)` but `v_sq = velocity**2` uses the raw value; use one `v_eff`.
-- [solver.py:785](file:///home/db/Software/pysole/src/pysole/solver.py#L785): `pts[:,3]*v_eff if pts[:,3].max() > 15 else pts[:,3]` is a magic-number guess of units. The data type is already known (depth returned earlier), so this branch always holds travel times. Remove the heuristic.
+- [solver.py:785](../src/pysole/solver.py#L785): `pts[:,3]*v_eff if pts[:,3].max() > 15 else pts[:,3]` is a magic-number guess of units. The data type is already known (depth returned earlier), so this branch always holds travel times. Remove the heuristic.
 - Algebra check: `A = cos²α_y cos²α_x + sin²α_y cos²α_x + sin²α_x cos²α_y = 1 − sin²α_x sin²α_y`, and `(cos²α_y + sin²α_y)/A = 1/A`. Also `dem_grads` already stores `sin/cos(atan(slope))`; the code recomputes `arctan`, `sin`, `cos` over the grid.
 
 ### M11. `blend_margin_topography` [CODE]
-[interpolation.py:165-174](file:///home/db/Software/pysole/src/pysole/interpolation.py#L165-L174)
+[interpolation.py:165-174](../src/pysole/interpolation.py#L165-L174)
 - `np.where(weight > 0.8, thickness, smoothed)` creates a step between raw and smoothed thickness at the 0.8 contour. Blend continuously: `w*raw + (1-w)*smoothed`.
 - `gaussian_filter(sigma=1.0)` is in pixels, so the smoothing scale changes with resolution.
 - `distance_transform_edt(...)*cellsize` ignores anisotropy; use `sampling=(dy, dx)`.
 - EDT treats the array border as non-background, so glacier cells at the DEM edge receive full weight.
 
 ### M12. Zero-boundary pseudo-points [CODE]
-[interpolation.py:611-632](file:///home/db/Software/pysole/src/pysole/interpolation.py#L611-L632)
+[interpolation.py:611-632](../src/pysole/interpolation.py#L611-L632)
 - `binary_erosion` defaults to `border_value=0`, so glacier pixels on the DEM edge are classed as boundary and receive spurious zero constraints where the glacier actually continues beyond the DEM. Use `border_value=1`.
 - The count is hard-coded to ~100 (`stride = len//100`), independent of perimeter length or the kriging range.
 - Added points are not de-duplicated against survey picks.
 
 ### M13. Raster I/O orientation round trip **[VERIFIED]**
-[raster.py:216-220](file:///home/db/Software/pysole/src/pysole/raster.py#L216-L220) vs [raster.py:557-558](file:///home/db/Software/pysole/src/pysole/raster.py#L557-L558)
+[raster.py:216-220](../src/pysole/raster.py#L216-L220) vs [raster.py:557-558](../src/pysole/raster.py#L557-L558)
 
 `BedrockMap.save` writes `tif`/`asc` flipped to top-down, but `csv`/`npy` unflipped (bottom-up). `load_dem` flips **every** file input including csv/npy:
 ```
@@ -262,8 +264,8 @@ Reloading a saved CSV/NPY mirrors it. Also the `asc` header uses `cellsize = (ma
 ## LOW severity
 
 - **Wasted compute:** `compute_gradients` always builds 10 output grids (including curvature, 4 `np.gradient` calls). The BSS loop calls it once per `kc` but uses only `["slope_rad"]`, roughly 3x more work than needed. Add `compute_slope_rad(dem, dx, dy)` and call it in the loop.
-- **Silent exception swallowing** at 13 sites: [drift_analyzer.py:231](file:///home/db/Software/pysole/src/pysole/drift_analyzer.py#L231), [233](file:///home/db/Software/pysole/src/pysole/drift_analyzer.py#L233), [269](file:///home/db/Software/pysole/src/pysole/drift_analyzer.py#L269), [271](file:///home/db/Software/pysole/src/pysole/drift_analyzer.py#L271), [371](file:///home/db/Software/pysole/src/pysole/drift_analyzer.py#L371), [408](file:///home/db/Software/pysole/src/pysole/drift_analyzer.py#L408), `raster.py:288/346/612/704/757`, `solver.py:780/849`. Several are `except LinAlgError: pass` followed by `except Exception: pass`, where the first is redundant. `DualKrigingSolver` sets `success=False` and `predict` returns NaN with no log. Count and report failed CV folds.
-- **Duplicated variogram code:** the same four model branches appear in `variogram_func` ([interpolation.py:252](file:///home/db/Software/pysole/src/pysole/interpolation.py#L252)), `DualKrigingSolver.__init__`, `predict`, and `spherical_variogram`. Extract one `variogram_model(name, h, nugget, psill, range)`.
+- **Silent exception swallowing** at 13 sites: [drift_analyzer.py:231](../src/pysole/drift_analyzer.py#L231), [233](../src/pysole/drift_analyzer.py#L233), [269](../src/pysole/drift_analyzer.py#L269), [271](../src/pysole/drift_analyzer.py#L271), [371](../src/pysole/drift_analyzer.py#L371), [408](../src/pysole/drift_analyzer.py#L408), `raster.py:288/346/612/704/757`, `solver.py:780/849`. Several are `except LinAlgError: pass` followed by `except Exception: pass`, where the first is redundant. `DualKrigingSolver` sets `success=False` and `predict` returns NaN with no log. Count and report failed CV folds.
+- **Duplicated variogram code:** the same four model branches appear in `variogram_func` ([interpolation.py:252](../src/pysole/interpolation.py#L252)), `DualKrigingSolver.__init__`, `predict`, and `spherical_variogram`. Extract one `variogram_model(name, h, nugget, psill, range)`.
 - **Docstring/behaviour mismatches:** `calculate_variogram(warn_low_pairs)` documents default False but is True. `compute_cutoff_wavelength` mentions `ds = sqrt(|dx*dy|)` but computes `2π·dx·dy/kc`. `migrate_eikonal` has an unused `plotit` parameter.
 - **Cosmetic:** double `[INFO]` prefix in log lines (logger already adds level). The migration progress bar wraps a single vectorised call. RF "trees" progress is a fake 50/50 split.
 - **Likely unused imports** (no linter available): `logging` in `drift_analyzer.py` and `survey_planner.py`, `Path` in `migration.py`, `ThreadPoolExecutor`/`Any` usage worth checking.

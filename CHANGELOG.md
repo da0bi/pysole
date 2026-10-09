@@ -7,10 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.3] - 2026-10-08
 
+### Fixed / Added (Pass-6 — final audit closure, N6-M1, N6-L1..L7)
+- **[N6-L1 · Strict boolean validation] (`src/pysole/config.py`, `src/pysole/__init__.py`)**: every boolean parameter (all `outputs.*` flags and every other `DEFAULT_CONFIG` leaf whose default is `true`/`false`, including `kriging_parameters.*.include_zero_boundary_condition`) is now validated by `coerce_bool()` in `load_config()` and `OutputsConfig.from_dict()`. `true`/`false`, `0`/`1` and the case-insensitive strings `true/false/yes/no/on/off/1/0` are accepted; JSON `null` falls back to the default; anything else raises the new `pysole.ConfigError` (a `ValueError`). **Behaviour change:** a quoted `"false"` used to be truthy and silently enabled the feature; `compute_uncertainty: null` used to skip the variance, it now means "default" (`true`).
+- **[N6-L2/L3 · Friendly CLI] (`src/pysole/config.py`)**: invalid JSON or a non-object top level raises `ConfigError` naming the file; `pysole` prints `pysole: error: <message>` to stderr and exits with status 1 for `ConfigError` / `FileNotFoundError` (full traceback with `-v`/`--debug`). `pysole --init` now prints `Created template configuration file at: <path>`.
+- **[N6-L4 · README]**: the CLI section lists `-V/--version`, `python -m pysole`, and documents the error handling and accepted boolean spellings.
+- **[N6-L5 · Unused imports/locals]**: removed from `pipeline.py`, `solver.py`, `drift_analyzer.py`, `migration.py`, `smoothing.py`, `survey_planner.py`, `variogram.py`, `plotting.py`, `raster.py`. `OutputsConfig` is now exported from `pysole.config` (and the package root) only; `pysole.pipeline` no longer re-exposes it.
+- **[N6-L6 · Docstrings]**: complete parameter sections for `built_in_kriging_interpolation`, `kriging_interpolation`, `migrate_eikonal_points` (`show_progress`) and `Solver.__init__` (`pre_/post_interpolation_target`, `nrbins`, `ice_density`, `g`, `survey_data_path`).
+- **[N6-M1 · Dead links] (`README.md`, `CHANGELOG.md`, `docs/*.md`)**: all absolute links to a local checkout were replaced by relative links; a link to the long-gone `docs/drift_analyzer.md` is now plain text with a pointer to the merged guide.
+- **[N6-L7 · Docs]**: "Historical document" banners on the six old review reports; new section 6 (`compute_uncertainty`) in `docs/pysole_interpolation_practice_guide.md`; **stale drift names corrected** in that guide (`sia_thickness` → `sia`, `z_surface` → `z_dem`, `regional_linear` → `linear_xy`, `quadratic` → `quadratic_xy`; same for `docs/gok_thickness_analysis_report.md`; the old names are rejected by `kriging_interpolation`).
+- **Tests**: `test_audit_regressions.py` tests 34–39 (boolean validation, invalid JSON, CLI error handling and `--init` message, public exports and unused-import guard, no absolute/dead documentation links, documented drift-term names must be valid).
+
+### Fixed / Added (Pass-5 — closure of Medium/Low findings)
+- **[F-M2 · `outputs.compute_uncertainty`] (`src/pysole/config.py`, `src/pysole/solver.py`, `src/pysole/plotting.py`, `README.md`, `pysole*.json`)**: new boolean (default `true`, also `Solver(compute_uncertainty=...)`) that controls *only* the post-migration Kriging variance. Diagnostic figures are **always saved**. With `false` the O(N²·G) variance step is skipped (the predicted bedrock is bitwise identical) and the uncertainty panels show the placeholder *"Uncertainty not computed (outputs.compute_uncertainty = false)"*. If `save_thickness_uncertainty` / `save_basal_shear_stress_uncertainty` is requested while it is `false`, the variance is computed anyway and a single warning is logged. Measured Kriging speed-up (160 000-cell grid, spherical): N=1000 → 3.4×, N=3000 → 7.0×, N=6000 → 11.4×; end-to-end CLI runs with identical bedrock rasters and the same figures: WUK (N=1098) 16.7 s → 14.5 s, GOK 121 s → 63 s. This supersedes the caveat in the N5-M7 entry below.
+- **[F-L1 · Single export] (`src/pysole/solver.py`, `src/pysole/pipeline.py`)**: `run_pipeline()` no longer saves the bedrock map unconditionally (it ignored `save_bedrock_elevation_map=false` and wrote the file twice), and neither pipeline entry point re-exports migration-stage outputs any more: `save_traveltime_grid` / `save_migrated_points` are written once by `migrate_eikonal()` (and not at all when migration is skipped, e.g. depth surveys), finalization-stage outputs once by `finalize_bedrock()`.
+- **[F-L2 · Figures follow the data files] (`src/pysole/config.py`, `src/pysole/solver.py`, `src/pysole/survey_planner.py`, `src/pysole/pipeline.py`, `README.md`)**: new `resolve_plots_dir()` / `configured_output_dir()`. An absolute `plots_dir` is used as is; a relative or unset one (`null` ≡ `"figures"`) resolves beside the data: the parent of an absolute `outputs.output_prefix`, else the effective `output_dir`. This applies to the main pipeline **and** `plan-survey`, and the log file follows the same base folder. **Behaviour change:** with an absolute `output_prefix` and no `output_dir`, figures/log no longer go to `<survey dir>/pysole/`; `plan_survey` resolves a relative `output_dir` against the config directory and no longer creates a `pysole/` folder in the working directory for absolute prefixes.
+- **[F-L4 · FFT padding] (`src/pysole/solver.py`)**: the cached DEM spectrum is padded for the smallest k_c requested so far (`ceil(4/(k_c·dx))` px, never below the old k_c = 0.01 sizing), removing edge error at small k_c (e.g. 0.004). Results for k_c ≥ 0.01 are unchanged.
+- **[F-L3 · Docs] (`src/pysole/solver.py`, `src/pysole/interpolation.py`)**: merged the two stacked `finalize_bedrock()` docstrings; corrected the `_process_chunk` return annotation.
+- **[F-L5 · Test robustness]**: the BSS-sweep streaming test now counts simultaneously live smoothed grids (deterministic) instead of relying on a 1.5× `tracemalloc` ratio.
+- **[F-M1 · withdrawn]**: the reported missing `Solver` attributes were a false positive (`migrator`, `bss_optimizer`, `kriging_engine`, `finalizer` are defined in `Solver.__init__`).
+- **Tests**: `test_audit_regressions.py` tests 21–33 (variance wiring, override warning, skipped variance with identical bedrock and figures, placeholder panel, config round-trip, `resolve_plots_dir`, single export, figure paths for pipeline and `plan_survey`, FFT padding).
+
+### Fixed (Pass-4 Review Resolution — R1–R7, N5-M1..M8)
+- **[R1 · CLI log-level precedence] (`src/pysole/pipeline.py`, `src/pysole/solver.py`, `src/pysole/config.py`)**:
+  - `run_from_config()` now forwards `log_level` into `load_config(...)` and both `Solver.from_config(...)` calls. Effective precedence: CLI `--verbose/--debug` > `PYSOLE_LOG_LEVEL` > `inputs.log_level`.
+  - `Solver.__init__` re-loaded the config and silently re-applied the config-file level over the CLI override; it now keeps the already-active level. (The earlier 0.4.3 claim that this was "verified" was only true for `main_cli()`, not for the Python/pipeline path.)
+  - CLI `--drift-analyzer` no longer overwrites `inputs.drift_analyzer: true` with `False` when the flag is absent.
+  - Test: `test_cli_log_level_overrides_config`.
+- **[R1+ · CLI `pysole <config.json>` was unusable] (`src/pysole/config.py`, `src/pysole/__main__.py`)**: the optional positional `config` combined with an argparse sub-parser made argparse reject `pysole pysole_wuk.json` (`invalid choice: 'pysole_wuk.json' (choose from plan-survey)`). `plan-survey` is now dispatched manually from its own parser, so `pysole <config.json> [flags]` and `pysole plan-survey --dem ...` both work. Added `src/pysole/__main__.py` so `python -m pysole <config.json>` works as documented. Test: `test_cli_config_positional_and_plan_survey_dispatch`.
+- **[R2 · Notebook & CLI docs] (`examples/pysole_quickstart.ipynb`, `README.md`)**: quick-start cell 3 now calls `recommend_drift_model(stage="post_migration")` and unpacks the returned ranked `CandidateDriftResult` list (the unsupported `cv_mode="lopo"` argument was dropped). README CLI section documents `--drift-analyzer`, `--profile-col`, `--init`, and `plan-survey`.
+- **[R3 · `nrbins` parity] (`README.md`, `src/pysole/variogram.py`)**: README and the `optimize_bss_variance()` log message now report the real rule `nrbins = min(30, max(3, in_range_pairs // 30))`, with `in_range_pairs` counting only pairs with `h ≤ maxdist`. Interactive prompts no longer print `None` for an automatic bin count.
+- **[R4 · `"linear"` variogram caveat] (`README.md`, `src/pysole/interpolation.py`, `src/pysole/variogram.py`)**: the `"linear"` model is a bounded 1-D profile model; it is not guaranteed conditionally positive-definite for 2-D areal Kriging. Documented in README and docstrings, and `built_in_kriging_interpolation()` now emits a runtime warning when it is selected.
+- **[R5 · Changelog truthfulness]**: corrected the inaccurate Task A/Phase 1/Phase 2/Task D entries below (marked *Corrected*).
+- **[R6 · Repository & test hygiene] (`.gitignore`, `tests/`)**: added `/pysole/` and `examples/**/pysole/` to `.gitignore`; removed stray `pysole/final_bedrock.tif`; `test_solver.py`, `test_config.py`, `test_drift_analyzer.py`, `test_curvature.py` now write all outputs into temporary directories.
+- **[N5-M3 · Name-based profile column] (`src/pysole/raster.py`)**: `load_survey_points()` selects `profile_column` by CSV header name (numeric kept, text factorised), drops it from the numeric matrix and appends it as column 4/5. Falls back to the legacy parser with a warning if the header is missing. The `perform_migration=False` path now also preserves the profile column.
+- **[N5-M4 · Compound-drift curvature] (`src/pysole/solver.py`, `src/pysole/interpolation.py`)**: compound drifts containing curvature (`sia_curvature_dem`, `z_dem_curvature_dem`, `full_physical`) use the k_c,opt-smoothed Laplacian curvature rather than raw DEM curvature (`CURVATURE_DRIFT_TERMS`).
+- **[N5-M7 · Conditional variance & streaming sweep] (`src/pysole/interpolation.py`, `src/pysole/solver.py`, `src/pysole/variogram.py`)**:
+  - `built_in_kriging_interpolation(..., return_variance=False)` skips the explicit `K⁻¹` solve and the O(N²·G) variance product (one `lu_solve` only) and returns an all-NaN variance grid. The traveltime pass of `migrate_eikonal()` always uses it. The bedrock pass requests variance only if plots or uncertainty rasters need it. **Caveat:** `Solver` always produces diagnostic figures (`plots_dir` defaults to `"figures"`), so through the Solver the bedrock-pass variance is currently always computed; the shortcut is effective for the traveltime pass and direct API calls. *Corrected in Pass-5: `outputs.compute_uncertainty` now controls the bedrock-pass variance independently of the figures — see above.*
+  - `optimize_bss_variance()` streams the k_c sweep in batches of `n_cores` and keeps only the running best DEM/slope; the full per-k_c grid stack is retained only in interactive mode.
+  - NaN-safe uncertainty statistics (`sqrt(max(var, 0))` preserving NaN).
+- **[N5-M8 · Test strengthening] (`tests/test_audit_regressions.py`, `tests/test_parameter_defaults.py`)**: vacuous `assertIsNotNone` checks replaced with exact numeric assertions (endpoint/geomspace values, mode counts, analytic oblique ray migration, closed-form linear Kriging, engine propagation).
+- **[Other fixes found during the pass]**: `blend_margin_topography()` no longer raises `NameError` (`tapered_thickness`) for point-array input; sample-point cache is invalidated after migration; `recommend_drift_model()` forwards profile IDs for LOPO; `np.random.seed` replaced by a local `default_rng(42)` in RF gap filling.
+- **[Deprecation fix — Corrected]** (`src/pysole/raster.py`): the earlier Task D change `np.array(src.read(1), ...)` did *not* remove the NumPy ≥ 2.5 `DeprecationWarning` (it originates inside rasterio's 2-D read path). `load_dem()` now uses `src.read([1])[0]`, which avoids it.
+
 ### Added / Fixed (Task D Release Preparation — Code Quality & Deprecation Hardening)
 - **[Code Quality & NumPy 2.5 Deprecation Fixes] (`src/pysole/raster.py`)**:
-  - Replaced `np.ascontiguousarray(src.read(1), dtype=np.float64)` with `np.array(src.read(1), dtype=np.float64)` in `load_dem()`, eliminating the NumPy 2.5 shape assignment deprecation warning (`DeprecationWarning: Setting the shape on a NumPy array has been deprecated`).
-  - Audited codebase across all 11 core modules, confirming 100% clean Python bytecode compilation (`py_compile`) and test suite execution.
+  - Replaced `np.ascontiguousarray(src.read(1), dtype=np.float64)` with `np.array(src.read(1), dtype=np.float64)` in `load_dem()`. *Corrected in Pass-4: this alone did not eliminate the NumPy 2.5 deprecation warning — see the entry above.*
+  - Audited codebase across all 11 core modules, confirming clean Python bytecode compilation (`py_compile`).
 
 ### Added / Fixed (Task C Release Preparation — Documentation & Examples Alignment)
 - **[Documentation & Examples Alignment — Bedrock Export & Schema Consistency] (`pysole.json`, `examples/wuk/pysole_wuk.json`, `examples/gok/pysole_gok.json`, `README.md`, `docs/drift_analyzer_&_survey_planner.md`)**:
@@ -31,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[Variogram Binning Formula Standardization] (`src/pysole/variogram.py`)**:
   - Standardized `nrbins` default formula to `min(30, max(3, in_range_pairs // 30))` in docstrings and $N > 5000$ chunked distance calculation routines.
 - **[CLI Parameter & Logging Precedence] (`src/pysole/config.py`)**:
-  - Verified `main_cli()` log level override ensuring command-line flags (`--verbose`, `--debug`) strictly supersede configuration file settings.
+  - *Corrected:* this only held for `main_cli()`'s own logger set-up; the pipeline/Solver path re-applied the config-file level. Fully fixed in the Pass-4 R1 entry above.
 - **[Documentation Typo Alignment] (`README.md`)**:
   - Corrected `post_migration.interpolation_target` parameter reference description to `"D"` (thickness target).
 - **[Task B Unit Tests] (`tests/test_audit_regressions.py`)**:
@@ -45,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[Output Directory & Log File Resolution] (`src/pysole/pipeline.py`)**:
   - Fixed `resolve_output_dir` call signature in `run_from_config()` to pass `output_dir`, `survey_data_path`, and `config_path` as explicit keyword arguments (`B2`), preventing CWD log file stray outputs and ensuring paths resolve relative to `config_path`.
 - **[Kriging Engine String Pass-Through] (`src/pysole/solver.py`)**:
-  - Updated `Solver.interpolate_kriging()` to pass `engine=self.engine_type` string (`"native"` or `"pykrige"`) into `kriging_interpolation()` (`B3`), making `"pykrige"` engine selection fully functional from JSON configurations.
+  - Updated the Solver's internal `_execute_kriging_pass()` (used by `interpolate_kriging()` and `calculate_bedrock()`) to pass `engine=self.engine_type` string (`"native"` or `"pykrige"`) into `kriging_interpolation()` (`B3`), making `"pykrige"` engine selection fully functional from JSON configurations.
   - Added regression test `test_kriging_engine_string_propagation` in `tests/test_audit_regressions.py`.
 
 ### Added / Fixed (Phase 1 Audit & Code Hardening — High Priority Findings)
@@ -53,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Replaced legacy default $k_c = 0.5\text{ rad/m}$ ($\lambda_c \approx 12.57\text{ m}$) with $k_c = 0.0314\text{ rad/m}$ ($\lambda_c = 2\pi / k_c \approx 200\text{ m}$) across `SurveyPlanner.plan_survey()`, `Solver.plan_survey()`, CLI `--kc` option, and user manual documentation (`N-H7`).
 - **[Pipeline Orchestration] Interactive Flags Plumbing & Output Prefix Standard (`src/pysole/pipeline.py`)**:
   - Forwarded `interactive_optimization` and `interactive_migration` configuration flags cleanly into `run_from_config()`, ensuring terminal prompts respect non-interactive environments (`N-H2`).
-  - Aligned default predicted bedrock map export file path with canonical `<prefix>_bedrock_elevation_map.tif`.
+  - Aligned default predicted bedrock map export file path with canonical `<prefix>_bedrock.<ext>` (*Corrected:* an earlier note named it `_bedrock_elevation_map.tif`).
 - **[Survey Planner & Spatial Resolution] Native Spatial Resolution Preservation (`src/pysole/survey_planner.py`)**:
   - Updated `SurveyPlanner.__init__` `dx`/`dy` parameters to default to `None`, ensuring resolution scaling directly preserves native DEM GeoTIFF pixel dimensions instead of falling back to 10m grid spacing.
 - **[Solver State & Variogram Plumbing] Configuration Preservation & Profile Column Support (`src/pysole/solver.py`, `src/pysole/raster.py`)**:
@@ -69,11 +111,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added / Fixed (Phase 2 Audit & Code Hardening — Medium Priority Findings)
 - **[Dynamic FFT Reflection Padding] Kernel-Scaled Padding (`src/pysole/smoothing.py`, `src/pysole/variogram.py`)**:
-  - Scaled reflection padding in `precompute_fft_grid` dynamically with Gaussian kernel size ($\text{pad\_px} = \lceil 4 \sigma_{\text{px}} \rceil$ where $\sigma_{\text{px}} = 1 / (\sqrt{2}\pi k_c \Delta x)$), eliminating 12–23m boundary distortion artifacts (`N-M3`).
+  - Scaled reflection padding in `precompute_fft_grid` dynamically with Gaussian kernel size ($\text{pad\_px} = \lceil 4 \sigma_{\text{px}} \rceil$ where $\sigma_{\text{px}} = 1 / (k_c \Delta x)$ — *Corrected:* the previously quoted $\sqrt{2}\pi$ factor did not match the code), eliminating 12–23m boundary distortion artifacts (`N-M3`).
   - Updated variogram frequency sweeps to pass `kc_min_val` into `precompute_fft_grid()`, ensuring padding is pre-sized for the widest Gaussian kernel.
 - **[Kriging Solvers & Regularization] LU Decomposition & Point Covariance Regularization (`src/pysole/interpolation.py`)**:
   - Replaced explicit $K^{-1}$ matrix inversions with LU factorizations (`scipy.linalg.lu_factor` / `lu_solve`) (`M5`).
-  - Applied relative Tikhonov regularization ($\epsilon \cdot \text{mean}(\text{diag}(K_{\text{pts}}))$) strictly to point covariance matrix `K[:N_pts, :N_pts]`, ensuring exact satisfaction of Lagrange drift constraints $F^T w = 0$ (`N3-M10`).
+  - Applied relative Tikhonov regularization $\epsilon = 10^{-6}\cdot\max(\text{sill}, \overline{\text{diag}(K_{\text{sample}})})$ strictly to the point block `K[:N_pts, :N_pts]` (in practice $\epsilon = 10^{-6}\,\text{sill}$ because the semivariogram diagonal is 0), ensuring exact satisfaction of Lagrange drift constraints $F^T w = 0$ (`N3-M10`).
 - **[Thickness Clipping & Boundary Masking] Glacier-Masked Clipping Counts (`src/pysole/solver.py`)**:
   - Evaluated negative thickness clipping count logging (`n_clipped_neg`) strictly inside the active glacier boundary outline mask when present (`N-M7`).
   - Changed default `interactive` flag in `Solver.finalize_bedrock()` from `True` to `False`.
@@ -350,11 +392,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Styled `pysole.drift_analyzer` card border and orchestrator method `recommend_drift_model(...)` highlights with **Bright Fuchsia** (`#e879f9`) for consistent visual mapping across the diagram.
   - Increased font size and vertical line spacing in `pysole.solver` orchestrator card by **+20%**.
 - **Documentation & Methodological Reference**:
-  - Expanded [`docs/drift_analyzer_&_survey_planner.md`](file:///home/db/Software/pysole/docs/drift_analyzer_&_survey_planner.md) with comprehensive equations for Universal Kriging, VIF, Pearson $r$, Spearman $\rho_s$, Spatial Buffer LOOCV, AICc, SIA depth modeling, and survey track layout algorithms, including a tri-metric diagnostic evaluation matrix table.
-  - Created [`docs/drift_analyzer.md`](file:///home/db/Software/pysole/docs/drift_analyzer.md) pointing to the comprehensive guide.
-  - Updated JSON configuration templates ([`pysole.json`](file:///home/db/Software/pysole/pysole.json), [`examples/gok/pysole_gok.json`](file:///home/db/Software/pysole/examples/gok/pysole_gok.json), [`examples/wuk/pysole_wuk.json`](file:///home/db/Software/pysole/examples/wuk/pysole_wuk.json)) with `"survey_profile_column"` and `"drift_analyzer"`.
-  - Updated [`README.md`](file:///home/db/Software/pysole/README.md) key features, JSON configuration snippet, and Parameter Reference table.
-  - Created dedicated unit test suites in [`tests/test_drift_analyzer.py`](file:///home/db/Software/pysole/tests/test_drift_analyzer.py) and [`tests/test_survey_planner.py`](file:///home/db/Software/pysole/tests/test_survey_planner.py).
+  - Expanded [`docs/drift_analyzer_&_survey_planner.md`](./docs/drift_analyzer_&_survey_planner.md) with comprehensive equations for Universal Kriging, VIF, Pearson $r$, Spearman $\rho_s$, Spatial Buffer LOOCV, AICc, SIA depth modeling, and survey track layout algorithms, including a tri-metric diagnostic evaluation matrix table.
+  - Created `docs/drift_analyzer.md` pointing to the comprehensive guide (since merged into [`docs/drift_analyzer_&_survey_planner.md`](docs/drift_analyzer_&_survey_planner.md)).
+  - Updated JSON configuration templates ([`pysole.json`](./pysole.json), [`examples/gok/pysole_gok.json`](./examples/gok/pysole_gok.json), [`examples/wuk/pysole_wuk.json`](./examples/wuk/pysole_wuk.json)) with `"survey_profile_column"` and `"drift_analyzer"`.
+  - Updated [`README.md`](./README.md) key features, JSON configuration snippet, and Parameter Reference table.
+  - Created dedicated unit test suites in [`tests/test_drift_analyzer.py`](./tests/test_drift_analyzer.py) and [`tests/test_survey_planner.py`](./tests/test_survey_planner.py).
 
 ### Changed
 - **Dual Kriging Spatial Cross-Validation (`src/pysole/interpolation.py`)**:

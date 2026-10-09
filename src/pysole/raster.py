@@ -89,7 +89,7 @@ class GridGeometry:
             Column grid indices clipped to [0, ncols - 1].
         """
         M, N = self.shape
-        minx, miny, maxx, maxy = self.bounds
+        minx, _, _, maxy = self.bounds
         cols = np.clip(np.floor((x - minx) / self.dx).astype(int), 0, N - 1)
         rows = np.clip(np.floor((maxy - y) / self.dy).astype(int), 0, M - 1)
         return rows, cols

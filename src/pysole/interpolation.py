@@ -243,6 +243,31 @@ def built_in_kriging_interpolation(
 
     Parameters
     ----------
+    sample_points : np.ndarray, shape (N, >=3)
+        Observations with columns ``[x, y, value, ...]``. Rows containing NaN in x, y or value are dropped;
+        additional columns (e.g. a profile ID) are ignored.
+    x_coords, y_coords : np.ndarray
+        1-D cell-centre coordinates [m] of the output grid; the result has shape
+        ``(len(y_coords), len(x_coords))``.
+    method : str, default "universal"
+        ``"ordinary"`` (constant unknown mean) or ``"universal"`` / ``"sia"`` (drift model). Universal Kriging
+        needs at least 4 valid points and is also selected automatically whenever an external drift is supplied.
+    variogram_model : str, default "spherical"
+        ``"spherical"``, ``"exponential"``, ``"gaussian"`` or ``"linear"`` (see Notes for the caveat).
+    external_drift_grid : np.ndarray or dict[str, np.ndarray], optional
+        One ``(M, N)`` grid or a dict of named grids used as external drifts. Each grid is standardised and
+        adds one drift column; grids without spatial variance are skipped with a warning.
+    drift_terms : list of str, optional
+        ``"linear_xy"`` adds x, y; ``"quadratic_xy"`` adds x, y, x², y², xy. Without external drifts and
+        without terms, Universal Kriging uses the full quadratic drift (6 columns incl. the constant);
+        with only ``"linear_xy"`` it uses 3 columns.
+    variogram_params : tuple (range, sill, nugget) or dict, optional
+        Variogram parameters (dict keys ``"range"``, ``"sill"``, ``"nugget"``). If omitted:
+        range = 0.6 x the largest inter-point distance, sill = variance of the values, nugget = 0.
+    n_cores : int, default -1
+        Number of worker threads for the grid evaluation (-1 uses all CPUs).
+    show_progress : bool, default True
+        Show a progress bar.
     return_variance : bool, default True
         If True, the Kriging estimation variance is evaluated, which requires the explicit
         inverse of the augmented Kriging matrix and an extra O((N+d)^2) work per grid cell.
@@ -433,7 +458,7 @@ def built_in_kriging_interpolation(
     w_sample = w_z[:N_pts]
     w_drift = w_z[N_pts:]
 
-    def _process_chunk(chunk_tuple: tuple[int, int]) -> tuple[int, int, np.ndarray, np.ndarray]:
+    def _process_chunk(chunk_tuple: tuple[int, int]) -> tuple[int, int, np.ndarray, np.ndarray | None]:
         start_idx, end_idx = chunk_tuple
         sub_size = end_idx - start_idx
         sub_x = xx_flat[start_idx:end_idx]
@@ -663,6 +688,40 @@ def kriging_interpolation(
 
     Parameters
     ----------
+    sample_points : np.ndarray, shape (N, >=3)
+        Observations ``[x, y, value, ...]`` (NaN rows are dropped, extra columns ignored).
+    geometry : GridGeometry
+        Output grid definition (shape, spacing, cell-centre coordinates).
+    method : str, default "universal"
+        ``"ordinary"``, ``"universal"``, ``"sia"`` or ``"regression"`` (the ``*_kriging`` spellings are accepted).
+    variogram_model : str, default "spherical"
+        ``"spherical"``, ``"exponential"``, ``"gaussian"`` or ``"linear"``.
+    variogram_params : tuple (range, sill, nugget) or dict, optional
+        Variogram parameters passed to the engine; if omitted the native engine uses data-driven defaults
+        (see ``built_in_kriging_interpolation``).
+    dem_grid : np.ndarray, optional
+        Surface DEM, required for the ``"z_dem"`` / ``"curvature_dem"`` drifts (and for ``"sia"`` when no
+        ``opt_slope_grid`` is given).
+    opt_slope_grid : np.ndarray, optional
+        Optimised smoothed slope grid [rad] used to build the SIA drift ``1 / sin(alpha)``.
+    drift_terms : list of str, optional
+        Drift basis names (primitives such as ``"sia"``, ``"z_dem"``, ``"curvature_dem"``, ``"linear_xy"`` or the
+        compound shortcuts ``"sia_space"``, ``"sia_z_dem"``, ``"full_physical"``, ...). An unknown name raises
+        ``ValueError``.
+    outline_mask : np.ndarray, optional
+        Boolean glacier mask; also defines the boundary used for the zero-value boundary condition.
+    include_zero_boundary_condition : bool, default True
+        Add zero-value pseudo-observations along the mask boundary.
+    n_cores : int, default -1
+        Worker threads (-1 uses all CPUs).
+    engine : str, default "native"
+        ``"native"`` (NumPy/SciPy) or ``"pykrige"``.
+    slope_floor_deg : float, default 5.0
+        Lower bound of the surface slope [deg] when forming the SIA drift (avoids ``1/sin(alpha)`` blow-up).
+    show_progress : bool, default True
+        Show a progress bar.
+    external_drift_grid : np.ndarray or dict[str, np.ndarray], optional
+        Additional user-supplied external drift grid(s) of the DEM shape.
     return_variance : bool, default True
         Native engine only. If False, the O(N^2) per-cell Kriging variance evaluation is skipped and
         ``KrigingResult.variance_grid`` is filled with NaN. Set False when uncertainty maps are not needed.

@@ -69,6 +69,7 @@
         "output_prefix": "final",
         "plots_dir": "figures",
         "save_bedrock_elevation_map": true,
+        "compute_uncertainty": true,
         "save_traveltime_grid": false,
         "save_migrated_points": false,
         "save_thickness_grid": false,

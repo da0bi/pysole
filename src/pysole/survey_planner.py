@@ -8,13 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import json
-import logging
 import numpy as np
 import matplotlib.pyplot as plt
 
+from .config import resolve_plots_dir
 from .logging import logger
 from .plotting import _save_figure
-from .raster import BedrockMap, GridGeometry, load_dem, load_outline
+from .raster import BedrockMap, load_dem, load_outline
 from .smoothing import compute_gradients, fft_gaussian_smooth
 
 
@@ -117,7 +117,7 @@ class SurveyPlanner:
 
         max_length_m = max_length_km * 1000.0
         ny, nx = d_sia.shape
-        minx, miny, maxx, maxy = self.bounds
+        minx, miny, maxx, _ = self.bounds
 
         # Cell center spatial coordinates in bottom-up grid (row 0 = miny)
         x_coords = minx + (np.arange(nx) + 0.5) * self.dx
@@ -244,9 +244,21 @@ class SurveyPlanner:
     ) -> dict[str, Any]:
         """
         Executes full forward survey planning pipeline.
+
+        Output locations: the rasters, GPX and GeoJSON go to ``<output_dir>/<output_prefix>_*``; if
+        ``output_prefix`` is an absolute path they are written beside it (``output_dir`` then only applies
+        to relative prefixes) and, without ``output_dir``, the prefix's folder is the base folder. Figures are
+        saved next to those data files: a relative or unset ``plots_dir`` resolves to ``<base folder>/figures``;
+        an absolute ``plots_dir`` is used as is.
         """
-        out_dir = Path(output_dir) if output_dir else Path.cwd()
-        fig_dir = Path(plots_dir) if plots_dir else out_dir / "figures"
+        prefix_path = Path(output_prefix).expanduser()
+        if output_dir:
+            out_dir = Path(output_dir)
+        elif prefix_path.is_absolute():
+            out_dir = prefix_path.parent
+        else:
+            out_dir = Path.cwd()
+        fig_dir = Path(resolve_plots_dir(plots_dir, output_prefix=output_prefix, output_dir=out_dir))
         out_dir.mkdir(parents=True, exist_ok=True)
         fig_dir.mkdir(parents=True, exist_ok=True)
 
@@ -283,7 +295,7 @@ class SurveyPlanner:
         # Render & save plot: <plots_dir>/<output_prefix_name>_survey_plan_map.png
         file_prefix = Path(output_prefix).name
         plot_path = fig_dir / f"{file_prefix}_survey_plan_map.png"
-        fig, ax = plt.subplots(figsize=(10, 8))
+        _, ax = plt.subplots(figsize=(10, 8))
         im = ax.imshow(
             d_sia,
             extent=[self.bounds[0], self.bounds[2], self.bounds[1], self.bounds[3]],

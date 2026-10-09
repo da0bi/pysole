@@ -4,7 +4,6 @@ Ported from MATLAB scripts GradRad.m and FFTSmooth.m by Daniel Binder (2011).
 """
 
 from dataclasses import dataclass
-from typing import Any
 import numpy as np
 from scipy.fft import fft2, ifft2, fftshift, ifftshift, fftfreq
 
