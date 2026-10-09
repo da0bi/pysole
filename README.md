@@ -570,16 +570,16 @@ The exact calculation of the estimation variance depends on the selected `interp
   </p>
 
 - **BSS-derived Product Target Interpolation (`interpolation_target`: `"P"`)**:
-  When interpolating the BSS product field $P(x,y) = D \cdot \sin(\alpha_{\text{opt}})$ (or $P(x,y) = T \cdot \sin(\alpha_{\text{opt}})$), Kriging calculates the product variance $\sigma_{\text{P}}^2(x,y)$. The 2D estimation variance ($\sigma_{\text{D}}^2(x,y)$ $[\text{m}^2]$ or $\sigma_{\text{T}}^2(x,y)$ $[\text{ns}^2]$) is derived via linear error propagation with the optimal surface slope field $\sin(\alpha_{\text{opt}}(x,y))$:
+  When interpolating the BSS product field $P(x,y) = D \cdot \sin(\alpha_{\text{opt}})$ (or $P(x,y) = T \cdot \sin(\alpha_{\text{opt}})$), Kriging calculates the product variance $\sigma_{\text{P}}^2(x,y)$. The 2D estimation variance is derived via linear error propagation with the optimal surface slope field $\sin(\alpha_{\text{opt}}(x,y))$:
 
   <p align="center">
-  $$\sigma_{\text{D}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m}^2] \qquad \text{or} \qquad \sigma_{\text{T}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{ns}^2]$$
+  $$\sigma_{\text{D or T}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m² or s²}]
   </p>
 
   Taking the square root converts the propagated variance field into the **Kriging Standard Error $\sigma_{\text{D}}(x,y)$ in meters** (or $\sigma_{\text{T}}(x,y)$ in traveltime units):
 
   <p align="center">
-  $$\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}]$$
+  $$\sigma_{\text{D or T}}(x,y) = \sqrt{\sigma_{\text{D or T}}^2(x,y)} \quad [\pm\,\text{m or s}]$$
   </p>
 
 Under Gaussian linear estimation theory, $\pm 1.00 \, \sigma(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96 \, \sigma(x,y)$ represents the 95% confidence margin of error.
