@@ -7,10 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.4] - 2026-10-09
 
-### Added / Fixed (Claude Code Review & Release Sync)
-- **[Code Review & Final Release Sync] (`src/pysole/`, `tests/`, `docs/`, `examples/`)**:
-  - Consolidated and integrated all Claude code review refinements, documentation alignments, and pass-4 audit fixes.
-  - Verified full unit test suite (87 tests) passing cleanly.
+### Added / Fixed / Refactored (Codebase Audit & Pipeline Streamlining)
+- **[save_traveltime_uncertainty output raster] (`src/pysole/config.py`, `src/pysole/solver.py`, `pysole.json`)**:
+  - Integrated `save_traveltime_uncertainty` into configuration schemas, dataclass structures (`OutputsConfig`), and Solver Pass 1 interpolation execution pipeline. Variance for product target "P" properly handles error propagation.
+- **["linear" variogram engine fallback] (`src/pysole/interpolation.py`, `src/pysole/solver.py`)**:
+  - Engine `"pykrige"` retains native 2-D linear support; engine `"native"` intercepts `"linear"` models, logs a warning, and falls back to `"spherical"`.
+- **[Single Output Source of Truth] (`src/pysole/config.py`, `src/pysole/pipeline.py`)**:
+  - Removed legacy `inputs.output_dir` fallback from `configured_output_dir()`, making `outputs.output_dir` the single source of truth.
+  - Removed deprecated dataclass property aliases `save_ice_thickness_map` and `save_basal_shear_stress_map` from `OutputsConfig`.
+  - Removed legacy `outputs_cfg.get("output_bedrock_map")` string export block from `run_from_config()`.
+- **[Solver Optimization & Clean Signatures] (`src/pysole/solver.py`)**:
+  - Added cached `safe_slope_sin` property to `Solver`, eliminating redundant trigonometric grid evaluations.
+  - Centralized Eikonal ray migration output exports via `self.export_outputs("migration")` in `migrate_eikonal()`.
+  - Used `self.safe_slope_sin` in `get_sample_points()`, `_execute_kriging_pass()`, and `finalize_bedrock()` for basal shear stress calculation.
+  - Removed obsolete `plotit` parameter from `finalize_bedrock()` signature.
+  - Removed legacy method alias `finalize_topography()`.
+  - Updated `run_pipeline()` to call canonical `calculate_bedrock()` and `finalize_bedrock()`.
+- **[Interpolation Subsystem Streamlining] (`src/pysole/interpolation.py`)**:
+  - Added static `COMPOUND_DRIFT_MAP` dictionary constant to simplify compound drift term expansion in `kriging_interpolation()` and `DriftBasis.__init__()`.
+  - Centralized entry guard for `"linear"` variogram model in `built_in_kriging_interpolation()`.
+- **[Test Suite Hygiene] (`tests/test_solver.py`, `tests/test_curvature.py`, `tests/__init__.py`)**:
+  - Updated unit tests calling legacy methods or obsolete parameter flags to use canonical API methods.
+  - Added `tests/__init__.py` to enforce headless `matplotlib.use("Agg")` backend during test execution.
 
 ## [0.4.3] - 2026-10-08
 

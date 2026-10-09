@@ -64,6 +64,7 @@ class OutputsConfig:
     output_prefix: str = "final"
     plots_dir: str = "figures"
     save_traveltime_grid: bool = False
+    save_traveltime_uncertainty: bool = False
     save_migrated_points: bool = False
     save_thickness_grid: bool = False
     save_thickness_uncertainty: bool = False
@@ -73,17 +74,13 @@ class OutputsConfig:
     compute_uncertainty: bool = True
 
     @property
-    def save_ice_thickness_map(self) -> bool:
-        return self.save_thickness_grid
-
-    @property
-    def save_basal_shear_stress_map(self) -> bool:
-        return self.save_basal_shear_stress
-
-    @property
     def uncertainty_rasters_requested(self) -> bool:
         """True if any exported uncertainty raster needs the Kriging estimation variance."""
-        return bool(self.save_thickness_uncertainty or self.save_basal_shear_stress_uncertainty)
+        return bool(
+            self.save_thickness_uncertainty
+            or self.save_basal_shear_stress_uncertainty
+            or self.save_traveltime_uncertainty
+        )
 
     @property
     def effective_compute_uncertainty(self) -> bool:
@@ -111,6 +108,7 @@ class OutputsConfig:
         """Returns a dictionary mapping optional output flag names to their boolean states."""
         return {
             "save_traveltime_grid": self.save_traveltime_grid,
+            "save_traveltime_uncertainty": self.save_traveltime_uncertainty,
             "save_migrated_points": self.save_migrated_points,
             "save_thickness_grid": self.save_thickness_grid,
             "save_thickness_uncertainty": self.save_thickness_uncertainty,
@@ -202,6 +200,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "output_prefix": "final",
         "plots_dir": "figures",
         "save_traveltime_grid": False,
+        "save_traveltime_uncertainty": False,
         "save_migrated_points": False,
         "save_thickness_grid": False,
         "save_thickness_uncertainty": False,
@@ -322,12 +321,11 @@ def configured_output_dir(config: dict[str, Any]) -> str | None:
     """
     Returns the explicitly configured base output folder, or None for the default ``<survey dir>/pysole``.
 
-    ``outputs.output_dir`` (or legacy ``inputs.output_dir``) wins; otherwise an absolute ``outputs.output_prefix``
+    ``outputs.output_dir`` wins; otherwise an absolute ``outputs.output_prefix``
     makes its parent folder the base, so data files, figures and the log file all live together.
     """
     outputs = config.get("outputs", {}) or {}
-    inputs = config.get("inputs", {}) or {}
-    explicit = outputs.get("output_dir") or inputs.get("output_dir")
+    explicit = outputs.get("output_dir")
     if explicit:
         return str(explicit)
     prefix_raw = outputs.get("output_prefix")

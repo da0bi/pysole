@@ -65,6 +65,7 @@ class Solver:
         config_path: str | Path | None = None,
         show_progress: bool = True,
         compute_uncertainty: bool | None = None,
+        config: dict[str, Any] | None = None,
     ):
         """
         Parameters
@@ -88,7 +89,7 @@ class Solver:
         pre_drift_terms : list of str, optional
             1st-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
         pre_variogram_model : str
-            1st-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'.
+            1st-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'. Note: 'linear' is supported under engine='pykrige'; engine='native' falls back to 'spherical' with a warning.
         pre_zero_boundary : bool
             If True, enforces a zero traveltime boundary condition (T=0) on the glacier margin outline.
         pre_interpolation_target : str
@@ -99,7 +100,7 @@ class Solver:
         post_drift_terms : list of str, optional
             2nd-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
         post_variogram_model : str
-            2nd-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'.
+            2nd-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'. Note: 'linear' is supported under engine='pykrige'; engine='native' falls back to 'spherical' with a warning.
         post_zero_boundary : bool
             If True, enforces a zero thickness boundary condition (H=0) on the glacier margin outline.
         post_interpolation_target : str
@@ -212,6 +213,7 @@ class Solver:
         self.migrated_points: np.ndarray | None = None
         self.drift_analyzer: bool = False
         self._traveltime_grid: np.ndarray | None = None
+        self._traveltime_std: np.ndarray | None = None
         self.opt_kc: float | None = None
         self.opt_slope: np.ndarray | None = None
         self.kriged_thickness: np.ndarray | None = None
@@ -225,7 +227,9 @@ class Solver:
         self.final_bss: np.ndarray | None = None
         self.bss_std: np.ndarray | None = None
         self.opt_variogram_params: dict[str, float] | None = None
-        if not hasattr(self, "config") or self.config is None:
+        if config is not None:
+            self.config = config
+        elif not hasattr(self, "config") or self.config is None:
             self.config = {}
         if self.config_path and Path(self.config_path).exists() and not self.config:
             try:
@@ -244,6 +248,11 @@ class Solver:
     @traveltime_grid.setter
     def traveltime_grid(self, value: np.ndarray | None) -> None:
         self._traveltime_grid = value
+
+    @property
+    def traveltime_std_grid(self) -> np.ndarray | None:
+        """Pre-migration signal traveltime Kriging standard error uncertainty grid sigma_T(x,y)."""
+        return self._traveltime_std
 
     @property
     def opt_wavelength(self) -> float | None:
@@ -291,6 +300,16 @@ class Solver:
     def slope_floor_deg(self) -> float:
         """Minimum surface slope angle threshold in degrees [°]."""
         return float(self.optimization_config.get("slope_floor_deg", 5.0))
+
+    @property
+    def safe_slope_sin(self) -> np.ndarray:
+        """Returns safe sin(alpha_opt) grid bounded below by slope_floor_deg."""
+        if self.opt_slope is not None:
+            opt_slope_sin = np.sin(self.opt_slope)
+        else:
+            opt_slope_sin = np.sin(self._get_dem_gradients()["slope_rad"])
+        min_slope_sin = np.sin(np.radians(self.slope_floor_deg))
+        return np.maximum(opt_slope_sin, min_slope_sin)
 
     def _cfg_get(self, section: str, key: str, default: Any = None) -> Any:
         """Helper method for safe configuration parameter lookup."""
@@ -414,6 +433,10 @@ class Solver:
                 res = self._export_optional_raster(self._traveltime_grid, suffix="traveltime", name="traveltime")
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
+            if cfg_out.save_traveltime_uncertainty and self._traveltime_std is not None:
+                res = self._export_optional_raster(self._traveltime_std, suffix="traveltime_uncertainty", name="traveltime uncertainty")
+                if res:
+                    saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_migrated_points and self.migrated_points is not None:
                 res = self._export_optional_points_csv(self.migrated_points, suffix="migrated_points")
                 if res:
@@ -446,6 +469,7 @@ class Solver:
     def clear_intermediate_grids(self) -> None:
         """Clears intermediate 2D array grids from memory to optimize footprint for large datasets."""
         self._traveltime_grid = None
+        self._traveltime_std = None
         self.kriged_thickness = None
         self.kriged_variance = None
         self.kriged_std = None
@@ -672,8 +696,7 @@ class Solver:
         has_prof = (pts.shape[1] >= 5)
 
         if target_upper == "P":
-            opt_slope_sin = np.sin(self.opt_slope)
-            interp_slope = self.geometry.create_interpolator(opt_slope_sin, fill_value=np.nan)
+            interp_slope = self.geometry.create_interpolator(self.safe_slope_sin, fill_value=np.nan)
             pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
             slopes_pts = interp_slope(pts_xy)
             min_slope_sin = np.sin(np.radians(self.slope_floor_deg))
@@ -825,9 +848,7 @@ class Solver:
         )
 
         if target_upper == "P":
-            opt_slope_sin = np.sin(self.opt_slope)
-            min_slope_sin = np.sin(np.radians(self.slope_floor_deg))
-            safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
+            safe_slope_grid = self.safe_slope_sin
             grid = krig_res.bedrock_grid / safe_slope_grid
             var = krig_res.variance_grid / (safe_slope_grid**2)
             return KrigingResult(bedrock_grid=grid, variance_grid=var)
@@ -908,6 +929,7 @@ class Solver:
                 logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
             return self.migrated_points
 
+        need_tt_unc = self.outputs_config_obj.save_traveltime_uncertainty
         krig1_res = self._execute_kriging_pass(
             target_type=self.pre_interpolation_target,
             points=pts,
@@ -916,15 +938,17 @@ class Solver:
             var_model=self.pre_variogram_model,
             zero_boundary=self.pre_zero_boundary,
             pass_name="Pass 1: Pre-Migration",
-            return_variance=False,  # the traveltime pass never consumes the Kriging variance
+            return_variance=need_tt_unc,
         )
         tt_grid = np.maximum(krig1_res.bedrock_grid, 0.0)
         if self.outline_mask is not None:
             tt_grid[~self.outline_mask] = np.nan
         self._traveltime_grid = tt_grid
 
-        if self.outputs_config_obj.save_traveltime_grid:
-            self._export_optional_raster(self._traveltime_grid, suffix="traveltime", name="traveltime")
+        if krig1_res.variance_grid is not None and not np.all(np.isnan(krig1_res.variance_grid)):
+            self._traveltime_std = np.sqrt(np.maximum(krig1_res.variance_grid, 0.0))
+            if self.outline_mask is not None:
+                self._traveltime_std[~self.outline_mask] = np.nan
 
         cached_dem_grads = self._get_dem_gradients()
 
@@ -970,9 +994,7 @@ class Solver:
                 except Exception:
                     break
 
-        if self.outputs_config_obj.save_migrated_points and self.migrated_points is not None:
-            self._export_optional_points_csv(self.migrated_points, suffix="migrated_points")
-
+        self.export_outputs("migration")
         return self.migrated_points
 
     def optimize_bss(
@@ -1053,7 +1075,6 @@ class Solver:
         method: str | None = None,
         variogram_model: str | None = None,
         interactive: bool = False,
-        plotit: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Calculates bedrock elevation grid using Dual Kriging interpolation pass.
@@ -1062,7 +1083,7 @@ class Solver:
         if pts is None:
             raise ValueError("No survey or migrated points available. Run migrate_eikonal() first.")
 
-        should_plot = plotit or interactive or (self.plots_dir is not None)
+        should_plot = interactive or (self.plots_dir is not None)
 
         krig_method = method if method is not None else self.post_kriging_method
         var_model = variogram_model if variogram_model is not None else self.post_variogram_model
@@ -1123,10 +1144,6 @@ class Solver:
 
         return self.kriged_bedrock, self.kriged_variance
 
-    def interpolate_kriging(self, *args, **kwargs):
-        """Alias for calculate_bedrock()."""
-        return self.calculate_bedrock(*args, **kwargs)
-
     def fill_holes_rf(self) -> np.ndarray:
         """Trains Random Forest ML model to fill remaining bedrock holes."""
         if self.kriged_bedrock is None:
@@ -1183,7 +1200,6 @@ class Solver:
     def finalize_bedrock(
         self,
         interactive: bool = False,
-        plotit: bool = True,
         random_forest_gap_filling: bool | None = None,
         apply_margin_blend: bool | None = None,
         min_gap_dist: float | None = None,
@@ -1206,8 +1222,6 @@ class Solver:
         ----------
         interactive : bool, default False
             If True, prompts for unset gap-filling / blending options and shows figures interactively.
-        plotit : bool, default True
-            Retained for API compatibility; diagnostic figures are always saved.
         random_forest_gap_filling : bool, optional
             Apply Random Forest gap filling. If None, asks when interactive, otherwise False.
         apply_margin_blend : bool, optional
@@ -1228,7 +1242,7 @@ class Solver:
             Corner frequency cutoff wavenumber (k_c,smooth) for FFT low-pass filtering.
             If None, defaults to optimal k_c. Lower values produce smoother bedrock terrain.
         """
-        should_plot = plotit or interactive or (self.plots_dir is not None)
+        should_plot = interactive or (self.plots_dir is not None)
 
         if self.kriged_thickness is None:
             if self.kriged_bedrock is not None:
@@ -1236,7 +1250,7 @@ class Solver:
                 if self.outline_mask is not None:
                     self.kriged_thickness[~self.outline_mask] = 0.0
             else:
-                self.interpolate_kriging(interactive=interactive, plotit=should_plot)
+                self.calculate_bedrock(interactive=interactive)
 
         # Step 4 Topography Finalization: Takes depth field D(x,y) from Step 3
         if smooth_bedrock:
@@ -1358,11 +1372,7 @@ class Solver:
             mean_unc = _safe_nanmean(self.kriged_std)
 
         # Basal Shear Stress Calculation (tb = rho_ice * g * D * sin(alpha) in kPa)
-        if self.opt_slope is not None and self.opt_slope.shape == self.dem_grid.shape:
-            sin_alpha_opt = np.sin(self.opt_slope)
-        else:
-            sin_alpha_opt = np.sin(self._get_dem_gradients()["slope_rad"])
-
+        sin_alpha_opt = self.safe_slope_sin
         self.final_bss = (self.ice_density * self.g * self.final_thickness * sin_alpha_opt) / 1000.0
         self.bss_std = (self.ice_density * self.g * self.kriged_std * sin_alpha_opt) / 1000.0
 
@@ -1429,10 +1439,6 @@ class Solver:
             transform=self.meta.get("transform"),
             name="final_bedrock",
         )
-
-    def finalize_topography(self, *args, **kwargs) -> BedrockMap:
-        """Alias for finalize_bedrock()."""
-        return self.finalize_bedrock(*args, **kwargs)
 
     def recommend_drift_model(
         self,
@@ -1601,12 +1607,11 @@ class Solver:
         )
         opt_wl = compute_cutoff_wavelength(opt_kc)
         logger.info(f"   Optimal Post-Migration Corner Frequency k_c = {opt_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
-        self.interpolate_kriging(interactive=opt_interactive, plotit=True)
+        self.calculate_bedrock(interactive=opt_interactive)
 
         logger.info("4. Finalizing Bedrock Topography...")
-        bedrock_map = self.finalize_topography(
+        bedrock_map = self.finalize_bedrock(
             interactive=opt_interactive,
-            plotit=True,
             random_forest_gap_filling=fin_cfg.get("random_forest_gap_filling", False),
             apply_margin_blend=fin_cfg.get("apply_margin_blend", False),
             min_gap_dist=fin_cfg.get("min_gap_dist", 50.0),

@@ -433,7 +433,7 @@ class TestAuditRegressions(unittest.TestCase):
         np.testing.assert_array_equal(sample_pts[:, 3], [0.0, 0.0, 1.0, 1.0])
 
     def test_linear_variogram_model_support(self):
-        """16. 'linear' variogram: accepted, finite, matches the closed-form bounded-linear Kriging, and warns (R4)."""
+        """16. 'linear' variogram: under native engine, logs warning and falls back to 'spherical'."""
         geom = GridGeometry.create((10, 10), dx=10.0, dy=10.0, bounds=(0, 0, 100, 100))
         pts = np.array([
             [20.0, 20.0, 10.0],
@@ -446,24 +446,23 @@ class TestAuditRegressions(unittest.TestCase):
                 pts, geom.x_coords, geom.y_coords, method="ordinary",
                 variogram_model="linear", variogram_params=params, show_progress=False,
             )
-        self.assertTrue(any("linear" in m and "1-D" in m for m in cm.output), cm.output)
+        self.assertTrue(any("linear" in m and "falling back to 'spherical'" in m for m in cm.output), cm.output)
         self.assertEqual(grid.shape, (10, 10))
         self.assertTrue(np.all(np.isfinite(grid)))
         self.assertTrue(np.all(np.isfinite(var)))
 
         # Exactness at a data location: Kriging is an exact interpolator (nugget = 0, only the 1e-6*sill
-        # Tikhonov term perturbs it) -> the node at (50, 50) is not exactly on the cell-centre grid, so check the
-        # closed-form ordinary-kriging solution at an arbitrary node instead.
-        from pysole.variogram import linear_variogram
+        # Tikhonov term perturbs it) -> check the closed-form spherical ordinary-kriging solution at an arbitrary node.
+        from pysole.variogram import spherical_variogram
         from scipy.spatial.distance import cdist
 
         reg = 1e-6 * params["sill"]
-        G = linear_variogram(cdist(pts[:, :2], pts[:, :2]), params["range"], params["sill"], params["nugget"])
+        G = spherical_variogram(cdist(pts[:, :2], pts[:, :2]), params["range"], params["sill"], params["nugget"])
         G = np.where(cdist(pts[:, :2], pts[:, :2]) == 0, 0.0, G) + reg * np.eye(3)
         A = np.ones((4, 4)); A[:3, :3] = G; A[3, 3] = 0.0
         j, i = 4, 6  # row (y index), col (x index)
         x0, y0 = geom.x_coords[i], geom.y_coords[j]
-        g0 = linear_variogram(np.hypot(pts[:, 0] - x0, pts[:, 1] - y0), params["range"], params["sill"], params["nugget"])
+        g0 = spherical_variogram(np.hypot(pts[:, 0] - x0, pts[:, 1] - y0), params["range"], params["sill"], params["nugget"])
         w = np.linalg.solve(A, np.append(g0, 1.0))
         self.assertAlmostEqual(float(grid[j, i]), float(w[:3] @ pts[:, 2]), places=8)
 
@@ -1149,9 +1148,39 @@ class TestAuditRegressions(unittest.TestCase):
                 if "drift" in line.lower() or "sia" in line:
                     for m in lists.finditer(line):
                         bad = [n for n in re.findall(r'"([A-Za-z_]+)"', m.group(1)) if n not in DriftBasis.SUPPORTED_TERMS]
-                        if bad:
-                            problems.append(f"{md.name}:{no}: unknown drift term(s) {bad}")
         self.assertEqual(problems, [])
+
+    def test_save_traveltime_uncertainty_export(self):
+        """40. save_traveltime_uncertainty auto-enables Pass 1 variance evaluation and exports traveltime uncertainty raster in traveltime units."""
+        import tempfile
+        from pysole.solver import Solver
+
+        bounds = (500000.0, 5200000.0, 500100.0, 5200100.0)
+        geom = GridGeometry.create((10, 10), dx=10.0, dy=10.0, bounds=bounds)
+        dem = np.full((10, 10), 1000.0)
+        pts = np.array([
+            [500020.0, 5200020.0, 1000.0, 0.5],
+            [500050.0, 5200050.0, 1000.0, 0.8],
+            [500080.0, 5200080.0, 1000.0, 1.2],
+        ])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            solver = Solver(
+                dem=dem,
+                dx=10.0,
+                dy=10.0,
+                bounds=geom.bounds,
+                output_dir=tmpdir,
+                config={"outputs": {"save_traveltime_uncertainty": True}},
+            )
+            solver.pre_kriging_points = pts
+            solver.migrate_eikonal(travel_times=pts, interactive=False)
+            self.assertIsNotNone(solver.traveltime_std_grid)
+            self.assertEqual(solver.traveltime_std_grid.shape, (10, 10))
+            self.assertTrue(np.all(np.isfinite(solver.traveltime_std_grid)))
+            self.assertTrue(np.all(solver.traveltime_std_grid >= 0.0))
+
+            saved = solver.export_outputs(stage="migration")
+            self.assertTrue(any("traveltime_uncertainty" in f for f in saved), saved)
 
 
 

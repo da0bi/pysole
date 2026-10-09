@@ -10,7 +10,7 @@ import sys
 from typing import Any
 import numpy as np
 
-from .config import load_config, resolve_path, resolve_output_dir, configured_output_dir
+from .config import load_config, resolve_output_dir, configured_output_dir
 from .logging import logger, setup_logging
 from .raster import BedrockMap
 
@@ -148,20 +148,6 @@ def run_from_config(
             smoothing_kernel_size=fin_cfg.get("smoothing_kernel_size", 3),
             smoothing_kc_cutoff=fin_cfg.get("smoothing_kc_cutoff"),
         )
-
-        # Migration-stage outputs are exported inside migrate_eikonal() (only when a migration actually ran) and
-        # finalization-stage outputs inside finalize_bedrock(); nothing is exported twice here.
-
-        output_bedrock_file = outputs_cfg.get("output_bedrock_map")
-        if output_bedrock_file:
-            full_out_path = resolve_path(output_bedrock_file, output_dir=solver.output_dir, config_path=config_file)
-            fmt = outputs_cfg.get("output_format", "geotiff")
-            saved_paths = final_raster.save(full_out_path, formats=fmt)
-            if isinstance(saved_paths, list):
-                for sp in saved_paths:
-                    logger.info(f" 5. Saved predicted bedrock map to: {sp}")
-            else:
-                logger.info(f" 5. Saved predicted bedrock map to: {saved_paths}")
 
         return final_raster
     except Exception as e:

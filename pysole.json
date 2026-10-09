@@ -71,6 +71,7 @@
         "save_bedrock_elevation_map": true,
         "compute_uncertainty": true,
         "save_traveltime_grid": false,
+        "save_traveltime_uncertainty": false,
         "save_migrated_points": false,
         "save_thickness_grid": false,
         "save_thickness_uncertainty": false,

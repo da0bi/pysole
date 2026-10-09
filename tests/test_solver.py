@@ -37,7 +37,7 @@ class TestSolverWuk(unittest.TestCase):
             opt_kc = model.optimize_bss(kc_max=0.3, kc_min=0.01, n_steps=5)
             self.assertGreater(opt_kc, 0)
 
-            bedrock_map = model.finalize_topography(
+            bedrock_map = model.finalize_bedrock(
                 interactive=False,
                 random_forest_gap_filling=False,
                 apply_margin_blend=True,
@@ -64,7 +64,7 @@ class TestSolverWuk(unittest.TestCase):
         )
         model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
         model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)
-        model.interpolate_kriging()
+        model.calculate_bedrock()
 
         self.assertIsNotNone(model.kriged_bedrock)
         self.assertEqual(model.kriged_bedrock.shape, (179, 213))
@@ -81,7 +81,7 @@ class TestSolverWuk(unittest.TestCase):
         )
         model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
         model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)
-        bedrock_map = model.finalize_topography(interactive=False, random_forest_gap_filling=False, apply_margin_blend=False)
+        bedrock_map = model.finalize_bedrock(interactive=False, random_forest_gap_filling=False, apply_margin_blend=False)
 
         self.assertIsInstance(bedrock_map, pysole.BedrockMap)
         self.assertTrue(np.all(np.isfinite(model.kriged_bedrock)))
@@ -113,7 +113,7 @@ class TestSolverWuk(unittest.TestCase):
         model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
         self.assertIsNotNone(model.traveltime_grid)
 
-        model.interpolate_kriging()
+        model.calculate_bedrock()
         self.assertIsNotNone(model.kriged_bedrock)
         self.assertEqual(model.kriged_bedrock.shape, (179, 213))
         self.assertTrue(np.all(np.isfinite(model.kriged_bedrock)))

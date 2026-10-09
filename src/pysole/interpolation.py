@@ -220,6 +220,16 @@ CURVATURE_DRIFT_TERMS: frozenset[str] = frozenset(
 )
 """Drift term names (primitive and compound) whose expansion includes the surface-curvature raster."""
 
+COMPOUND_DRIFT_MAP: dict[str, set[str]] = {
+    "sia_space": {"sia", "linear_xy"},
+    "sia_z_dem": {"sia", "z_dem"},
+    "sia_curvature_dem": {"sia", "curvature_dem"},
+    "z_dem_curvature_dem": {"z_dem", "curvature_dem"},
+    "sia_z_dem_curvature_dem": {"sia", "z_dem", "curvature_dem"},
+    "full_physical": {"sia", "z_dem", "curvature_dem"},
+    "full_spatial_physical": {"sia", "z_dem", "curvature_dem", "linear_xy"},
+}
+
 
 def built_in_kriging_interpolation(
     sample_points: np.ndarray,
@@ -277,12 +287,18 @@ def built_in_kriging_interpolation(
 
     Notes
     -----
-    The ``"linear"`` variogram model is the bounded 1-D profile model
-    ``gamma(h) = nugget + sill * min(h / range, 1)``. It is not a conditionally negative
-    definite function in two dimensions, so the 2-D Kriging system may be indefinite and
-    the estimation variance may be clamped to zero. Prefer ``"spherical"``,
-    ``"exponential"`` or ``"gaussian"`` for areal interpolation.
+    The ``"linear"`` variogram model is a 1-D profile model and is not valid for 2-D native spatial
+    Kriging. If specified under the native engine, it automatically falls back to 'spherical' with a warning.
+    To use a 2-D linear model, set engine='pykrige'.
     """
+    if str(variogram_model).lower().strip() == "linear":
+        logger.warning(
+            "   [Variogram Engine Warning] The 'linear' variogram model is a 1-D profile model and is not "
+            "valid for 2-D native spatial Kriging. Automatically falling back to 'spherical' "
+            "(which provides linear slope behavior near the origin). To use a 2-D linear model, set engine='pykrige'."
+        )
+        variogram_model = "spherical"
+
     valid = ~np.isnan(sample_points[:, 0]) & ~np.isnan(sample_points[:, 1]) & ~np.isnan(sample_points[:, 2])
     pts = sample_points[valid]
 
@@ -319,13 +335,6 @@ def built_in_kriging_interpolation(
         nugget = 0.0
 
     from .variogram import evaluate_variogram_model
-
-    if str(variogram_model).lower().strip() == "linear":
-        logger.warning(
-            "   [Variogram Warning] The 'linear' variogram model is a bounded 1-D profile model and is not "
-            "positive-definite in 2-D. The 2-D Kriging system may be indefinite and the variance may collapse to 0. "
-            "Prefer 'spherical', 'exponential' or 'gaussian' for areal interpolation."
-        )
 
     def variogram_func(h: np.ndarray) -> np.ndarray:
         gamma = evaluate_variogram_model(h, variogram_model, range_a, sill, nugget)
@@ -728,10 +737,9 @@ def kriging_interpolation(
 
     Notes
     -----
-    ``variogram_model="linear"`` selects the bounded 1-D profile model
-    ``gamma(h) = nugget + sill * min(h / range, 1)`` in the native engine. This model is not
-    conditionally negative definite in 2-D, so areal Kriging systems may be indefinite and the variance
-    may be clamped to zero (a runtime warning is logged). Prefer 'spherical', 'exponential' or 'gaussian'.
+    ``variogram_model="linear"`` is supported under ``engine="pykrige"``. Under ``engine="native"``,
+    selecting ``"linear"`` logs a warning and automatically falls back to ``"spherical"``
+    (the 2-D valid model with near-origin linear slope behavior).
     """
     M, N = geometry.shape
     x_coords = geometry.x_coords
@@ -800,18 +808,8 @@ def kriging_interpolation(
     expanded_primitives: set[str] = set()
     if drift_terms:
         for term in drift_terms:
-            if term == "sia_space":
-                expanded_primitives.update(["sia", "linear_xy"])
-            elif term == "sia_z_dem":
-                expanded_primitives.update(["sia", "z_dem"])
-            elif term == "sia_curvature_dem":
-                expanded_primitives.update(["sia", "curvature_dem"])
-            elif term == "z_dem_curvature_dem":
-                expanded_primitives.update(["z_dem", "curvature_dem"])
-            elif term in ["sia_z_dem_curvature_dem", "full_physical"]:
-                expanded_primitives.update(["sia", "z_dem", "curvature_dem"])
-            elif term == "full_spatial_physical":
-                expanded_primitives.update(["sia", "z_dem", "curvature_dem", "linear_xy"])
+            if term in COMPOUND_DRIFT_MAP:
+                expanded_primitives.update(COMPOUND_DRIFT_MAP[term])
             elif term in DriftBasis.SUPPORTED_TERMS:
                 expanded_primitives.add(term)
             else:
@@ -1009,18 +1007,8 @@ class DriftBasis:
         for term in self.drift_terms:
             if term not in self.SUPPORTED_TERMS:
                 raise ValueError(f"Unknown drift term '{term}'. Supported terms: {sorted(self.SUPPORTED_TERMS)}")
-            if term == "sia_space":
-                primitives.update(["sia", "linear_xy"])
-            elif term == "sia_z_dem":
-                primitives.update(["sia", "z_dem"])
-            elif term == "sia_curvature_dem":
-                primitives.update(["sia", "curvature_dem"])
-            elif term == "z_dem_curvature_dem":
-                primitives.update(["z_dem", "curvature_dem"])
-            elif term in ["sia_z_dem_curvature_dem", "full_physical"]:
-                primitives.update(["sia", "z_dem", "curvature_dem"])
-            elif term == "full_spatial_physical":
-                primitives.update(["sia", "z_dem", "curvature_dem", "linear_xy"])
+            if term in COMPOUND_DRIFT_MAP:
+                primitives.update(COMPOUND_DRIFT_MAP[term])
             else:
                 primitives.add(term)
 

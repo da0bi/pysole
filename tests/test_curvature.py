@@ -121,9 +121,8 @@ class TestSurfaceCurvatureAndBedrockEmbedding(unittest.TestCase):
         solver.survey_points = sample_pts
         solver.migrated_points = sample_pts.copy()
 
-        bedrock_map = solver.finalize_topography(
+        bedrock_map = solver.finalize_bedrock(
             interactive=False,
-            plotit=False,
             random_forest_gap_filling=False,
             apply_margin_blend=True,
             min_gap_dist=20.0,
