@@ -285,7 +285,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `plots_dir` | `str` | `"figures"` | Diagnostic figures are always saved - `plots_dir` controls *where*. `null` is equivalent to `"figures"`. A relative path is resolved inside `output_dir`, or absolute `output_prefix`. `PySole` data products and figures always share the same location, except an absolute `plots_dir` is defined. |
 | | `save_bedrock_elevation_map` | `bool` | `true` | If `true` (default), exports the predicted bedrock elevation raster grid <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) to `<output_prefix>_bedrock.<ext>`. |
 | | `save_traveltime_grid` | `bool` | `false` | If `true`, exports the pre-migration interpolated traveltime raster grid, <i>T</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_traveltime.<ext>`. |
-| | `save_traveltime_uncertainty` | `bool` | `false` | If `true`, exports the Kriging traveltime uncertainty raster grid, <i>σ<sub>T</sub></i>(<i>x</i>,<i>y</i>), in one-way traveltime units (two-way data is halved first), masked by the creeping body outline to `<output_prefix>_traveltime_uncertainty.<ext>`. For `interpolation_target: "P"` the variance is propagated as σ<sub>T</sub>² = σ<sub>P</sub>² / sin²α<sub>opt</sub>. Not shown in the diagnostic figures. Unavailable (with a warning) if migration is skipped or the survey data are depths. |
+| | `save_traveltime_uncertainty` | `bool` | `false` | If `true`, exports the Kriging traveltime uncertainty raster grid, <i>σ<sub>T</sub></i>(<i>x</i>,<i>y</i>), in traveltime units and masked by the creeping body outline to `<output_prefix>_traveltime_uncertainty.<ext>`. Unavailable (with a warning) if migration is skipped or the survey data are depths. |
 | | `save_migrated_points` | `bool` | `false` | If `true`, exports the 3D ray-migrated survey points to `<output_prefix>_migrated_points.csv` (`x, y, z_surface, depth_migrated`). If migration is skipped, it is automatically set to `false` and a log message is printed. |
 | | `save_thickness_grid` | `bool` | `false` | If `true`, exports the final thickness raster grid, <i>D</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness.<ext>`. |
 | | `save_thickness_uncertainty` | `bool` | `false` | If `true`, exports the Kriging thickness uncertainty raster grid, <i>σ<sub>D</sub></i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness_uncertainty.<ext>`. Skipped with a warning if the [memory guard](#memory-guard-and-uncertainty) had to skip the variance. |
@@ -357,25 +357,25 @@ Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and c
 
 #### Derivation of FFT Filter Parameter Defaults (`kc_max`, `kc_min`, `lambda_min`, `lambda_max`, `n_steps`)
 
-When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` dynamically derives physically sound parameter defaults based on the DEM spatial resolution ($\Delta x, \Delta y$) and total domain extent ($L_{\text{max}} = \max(N_x \cdot |dx|, M_y \cdot |dy|)$):
+When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` dynamically derives physically sound parameter defaults based on the DEM spatial resolution (&Delta;<i>x</i>, &Delta;<i>y</i>) and total domain extent (<i>L</i><sub>max</sub> = max(<i>N</i><sub>x</sub> &middot; |<i>dx</i>|, <i>M</i><sub>y</sub> &middot; |<i>dy</i>|)):
 
-- **Maximum Frequency Cutoff $k_{\text{c,max}}$ and Minimum Wavelength $\lambda_{\text{min}}$**:
+- **Maximum Frequency Cutoff <i>k</i><sub>c,max</sub> and Minimum Wavelength <i>&lambda;</i><sub>min</sub>**:
    - **`kc_max` Default**: Defaults to the spatial Nyquist wavenumber limit of the DEM grid:
      <p align="center">
      $$k_{\text{c,max}} = k_{\text{Nyquist}} = \frac{\pi}{\min(|dx|, |dy|)} \quad [\text{rad/m}]$$
      </p>
-   - **`lambda_min` Wavelength Metric & Fallback**: If the user provides a custom $\lambda_{\text{min}}$ [m], it converts directly to wavenumber as $k_{\text{c,max}} = 2\pi / \lambda_{\text{min}}$ for the FFT filtering. When `lambda_min` is `null` (or when `fft_filter_metric = "wavelength"` with `null` `lambda_min`), `PySole` falls back directly to `kc_max` ($k_{\text{Nyquist}}$).
+   - **`lambda_min` Wavelength Metric & Fallback**: If the user provides a custom <i>&lambda;</i><sub>min</sub> [m], it converts directly to wavenumber as <i>k</i><sub>c,max</sub> = 2&pi; / <i>&lambda;</i><sub>min</sub> for the FFT filtering. When `lambda_min` is `null` (or when `fft_filter_metric = "wavelength"` with `null` `lambda_min`), `PySole` falls back directly to `kc_max` (<i>k</i><sub>Nyquist</sub>).
 
-- **Minimum Frequency Cutoff $k_{\text{c,min}}$ and Maximum Wavelength $\lambda_{\text{max}}$**:
+- **Minimum Frequency Cutoff <i>k</i><sub>c,min</sub> and Maximum Wavelength <i>&lambda;</i><sub>max</sub>**:
    - **`kc_min` Default (Half-Domain Limit)**: Defaults to the Half-Domain scaling limit:
      <p align="center">
      $$k_{\text{c,min}} = \frac{4\pi}{L_{\text{DEM,max}}} \quad [\text{rad/m}]$$
      </p>
-     This constrains the maximum filter wavelength to half the physical DEM extent ($\lambda_{\text{max}} = L_{\text{DEM,max}} / 2$).
-   - **`lambda_max` Wavelength Metric & Fallback**: If the user provides a custom $\lambda_{\text{max}}$ [m], it converts directly to wavenumber as $k_{\text{c,min}} = 2\pi / \lambda_{\text{max}}$ for the FFT filtering. When `lambda_max` is `null`, `PySole` falls back directly to `kc_min` ($4\pi / L_{\text{max}}$).
+     This constrains the maximum filter wavelength to half the physical DEM extent (<i>&lambda;</i><sub>max</sub> = <i>L</i><sub>DEM,max</sub> / 2).
+   - **`lambda_max` Wavelength Metric & Fallback**: If the user provides a custom <i>&lambda;</i><sub>max</sub> [m], it converts directly to wavenumber as <i>k</i><sub>c,min</sub> = 2&pi; / <i>&lambda;</i><sub>max</sub> for the FFT filtering. When `lambda_max` is `null`, `PySole` falls back directly to `kc_min` (4&pi; / <i>L</i><sub>max</sub>).
 
 - **Evaluation Step Count `n_steps` (Discrete Fourier Mode Counting)**:
-   - When `n_steps` is `null`, `PySole` dynamically calculates the number of integer Fourier modes spanning the frequency search range $[k_{\text{c,min}}, k_{\text{c,max}}]$ over the maximum domain length $L_{\text{DEM,max}}$:
+   - When `n_steps` is `null`, `PySole` dynamically calculates the number of integer Fourier modes spanning the frequency search range [<i>k</i><sub>c,min</sub>, <i>k</i><sub>c,max</sub>] over the maximum domain length <i>L</i><sub>DEM,max</sub>:
      <p align="center">
      $$n_{\text{modes}} = \left\lfloor \frac{(k_{\text{c,max}} - k_{\text{c,min}}) \cdot L_{\text{max}}}{2\pi} \right\rfloor$$
      </p>
@@ -383,7 +383,7 @@ When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `n
      <p align="center">
      $$n_{\text{steps}} = \text{clip}(n_{\text{modes}}, 10, 50)$$
      </p>
-   - The candidate corner frequency vector $\mathbf{k}_c$ is generated as a logarithmically/geometrically spaced array (`np.geomspace`) from $k_{\text{c,max}}$ down to $k_{\text{c,min}}$ with $n_{\text{steps}}$ evaluation passes.
+   - The candidate corner frequency vector <b>k</b><sub>c</sub> is generated as a logarithmically/geometrically spaced array (`np.geomspace`) from <i>k</i><sub>c,max</sub> down to <i>k</i><sub>c,min</sub> with <i>n</i><sub>steps</sub> evaluation passes.
 
 <a id="variogram-binning"></a>
 #### 4. Variogram Binning with Minimum Pair Threshold
