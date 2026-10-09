@@ -327,5 +327,23 @@ pysole pysole.json --drift-analyzer --profile-col line_id
 pysole pysole.json --batch
 
 # Standalone Survey Planning (defaults: k_c=0.0314, tau=100 kPa, max-km=5.0 km)
-pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 0.0314 --tau 100 --max-km 5.0 --output proposed_survey
+pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 0.0314 --tau 100 --max-km 5.0 --out-dir results --format tif
 ```
+
+#### `pysole plan-survey` CLI Options & Path Resolution
+
+Computes the shallow-ice-approximation (SIA) thickness model and proposes survey tracks within a length budget.
+
+- **Options:**
+  - `--dem`: File path to surface DEM raster (required).
+  - `--outline`: File path to creeping body / glacier boundary polygon (optional).
+  - `--kc`: FFT corner wavenumber in rad/m (default `0.0314`).
+  - `--tau`: Target basal shear stress $\tau_0$ in kPa (default `100`).
+  - `--max-km`: Survey length budget in km (default `5.0`).
+  - `--prefix`: Output prefix (default `final`).
+  - `--out-dir`: Output directory for generated deliverables.
+  - `--plots-dir`: Output directory for diagnostic figures.
+  - `--format`: Export raster format (`tif` or `asc`, default `tif`).
+
+- **Output Path Resolution:** Outputs are kept together: files go to `--out-dir` (current directory if omitted); an absolute `--prefix` places all files beside it; figures are saved in `figures/` next to the data files unless `--plots-dir` is an absolute path.
+

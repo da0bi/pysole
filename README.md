@@ -681,11 +681,11 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```
   *Names the column of the survey CSV that identifies the survey profile / line (matched by header name, so it may be at any position; numeric or text IDs are supported). It enables leave-one-profile-out (LOPO) cross-validation in the Drift Analyzer and overrides `inputs.survey_profile_column`.*
 
-* **Plan an Unprobed Glacier Survey (no survey data required):**
+* **Survey Planner (no survey data required):**
   ```bash
   pysole plan-survey --dem dem.tif --outline outline.geojson --kc 0.0314 --tau 100 --max-km 5 --out-dir results --format tif
   ```
-  *Computes the shallow-ice-approximation (SIA) thickness model and proposes survey tracks within a length budget. Options: `--dem` (required), `--outline`, `--kc` (FFT corner wavenumber in rad/m, default `0.0314`), `--tau` (target basal shear stress $\tau_0$ in kPa, default `100`), `--max-km` (survey length budget in km, default `5.0`), `--prefix` (output prefix, default `final`), `--out-dir`, `--plots-dir` and `--format` (`tif` or `asc`, default `tif`). Outputs are kept together: files go to `--out-dir` (current directory if omitted); an absolute `--prefix` places all files beside it; figures are saved in `figures/` next to the data files unless `--plots-dir` is an absolute path.*
+  *Computes a SIA thickness model and proposes survey tracks within a length budget. For full details and CLI options, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md).*
 
 * **Show the Installed Version:**
   ```bash
