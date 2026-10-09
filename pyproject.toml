@@ -40,6 +40,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "nbclient>=0.10.0",
+    "nbformat>=5.9.0",
+    "ipykernel>=6.29.0",
 ]
 pykrige = [
     "pykrige>=1.7.0",

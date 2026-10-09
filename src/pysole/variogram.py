@@ -14,7 +14,6 @@ from pathlib import Path
 from scipy.spatial.distance import pdist
 from scipy.optimize import curve_fit
 from .smoothing import (
-    compute_gradients,
     compute_slope_rad,
     precompute_fft_grid,
     fft_gaussian_smooth_precomputed,
@@ -269,7 +268,14 @@ def gaussian_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarra
 
 
 def linear_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarray:
-    """Linear variogram model: gamma(h) = n + c * min(h/a, 1)."""
+    """
+    Bounded linear variogram model: gamma(h) = n + c * min(h/a, 1).
+
+    Caveat: this is a 1-D profile model (a "tent" covariance). It is not conditionally negative
+    definite in two dimensions, so a 2-D Kriging system built from it may be indefinite and the
+    resulting estimation variance may be clamped to 0. Use 'spherical', 'exponential' or
+    'gaussian' for areal (2-D) interpolation.
+    """
     h = np.asarray(h, dtype=float)
     a_eff = max(float(a), 1e-6)
     return n + c * np.clip(h / a_eff, 0.0, 1.0)
@@ -389,8 +395,6 @@ def optimize_bss_variance(
     """
     dx = geometry.dx
     dy = geometry.dy
-    x_coords = geometry.x_coords
-    y_coords = geometry.y_coords
 
     effective_n_cores = (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
 
@@ -461,14 +465,17 @@ def optimize_bss_variance(
     survey_dists = pdist(pts_valid_coords) if (len(pts_valid_coords) >= 2 and len(pts_valid_coords) <= 5000) else None
 
     # Pre-compute 2D Forward FFT and wavenumber grid ONCE on raw DEM elevation Z_surf with padding for lowest kc
-    A_shift_dem, k_grid_dem, k_max_grid = precompute_fft_grid(dem, dx=dx, dy=dy, kc=kc_min_val)
+    A_shift_dem, k_grid_dem, _ = precompute_fft_grid(dem, dx=dx, dy=dy, kc=kc_min_val)
     base_slope = compute_slope_rad(dem, dx=dx, dy=dy)
 
+    actual_nrbins_calc: int | None = None
     if survey_dists is not None and len(survey_dists) > 0:
         n_pairs = len(survey_dists)
         max_pair_dist = float(np.max(survey_dists))
         maxdist_calc = 0.5 * max_pair_dist
-        max_bins_for_30_pairs = max(3, n_pairs // 30)
+        in_range_pairs_calc = int(np.sum(survey_dists <= maxdist_calc))
+        # Identical rule to calculate_variogram(): min(30, max(3, in_range_pairs // 30)); explicit values floored at 3
+        max_bins_for_30_pairs = min(30, max(3, in_range_pairs_calc // 30))
 
         if nrbins is None or nrbins <= 0:
             actual_nrbins_calc = max_bins_for_30_pairs
@@ -476,7 +483,7 @@ def optimize_bss_variance(
             actual_nrbins_calc = max(3, int(nrbins))
 
         bin_w = maxdist_calc / actual_nrbins_calc if actual_nrbins_calc > 0 else 0.0
-        avg_pairs_p_bin = n_pairs / float(actual_nrbins_calc) if actual_nrbins_calc > 0 else 0.0
+        avg_pairs_p_bin = in_range_pairs_calc / float(actual_nrbins_calc) if actual_nrbins_calc > 0 else 0.0
 
         bins_calc = np.linspace(0, maxdist_calc, actual_nrbins_calc + 1)
         bin_idxs = np.digitize(survey_dists, bins_calc) - 1
@@ -488,8 +495,13 @@ def optimize_bss_variance(
         logger.info(
             f"   Variogram Lag Distance Binning: {actual_nrbins_calc} bins (maxdist = {maxdist_calc:.2f} m, "
             f"bin width = {bin_w:.2f} m), relative distances per bin: avg = {avg_pairs_p_bin:.1f} pairs/bin "
-            f"(range: {min_p} - {max_p} pairs, total pairs = {n_pairs})"
+            f"(range: {min_p} - {max_p} pairs, in-range pairs = {in_range_pairs_calc} of {n_pairs} total)"
         )
+
+    def _effective_nrbins_label() -> str:
+        if nrbins is not None and nrbins > 0:
+            return str(max(3, int(nrbins)))
+        return str(actual_nrbins_calc) if actual_nrbins_calc is not None else "auto"
 
     all_kc_variances = []
     all_smoothed_slopes = {}
@@ -597,9 +609,9 @@ def optimize_bss_variance(
                         )
                         if interactive:
                             while True:
-                                ans_range = input(f"\nCalculated Correlation Range = {a_range:.2f} m (using nrbins = {nrbins}). Accept these values? [Y/n]: ").strip().lower()
+                                ans_range = input(f"\nCalculated Correlation Range = {a_range:.2f} m (using nrbins = {_effective_nrbins_label()}). Accept these values? [Y/n]: ").strip().lower()
                                 if ans_range in ["n", "no"]:
-                                    val_bins = input(f"Enter custom number of distance bins (nrbins, current = {nrbins}): ").strip()
+                                    val_bins = input(f"Enter custom number of distance bins (nrbins, current = {_effective_nrbins_label()}): ").strip()
                                     if val_bins:
                                         try:
                                             nrbins = int(val_bins)
@@ -640,25 +652,32 @@ def optimize_bss_variance(
         if range_fix is None:
             range_fix = 1000.0
 
-        # Step 2: Parallel execution across all kc_values using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=effective_n_cores) as executor:
-            kc_eval_results = list(
-                get_progress_bar(
-                    executor.map(_eval_single_kc, valid_kc_list),
-                    total=len(valid_kc_list),
-                    desc="   [BSS Optimization] Searching k_c spectrum",
-                    unit="kc",
-                    disable=not show_progress,
-                )
-            )
+        # Step 2: Evaluate all kc_values in streaming batches of n_cores threads. Each result is reduced
+        # immediately into the running optimum, so peak memory stays O(n_cores) instead of O(n_steps)
+        # (every evaluation owns a full-size smoothed DEM + slope grid). Per-kc grids are only retained
+        # when interactive re-use of the cache is requested.
+        keep_all_grids = bool(interactive)
 
-        for res in kc_eval_results:
+        def _stream_kc_results():
+            batch = max(1, effective_n_cores)
+            with ThreadPoolExecutor(max_workers=effective_n_cores) as executor:
+                for i0 in range(0, len(valid_kc_list), batch):
+                    yield from executor.map(_eval_single_kc, valid_kc_list[i0:i0 + batch])
+
+        for res in get_progress_bar(
+            _stream_kc_results(),
+            total=len(valid_kc_list),
+            desc="   [BSS Optimization] Searching k_c spectrum",
+            unit="kc",
+            disable=not show_progress,
+        ):
             if res is None:
                 continue
 
             kc_val, kc_key, smoothed_dem, smoothed_slope, var_result, mean_product = res
-            all_smoothed_dems[kc_key] = smoothed_dem.copy()
-            all_smoothed_slopes[kc_key] = smoothed_slope.copy()
+            if keep_all_grids:
+                all_smoothed_dems[kc_key] = smoothed_dem
+                all_smoothed_slopes[kc_key] = smoothed_slope
 
             if len(var_result["val"]) > 0:
                 if mean_product != 0 and not np.isnan(mean_product):

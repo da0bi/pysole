@@ -2,6 +2,7 @@
 Unit tests for pysole.json configuration parsing and run_from_config workflow using Wurtenkees Glacier dataset.
 """
 
+import json
 import unittest
 import tempfile
 import pathlib
@@ -11,24 +12,47 @@ import pysole
 
 
 class TestConfigWorkflowWuk(unittest.TestCase):
+    @staticmethod
+    def _config_with_temp_outputs(cfg_path: str, out_dir: str) -> str:
+        """Copies an example config into out_dir with absolute input paths and outputs.output_dir = out_dir."""
+        cfg_p = pathlib.Path(cfg_path)
+        with open(cfg_p, "r") as f:
+            cfg = json.load(f)
+        for key in ("dem_path", "outline_path", "survey_data_path"):
+            val = cfg["inputs"].get(key)
+            if val:
+                cfg["inputs"][key] = str((cfg_p.parent / val).resolve())
+        cfg.setdefault("outputs", {})["output_dir"] = str(out_dir)
+        new_path = pathlib.Path(out_dir) / cfg_p.name
+        with open(new_path, "w") as f:
+            json.dump(cfg, f)
+        return str(new_path)
+
     def test_run_from_config_wuk(self):
-        wuk_config = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/wuk/pysole_wuk.json"))
+        wuk_config_orig = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/wuk/pysole_wuk.json"))
+        gok_config_orig = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/gok/pysole_gok.json"))
 
-        # Execute complete workflow from Wurtenkees Glacier config
-        solver = pysole.Solver.from_config(wuk_config)
-        self.assertEqual(solver.dem_grid.shape, (179, 213))
-        self.assertEqual(solver.dx, 5.0)
-        self.assertEqual(solver.dy, 5.0)
-        self.assertEqual(solver.n_cores, -1)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            wuk_config = self._config_with_temp_outputs(wuk_config_orig, tmp_dir)
 
-        gok_config = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/gok/pysole_gok.json"))
-        solver_gok = pysole.Solver.from_config(gok_config)
-        self.assertEqual(solver_gok.n_cores, -1)
+            # Execute complete workflow from Wurtenkees Glacier config
+            solver = pysole.Solver.from_config(wuk_config)
+            self.assertEqual(solver.dem_grid.shape, (179, 213))
+            self.assertEqual(solver.dx, 5.0)
+            self.assertEqual(solver.dy, 5.0)
+            self.assertEqual(solver.n_cores, -1)
 
-        bedrock_map = pysole.run_from_config(wuk_config, is_batch=True)
-        self.assertIsInstance(bedrock_map, pysole.BedrockMap)
-        self.assertEqual(bedrock_map.shape, (179, 213))
-        self.assertTrue(np.all(np.isfinite(bedrock_map.grid)))
+            gok_dir = os.path.join(tmp_dir, "gok")
+            os.makedirs(gok_dir)
+            gok_config = self._config_with_temp_outputs(gok_config_orig, gok_dir)
+            solver_gok = pysole.Solver.from_config(gok_config)
+            self.assertEqual(solver_gok.n_cores, -1)
+
+            bedrock_map = pysole.run_from_config(wuk_config, is_batch=True)
+            self.assertIsInstance(bedrock_map, pysole.BedrockMap)
+            self.assertEqual(bedrock_map.shape, (179, 213))
+            self.assertTrue(np.all(np.isfinite(bedrock_map.grid)))
+            self.assertTrue(os.path.exists(os.path.join(tmp_dir, "wuk_final_bedrock.tif")))
 
     def test_save_multi_format_all(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

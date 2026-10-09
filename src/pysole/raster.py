@@ -89,7 +89,7 @@ class GridGeometry:
             Column grid indices clipped to [0, ncols - 1].
         """
         M, N = self.shape
-        minx, miny, maxx, maxy = self.bounds
+        minx, _, _, maxy = self.bounds
         cols = np.clip(np.floor((x - minx) / self.dx).astype(int), 0, N - 1)
         rows = np.clip(np.floor((maxy - y) / self.dy).astype(int), 0, M - 1)
         return rows, cols
@@ -478,7 +478,9 @@ def load_dem(
             import rasterio
 
             with rasterio.open(dem_input) as src:
-                grid = np.array(src.read(1), dtype=np.float64)
+                # NOTE: read([1])[0] instead of read(1): rasterio's 2-D read path sets ndarray.shape in place,
+                # which emits a DeprecationWarning under NumPy >= 2.5. Values are identical.
+                grid = np.array(src.read([1])[0], dtype=np.float64)
                 if src.nodata is not None:
                     grid[grid == src.nodata] = np.nan
                 transform = src.transform
@@ -833,26 +835,41 @@ def load_survey_points(
     Loads CSV, whitespace-delimited files, or NumPy arrays, converts coordinates, and validates bounds.
     """
     prof_arr: np.ndarray | None = None
+    pts: np.ndarray | None = None
     if isinstance(survey_input, (str, Path, os.PathLike)):
         filepath = str(survey_input)
-        if profile_column and filepath.endswith(".csv"):
+        is_csv = filepath.lower().endswith(".csv")
+        if profile_column and is_csv:
             try:
                 import pandas as pd
-                df_prof = pd.read_csv(filepath)
-                if profile_column in df_prof.columns:
-                    s_prof = df_prof[profile_column]
-                    if s_prof.dtype == object or any(isinstance(v, str) for v in s_prof.dropna().head(10)):
-                        prof_arr = pd.factorize(s_prof)[0].astype(np.float64)
-                    else:
+
+                df_csv = pd.read_csv(filepath)
+                if profile_column in df_csv.columns:
+                    s_prof = df_csv[profile_column]
+                    if pd.api.types.is_numeric_dtype(s_prof):
                         prof_arr = pd.to_numeric(s_prof, errors="coerce").to_numpy(dtype=np.float64)
-            except Exception:
-                pass
-        try:
-            pts = np.loadtxt(filepath, delimiter="," if filepath.endswith(".csv") else None)
-        except ValueError:
-            import pandas as pd
-            df_tmp = pd.read_csv(filepath)
-            pts = df_tmp.select_dtypes(include=[np.number]).to_numpy()
+                    else:
+                        codes = pd.factorize(s_prof)[0].astype(np.float64)
+                        codes[codes < 0] = np.nan  # factorize flags missing labels with -1
+                        prof_arr = codes
+                    # Drop the profile column by NAME before building the numeric [X, Y, (Z), value] matrix
+                    pts = df_csv.drop(columns=[profile_column]).select_dtypes(include=[np.number]).to_numpy(dtype=np.float64)
+                else:
+                    logger.warning(
+                        f"Survey profile column '{profile_column}' not found in CSV header {list(df_csv.columns)}. "
+                        "Profile-based cross-validation is disabled for this dataset."
+                    )
+            except Exception as e:
+                logger.warning(f"Could not parse survey profile column '{profile_column}': {e}")
+                prof_arr = None
+                pts = None
+        if pts is None:
+            try:
+                pts = np.loadtxt(filepath, delimiter="," if is_csv else None)
+            except ValueError:
+                import pandas as pd
+                df_tmp = pd.read_csv(filepath)
+                pts = df_tmp.select_dtypes(include=[np.number]).to_numpy()
     else:
         pts = np.array(survey_input, dtype=np.float64)
 

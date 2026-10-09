@@ -4,15 +4,15 @@ Handles configuration ingestion, workspace path resolution, output export manage
 and high-level execution wrappers.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
+import os
 import sys
 from typing import Any
 import numpy as np
 
-from .config import load_config, resolve_path, resolve_input_path, resolve_output_dir, OutputsConfig
+from .config import load_config, resolve_path, resolve_output_dir, configured_output_dir
 from .logging import logger, setup_logging
-from .raster import BedrockMap, save_points_csv
+from .raster import BedrockMap
 
 
 class PipelineExporter:
@@ -78,14 +78,14 @@ def run_from_config(
     if not config_file.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_file.resolve()}")
 
-    cfg = load_config(config_file)
+    cfg = load_config(config_file, log_level=log_level)
     inputs_cfg = cfg.get("inputs", {})
     outputs_cfg = cfg.get("outputs", {})
 
-    log_lvl = log_level if log_level is not None else inputs_cfg.get("log_level", "INFO")
+    log_lvl = log_level or os.environ.get("PYSOLE_LOG_LEVEL") or inputs_cfg.get("log_level", "INFO")
 
     output_dir = resolve_output_dir(
-        output_dir=outputs_cfg.get("output_dir") or inputs_cfg.get("output_dir"),
+        output_dir=configured_output_dir(cfg),
         survey_data_path=inputs_cfg.get("survey_data_path"),
         config_path=config_file,
     )
@@ -98,7 +98,7 @@ def run_from_config(
         if survey_data_path is None:
             logger.info("   [INFO] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
 
-            solver = Solver.from_config(config_file)
+            solver = Solver.from_config(config_file, log_level=log_level)
             if is_batch:
                 solver.show_progress = False
 
@@ -118,7 +118,7 @@ def run_from_config(
         logger.info(f"        STARTING NEW PYSOLE BEDROCK TOPOGRAPHY CALCULATION ({config_file.resolve()})")
         logger.info("=" * 80)
 
-        solver = Solver.from_config(config_file)
+        solver = Solver.from_config(config_file, log_level=log_level)
         if is_batch:
             solver.show_progress = False
 
@@ -149,8 +149,8 @@ def run_from_config(
             smoothing_kc_cutoff=fin_cfg.get("smoothing_kc_cutoff"),
         )
 
-        exporter = PipelineExporter(solver)
-        exporter.export_all()
+        # Migration-stage outputs are exported inside migrate_eikonal() (only when a migration actually ran) and
+        # finalization-stage outputs inside finalize_bedrock(); nothing is exported twice here.
 
         output_bedrock_file = outputs_cfg.get("output_bedrock_map")
         if output_bedrock_file:

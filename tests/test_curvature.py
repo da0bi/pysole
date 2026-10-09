@@ -13,6 +13,10 @@ from pysole.solver import Solver
 
 class TestSurfaceCurvatureAndBedrockEmbedding(unittest.TestCase):
     def setUp(self):
+        import tempfile
+
+        self._out_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._out_dir.cleanup)
         self.dx = 10.0
         self.dy = 10.0
         self.nx = 30
@@ -111,6 +115,7 @@ class TestSurfaceCurvatureAndBedrockEmbedding(unittest.TestCase):
             post_drift_terms=["z_dem", "curvature_dem", "quadratic_xy"],
             perform_migration=False,
             survey_data_type="depth",
+            output_dir=self._out_dir.name,
         )
 
         solver.survey_points = sample_pts

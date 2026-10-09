@@ -207,6 +207,7 @@ All execution options can be fully defined in a single JSON configuration file, 
         "output_prefix": "final",
         "plots_dir": "figures",
         "save_bedrock_elevation_map": true,
+        "compute_uncertainty": true,
         "save_traveltime_grid": false,
         "save_migrated_points": false,
         "save_thickness_grid": false,
@@ -257,14 +258,14 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `pre_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (the default for `pre_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
 | | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` tool. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
 | | `pre_migration.drift_terms` | `list[str]` | `[]` | `["sia"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described in the subsection "7. Universal Kriging Drift Models" in the "Technical & Methodological Notes". |
-| | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
+| | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). ⚠️ `"linear"` is a bounded 1-D *profile* model, $\gamma(h)=n+c\,\min(h/a,1)$, that is **not** conditionally negative definite in 2-D: areal Kriging with it can yield indefinite systems and zero/clamped variance (a runtime warning is logged). Prefer `"spherical"`, `"exponential"` or `"gaussian"`. |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 s) along the perimeter and rock outcrop margin outline(s). |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth, <i>D</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"D"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
 | | `post_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (the default for `post_migration.interpolation_target`: `"D"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
 | | `post_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` tool. For full details, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md). |
 | | `post_migration.drift_terms` | `list[str]` | `[]` |  `["sia"]` (SIA physical drift model - the default for `post_migration.interpolation_target`: `"D"`). If left empty `[]` (the default for `post_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described in the subsection "7. Universal Kriging Drift Models" in the "Technical & Methodological Notes". |
-| | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). |
+| | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). ⚠️ `"linear"` is a bounded 1-D profile model and is not valid for 2-D areal Kriging (see `pre_migration.variogram_model`). |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
 | **`finalization_parameters`** | `random_forest_gap_filling` | `bool` | `false` | If `true`, applies Random Forest machine learning gap filling across unmeasured interior regions. |
 | | `apply_margin_blend` | `bool` | `false` | If `true`, applies geomorphological margin blending to seamlessly transition calculated bedrock elevation to surrounding surface DEM terrain. |
@@ -276,9 +277,10 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `smoothing_kc_cutoff` | `float` | `null` | Corner frequency cutoff wavenumber (<i>k</i><sub>c,smooth</sub>) for `"fft_lowpass"`. If `null`, defaults to <i>k</i><sub>c,opt</sub> from the surface slope smoothing optimization. <i>Lower</i> values produce smoother bedrock terrain. |
 | **`outputs`** | `output_dir` | `str` | `null` | General workspace directory for all output files. `"."` defines `output_dir` as the parent directory of the `pysole.json` configuration file. If `null` (default), automatically creates a `pysole` folder inside the parent directory of `survey_data_path`. All relative output paths are resolved relative to `output_dir`. Absolute output paths override `output_dir`. |
 | | `output_format` | `str` / `list[str]` | `"tif"` | Desired export format(s): `"tif"`, `"asc"`, `"csv"`, `"npy"`, a list of formats (e.g. `["tif", "asc", "csv"]`), or `"all"` to export all four formats. |
-| | `output_prefix` | `str` | `"final"` | Filename prefix or absolute filepath prefix used to construct export filenames. Do not include file extensions—format extension(s) are determined by `output_format`. Relative prefix names resolve inside `output_dir`; absolute filepaths override `output_dir`. 🚨 The final bedrock grid `<output_prefix>_bedrock.<ext>` is exported by default. 🚨 |
-| | `plots_dir` | `str` | `"figures"` | Output directory for saving diagnostic figures. All generated figures are saved automatically. If `null`, figures are saved into a `"figures"` folder inside `output_dir`. An absolute path overrides `output_dir/figures`. |
+| | `output_prefix` | `str` | `"final"` | Filename prefix or absolute filepath prefix used to construct export filenames. Do not include file extensions—format extension(s) are determined by `output_format`. Relative prefix names resolve inside `output_dir`; absolute filepaths override `output_dir`. **If an absolute path is given, all outputs of the run — rasters, CSV/GPX/GeoJSON files *and the diagnostic figures* — are written beside it (figures in a `figures/` subfolder, unless `plots_dir` is absolute).** 🚨 The final bedrock grid `<output_prefix>_bedrock.<ext>` is exported by default. 🚨 |
+| | `plots_dir` | `str` | `"figures"` | Where diagnostic figures are saved (figures are **always** saved; this setting controls *where*, not *whether*). `null` is equivalent to `"figures"`. A relative path is resolved **next to the data files**: inside `output_dir`, or — if `output_prefix` is an absolute path — in that path's folder, so data and figures always end up together. An absolute `plots_dir` is used as is. |
 | | `save_bedrock_elevation_map` | `bool` | `true` | If `true` (default), exports the predicted bedrock elevation raster grid, $Z_{\text{bed}}(x,y) = Z_{\text{surf}}(x,y) - D(x,y)$, to `<output_prefix>_bedrock.<ext>`. |
+| | `compute_uncertainty` | `bool` | `true` | If `true` (default), the post-migration Kriging estimation variance is evaluated, giving the uncertainty maps $\sigma_D(x,y)$ and $\sigma_{\tau_b}(x,y)$ shown in the diagnostic figures. If `false`, this O(N²·G) step is skipped (N survey points, G grid cells; typically 3–11× faster Kriging for N = 1 000–6 000 points on a 160 000-cell grid, identical bedrock result). The figures are still saved, with an *"Uncertainty not computed"* placeholder in the uncertainty panels. 🚨 If `save_thickness_uncertainty` or `save_basal_shear_stress_uncertainty` is `true`, the variance is needed: `compute_uncertainty: false` is then overridden with a warning. 🚨 |
 | | `save_traveltime_grid` | `bool` | `false` | If `true`, exports the pre-migration interpolated traveltime raster grid, <i>T</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_traveltime.<ext>`. |
 | | `save_migrated_points` | `bool` | `false` | If `true`, exports the 3D ray-migrated survey points to `<output_prefix>_migrated_points.csv` (`x, y, z_surface, depth_migrated`). If migration is skipped, it is automatically set to `false` and a log message is printed. |
 | | `save_thickness_grid` | `bool` | `false` | If `true`, exports the final thickness raster grid, <i>D</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness.<ext>`. |
@@ -381,13 +383,13 @@ When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `n
 
 <a id="variogram-binning"></a>
 #### 4. Variogram Binning with Minimum Pair Threshold
-Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances across a total of $N$ survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole initially determines a minimum distance bin count based on the total number of survey point pairs ($N_{\text{pairs}} = \frac{N(N-1)}{2}$):
+Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances across a total of $N$ survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole determines the bin count from the number of point pairs that actually fall inside the variogram range, i.e. pairs whose separation is at most $h_{\text{max}}$ (by default half of the maximum pairwise distance):
 
 $$
-\text{nrbins} = \max\left(3, \frac{N_{\text{pairs}}}{30}\right)
+\text{nrbins} = \min\left(30,\ \max\left(3,\ \left\lfloor \frac{N_{\text{pairs}}(h \le h_{\text{max}})}{30} \right\rfloor\right)\right)
 $$
 
-Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. If a user-specified `nrbins` yields, however, fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice. An absolute lower floor of 3 lag distance bins is enforced across all calculations.
+Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. The automatic bin count is capped at 30 bins. If a user-specified `nrbins` yields, however, fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice. An absolute lower floor of 3 lag distance bins is enforced across all calculations (including explicit values). For very large surveys ($N > 5000$) the lag statistics are accumulated in chunks and $N_{\text{pairs}} = N(N-1)/2$ is used instead of the in-range pair count.
 
 <a id="dual-kriging-vector-engine"></a>
 #### 5. High-Performance Dual Kriging Vector Engine
@@ -647,12 +649,38 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole pysole.json --verbose
   ```
-  *Enables `DEBUG` level logging verbosity for detailed computational diagnostics. Acts as a temporary CLI runtime override taking precedence over the `log_level` defined in `pysole.json`.*
+  *Enables `DEBUG` level logging verbosity for detailed computational diagnostics (`-v`, `--verbose` and `--debug` are equivalent). Acts as a temporary CLI runtime override taking precedence over the `PYSOLE_LOG_LEVEL` environment variable and the `log_level` defined in `pysole.json`.*
+
+* **Enable the Interactive Drift Analyzer:**
+  ```bash
+  pysole pysole.json --drift-analyzer
+  ```
+  *Runs the Drift Analyzer helper (cross-validated ranking of candidate drift models) before each Universal Kriging pass. Equivalent to `inputs.drift_analyzer: true`; omitting the flag keeps the value from `pysole.json`. Automatically skipped for Ordinary Kriging.*
+
+* **Select the Survey Profile Column for Profile-Wise Cross-Validation:**
+  ```bash
+  pysole pysole.json --profile-col profile_name
+  ```
+  *Names the column of the survey CSV that identifies the survey profile / line (matched by header name, so it may be at any position; numeric or text IDs are supported). It enables leave-one-profile-out (LOPO) cross-validation in the Drift Analyzer and overrides `inputs.survey_profile_column`.*
+
+* **Plan an Unprobed Glacier Survey (no survey data required):**
+  ```bash
+  pysole plan-survey --dem dem.tif --outline outline.geojson --kc 0.0314 --tau 100 --max-km 5 --out-dir results --format tif
+  ```
+  *Computes the shallow-ice-approximation (SIA) thickness model and proposes survey tracks within a length budget. Options: `--dem` (required), `--outline`, `--kc` (FFT corner wavenumber in rad/m, default `0.0314`), `--tau` (target basal shear stress $\tau_0$ in kPa, default `100`), `--max-km` (survey length budget in km, default `5.0`), `--prefix` (output prefix, default `final`), `--out-dir`, `--plots-dir` and `--format` (`tif` or `asc`, default `tif`). Outputs are kept together: files go to `--out-dir` (current directory if omitted); an absolute `--prefix` places all files beside it; figures are saved in `figures/` next to the data files unless `--plots-dir` is an absolute path.*
+
+* **Show the Installed Version:**
+  ```bash
+  pysole --version
+  ```
+  *Prints `PySole <version>` and exits (`-V` is equivalent). `python -m pysole ...` is also supported.*
 
 * **Display CLI Help & Usage Options:**
   ```bash
   pysole --help
   ```
+
+> **Error handling:** a missing configuration file, invalid JSON, or an invalid configuration value (e.g. a non-boolean value such as `"maybe"` for a boolean parameter) is reported as a single `pysole: error: ...` line on stderr with exit status 1. Add `-v` / `--debug` to get the full traceback. Boolean parameters accept JSON `true`/`false` (also `0`/`1` and the strings `"true"`/`"false"`, `"yes"`/`"no"`, `"on"`/`"off"`, case-insensitive); `null` falls back to the default.
 
 ---
 
@@ -789,9 +817,9 @@ blended_bedrock = finalizer.blend_margin(rf_filled, min_gap_dist=50.0)
 <a id="real-world-example-wurtenkees-glacier"></a>
 ## Real-World Example: Wurtenkees Glacier
 
-You can run a complete real-world demonstration on the **Wurtenkees Glacier** dataset (Hohe Tauern, Eastern Alps, Austria) using the provided configuration file [`examples/wuk/pysole_wuk.json`](file:///home/db/Software/pysole/examples/wuk/pysole_wuk.json).
+You can run a complete real-world demonstration on the **Wurtenkees Glacier** dataset (Hohe Tauern, Eastern Alps, Austria) using the provided configuration file [`examples/wuk/pysole_wuk.json`](./examples/wuk/pysole_wuk.json).
 
-An executable example script is provided in [`examples/wuk/run_wuk_example.py`](file:///home/db/Software/pysole/examples/wuk/run_wuk_example.py):
+An executable example script is provided in [`examples/wuk/run_wuk_example.py`](./examples/wuk/run_wuk_example.py):
 
 ```bash
 python examples/wuk/run_wuk_example.py

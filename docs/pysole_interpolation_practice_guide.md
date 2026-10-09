@@ -5,18 +5,18 @@
 In radar glaciology and subglacial topography modeling, converting sparse Ground-Penetrating Radar (GPR) traveltimes or migrated depth picks into a continuous 3D bed elevation grid ($Z_{\text{bed}}(x,y)$) or ice thickness map ($H(x,y)$) is a fundamental inverse problem. The accuracy of the resulting ice volume and subglacial trough geometry depends heavily on the chosen spatial interpolation strategy and geostatistical drift model.
 
 The PySole package provides two primary interpolation workflows across its two-pass architecture (Pass 1: Pre-migration traveltimes $T(x,y)$; Pass 2: Post-migration depths $D(x,y)$):
-1. **Direct Depth / Traveltime Kriging ($D$ or $T$)**: Direct spatial interpolation of observed depths or traveltimes using Ordinary Kriging (OK) or Universal Kriging (UK) with spatial drift terms (e.g., surface elevation `z_surface`, linear trend).
+1. **Direct Depth / Traveltime Kriging ($D$ or $T$)**: Direct spatial interpolation of observed depths or traveltimes using Ordinary Kriging (OK) or Universal Kriging (UK) with spatial drift terms (e.g., surface elevation `z_dem`, linear trend).
 2. **Basal Shear Stress (BSS) Product Kriging ($P = D \cdot \sin\alpha$)**: Interpolation of the product of depth (or traveltime) and optimum low-pass filtered surface slope ($\sin\alpha$), grounded in the Shallow Ice Approximation (SIA).
-3. **BSS Product Kriging with Universal Kriging and SIA Drift Model (`sia_thickness`)**: Incorporating an inverse-slope drift term ($U_{\text{SIA}} = 1/\sin\alpha$) during UK trend fitting of the BSS product.
+3. **BSS Product Kriging with Universal Kriging and SIA Drift Model (`sia`)**: Incorporating an inverse-slope drift term ($U_{\text{SIA}} = 1/\sin\alpha$) during UK trend fitting of the BSS product.
 
 ### Key Finding & Core Recommendation
 > [!CAUTION]
-> **The Double-Scaling Artifact Warning**: Combining Universal Kriging with the `sia_thickness` drift model ($1/\sin\alpha$) during **BSS Product Kriging** introduces a catastrophic $\frac{1}{\sin^2\alpha}$ quadratic inverse-slope scaling artifact. At low-slope glacier margins ($\alpha \approx 3^\circ - 5^\circ$), this multiplies residual trend parameters by $>130\times$, generating artificial ice thickness peaks (up to **170 m** on Goldbergkees vs. true ~121 m peak) and pulling the maximum thickness peak away from the central basin towards the margin rim.
+> **The Double-Scaling Artifact Warning**: Combining Universal Kriging with the `sia` drift model ($1/\sin\alpha$) during **BSS Product Kriging** introduces a catastrophic $\frac{1}{\sin^2\alpha}$ quadratic inverse-slope scaling artifact. At low-slope glacier margins ($\alpha \approx 3^\circ - 5^\circ$), this multiplies residual trend parameters by $>130\times$, generating artificial ice thickness peaks (up to **170 m** on Goldbergkees vs. true ~121 m peak) and pulling the maximum thickness peak away from the central basin towards the margin rim.
 
 **General Rule of Thumb**:
 * **Recommended PySole Default**: **BSS Product Kriging with Ordinary Kriging (`ordinary`)** for both Pass 1 and Pass 2.
-* **If elevation trends exist**: Use **BSS Product Kriging with Universal Kriging using `z_surface` (DEM elevation) drift**.
-* **Do NOT use `sia_thickness` drift model when interpolating BSS products ($P_1$ or $P_2$)**. `sia_thickness` drift is only mathematically valid when interpolating **Direct Depths/Traveltimes** ($D$ or $T$) without slope multiplication.
+* **If elevation trends exist**: Use **BSS Product Kriging with Universal Kriging using `z_dem` (DEM elevation) drift**.
+* **Do NOT use `sia` drift model when interpolating BSS products ($P_1$ or $P_2$)**. `sia` drift is only mathematically valid when interpolating **Direct Depths/Traveltimes** ($D$ or $T$) without slope multiplication.
 
 ---
 
@@ -57,7 +57,7 @@ $$\hat{D}(x,y) = \frac{\hat{P}(x,y)}{\sin(\alpha_{k_c}(x,y))}$$
 
 ### 2.3 Mathematical Derivation of the Double-Scaling Artifact
 
-When a user configures `post_drift_terms = ["sia_thickness"]` alongside Universal Kriging in PySole, the SIA drift covariate $f_{\text{SIA}}(x,y) = \frac{1}{\sin\alpha(x,y)}$ is applied to the target field.
+When a user configures `post_drift_terms = ["sia"]` alongside Universal Kriging in PySole, the SIA drift covariate $f_{\text{SIA}}(x,y) = \frac{1}{\sin\alpha(x,y)}$ is applied to the target field.
 
 If the target field is the **BSS Product** $P(x,y) = D(x,y) \cdot \sin\alpha(x,y)$, Universal Kriging fits the trend:
 $$\hat{P}(x,y) = \beta_0 + \beta_1 \cdot \left(\frac{1}{\sin\alpha(x,y)}\right) + e(x,y)$$
@@ -75,14 +75,14 @@ This double-scaling artifact occurs in both Pass 1 (traveltimes $P_1 = T \cdot \
 
 ---
 
-### 2.4 Non-Slope Spatial Drift Models (`z_surface`, `regional_linear`, `quadratic`)
+### 2.4 Non-Slope Spatial Drift Models (`z_dem`, `linear_xy`, `quadratic_xy`)
 
 To account for elevation-dependent glaciological trends (e.g., thicker ice in high accumulation basins, thinner ice on ablation tongues) without slope interaction, PySole supports non-slope spatial drift models:
-* `z_surface`: Surface elevation $Z_{\text{surf}}(x,y)$ from the input DEM.
-* `regional_linear`: Planar coordinates $[x, y]$.
-* `quadratic`: Quadratic spatial coordinates $[x, y, x^2, y^2, xy]$.
+* `z_dem`: Surface elevation $Z_{\text{surf}}(x,y)$ from the input DEM.
+* `linear_xy`: Planar coordinates $[x, y]$.
+* `quadratic_xy`: Quadratic spatial coordinates $[x, y, x^2, y^2, xy]$.
 
-When using `z_surface` with BSS Product Kriging:
+When using `z_dem` with BSS Product Kriging:
 $$\hat{P}(x,y) = \beta_0 + \beta_1 Z_{\text{surf}}(x,y) + e(x,y) \implies \hat{D}(x,y) = \frac{\beta_0 + \beta_1 Z_{\text{surf}}(x,y) + e(x,y)}{\sin\alpha(x,y)}$$
 This preserves linear elevation scaling while preventing quadratic slope singularities.
 
@@ -99,11 +99,11 @@ We evaluated 6 distinct interpolation strategies across two contrasting alpine g
 | Strategy Code | Interpolated Target Field | Kriging Engine | Drift Model (`pre/post_drift_terms`) |
 | :--- | :--- | :--- | :--- |
 | **Strategy 1** | Direct Depths / Traveltimes ($D, T$) | Ordinary Kriging | None (`ordinary`) |
-| **Strategy 2** | Direct Depths / Traveltimes ($D, T$) | Universal Kriging | `sia_thickness` ($1/\sin\alpha$) |
+| **Strategy 2** | Direct Depths / Traveltimes ($D, T$) | Universal Kriging | `sia` ($1/\sin\alpha$) |
 | **Strategy 3** | BSS Product ($P = D \cdot \sin\alpha$) | Ordinary Kriging | None (**PySole Default**) |
-| **Strategy 4** | BSS Product ($P = D \cdot \sin\alpha$) | Universal Kriging | `sia_thickness` (**Double-Scaled**) |
-| **Strategy 5** | BSS Product ($P = D \cdot \sin\alpha$) | Universal Kriging | `z_surface` (DEM Elevation Drift) |
-| **Strategy 6** | Direct Depths / Traveltimes ($D, T$) | Universal Kriging | `z_surface` (DEM Elevation Drift) |
+| **Strategy 4** | BSS Product ($P = D \cdot \sin\alpha$) | Universal Kriging | `sia` (**Double-Scaled**) |
+| **Strategy 5** | BSS Product ($P = D \cdot \sin\alpha$) | Universal Kriging | `z_dem` (DEM Elevation Drift) |
+| **Strategy 6** | Direct Depths / Traveltimes ($D, T$) | Universal Kriging | `z_dem` (DEM Elevation Drift) |
 
 ---
 
@@ -117,8 +117,8 @@ We evaluated 6 distinct interpolation strategies across two contrasting alpine g
 | **Strategy 2**: Direct Depth (Universal + SIA) | 74.68 | 30.27 | 0.0133 | 226.7 | 0.24 |
 | **Strategy 3**: BSS Product + Ordinary (**Default**) | **79.73** | **29.79** | **0.0131** | **219.2** | **0.65** |
 | **Strategy 4**: BSS Product + Universal (SIA Drift) | 86.44 | 30.31 | 0.0133 | 223.0 | 0.66 |
-| **Strategy 5**: BSS Product + Universal (`z_surface`) | 79.70 | 29.78 | 0.0131 | 219.2 | 0.65 |
-| **Strategy 6**: Direct Depth (Universal + `z_surface`) | 74.60 | 30.20 | 0.0132 | 226.7 | 0.24 |
+| **Strategy 5**: BSS Product + Universal (`z_dem`) | 79.70 | 29.78 | 0.0131 | 219.2 | 0.65 |
+| **Strategy 6**: Direct Depth (Universal + `z_dem`) | 74.60 | 30.20 | 0.0132 | 226.7 | 0.24 |
 
 #### WUK Insights
 * On Wurtenkees, the surface slope is steep and relatively uniform ($>15^\circ$). As a result, the double-scaling artifact in Strategy 4 is mild (elevating max thickness from 79.7 m to 86.4 m) because $\sin\alpha$ never drops near zero.
@@ -136,12 +136,12 @@ We evaluated 6 distinct interpolation strategies across two contrasting alpine g
 | **Strategy 2**: Direct Depth (Universal + SIA) | NaN | NaN | 0.0000 | 0.0 | **Failed (Singular Kriging Matrix)** |
 | **Strategy 3**: BSS Product + Ordinary (**Default**) | **121.25** | **38.80** | **0.0422** | **330.2** | **Optimal (Physics-Based Central Basin)** |
 | **Strategy 4**: BSS Product + Universal (SIA Drift) | **170.35** | **40.62** | **0.0442** | **165.5** | **UNREALISTIC (Double-Scaled Margin Peak)** |
-| **Strategy 5**: BSS Product + Universal (`z_surface`) | NaN | NaN | 0.0000 | 0.0 | **Failed (Singular Kriging Matrix)** |
-| **Strategy 6**: Direct Depth (Universal + `z_surface`) | NaN | NaN | 0.0000 | 0.0 | **Failed (Singular Kriging Matrix)** |
+| **Strategy 5**: BSS Product + Universal (`z_dem`) | NaN | NaN | 0.0000 | 0.0 | **Failed (Singular Kriging Matrix)** |
+| **Strategy 6**: Direct Depth (Universal + `z_dem`) | NaN | NaN | 0.0000 | 0.0 | **Failed (Singular Kriging Matrix)** |
 
 #### GOK Diagnostic Analysis
 1. **Double-Scaling Artifact (Strategy 4)**: Inflates maximum ice thickness from **121.25 m** to **170.35 m** (+49.1 m artificial excess!) and shifts the maximum peak location from the central basin (330.2 m from border) down to 165.5 m near low-slope plateau benches.
-2. **Kriging Matrix Singularity (Strategies 2, 5, 6)**: Applying Universal Kriging with external drifts (`sia_thickness` or `z_surface`) on large 2D GPR networks (2033 points) without drift normalization causes matrix ill-conditioning (`LinAlgWarning: Singular matrix`).
+2. **Kriging Matrix Singularity (Strategies 2, 5, 6)**: Applying Universal Kriging with external drifts (`sia` or `z_dem`) on large 2D GPR networks (2033 points) without drift normalization causes matrix ill-conditioning (`LinAlgWarning: Singular matrix`).
 3. **Robustness of Strategy 3 (BSS + Ordinary Kriging)**: Strategy 3 is completely immune to matrix singularity issues and places the maximum ice thickness of **121.25 m** cleanly in the deep central basin (330.2 m from border).
 
 ---
@@ -200,7 +200,7 @@ Based on theoretical derivations and empirical benchmarks on WUK and GOK, we est
  │Strategy3│                 │Strategy5│       │Strategy3│                 │Strategy1│
  └─────────┘                 └─────────┘       └─────────┘                 └─────────┘
   (BSS + OK)                  (BSS + UK         (BSS + OK)                (Direct D + OK)
-                             z_surface)
+                             z_dem)
 ```
 
 ### Case A: Standard Alpine Valley Glaciers (e.g. Goldbergkees, Pasterze)
@@ -221,7 +221,7 @@ Based on theoretical derivations and empirical benchmarks on WUK and GOK, we est
   ```
 
 ### Case B: Glaciers with Strong Altitude/Elevation Gradients
-* **Recommended Strategy**: **Strategy 5 (BSS Product + Universal Kriging with `z_surface` Drift)**
+* **Recommended Strategy**: **Strategy 5 (BSS Product + Universal Kriging with `z_dem` Drift)**
 * **Rationale**: Captures regional elevation-dependent ice thickness variations (accumulation zone vs. ablation tongue) while completely avoiding slope singularities.
 * **JSON Configuration**:
   ```json
@@ -239,7 +239,7 @@ Based on theoretical derivations and empirical benchmarks on WUK and GOK, we est
 
 ### Case C: Flat Icefield Benches & Low-Slope Margin Regions ($\alpha < 5^\circ$)
 * **Recommended Strategy**: **Strategy 3 (BSS + Ordinary Kriging)** or **Strategy 1 (Direct Depth + Ordinary Kriging)**
-* **STRICT RULE**: **NEVER configure `sia_thickness` drift for post-migration depth interpolation on flat benches!**
+* **STRICT RULE**: **NEVER configure `sia` drift for post-migration depth interpolation on flat benches!**
 
 ---
 
@@ -248,9 +248,15 @@ Based on theoretical derivations and empirical benchmarks on WUK and GOK, we est
 | Glacier Setting | Recommended Strategy | Pre-Kriging Type & Drift | Post-Kriging Type & Drift | Primary Benefit |
 | :--- | :--- | :--- | :--- | :--- |
 | **Standard Alpine Valley** | Strategy 3 (BSS + OK) | `ordinary`, `[]` | `ordinary`, `[]` | Optimal central basin depth, clean margin tapering |
-| **Long Valley Tongue (Elevational Drift)** | Strategy 5 (BSS + UK Elevation) | `universal`, `["z_surface"]` | `universal`, `["z_surface"]` | Models altitude-dependent thickness gradients |
+| **Long Valley Tongue (Elevational Drift)** | Strategy 5 (BSS + UK Elevation) | `universal`, `["z_dem"]` | `universal`, `["z_dem"]` | Models altitude-dependent thickness gradients |
 | **Flat Plateau / Ice Cap** | Strategy 3 or Strategy 1 | `ordinary`, `[]` | `ordinary`, `[]` | Prevents inverse-slope margin explosion |
-| **Direct Depth Interpolation (No BSS)** | Strategy 2 (Direct Depth + SIA) | `universal`, `["sia_thickness"]` | `universal`, `["sia_thickness"]` | Valid ONLY if BSS product multiplication is disabled |
+| **Direct Depth Interpolation (No BSS)** | Strategy 2 (Direct Depth + SIA) | `universal`, `["sia"]` | `universal`, `["sia"]` | Valid ONLY if BSS product multiplication is disabled |
 
 ---
-*Report filed in PySole Documentation: [pysole_interpolation_practice_guide.md](file:///home/db/Software/pysole/docs/pysole_interpolation_practice_guide.md).*
+
+## 6. Runtime Note: Uncertainty Maps (`outputs.compute_uncertainty`)
+
+The post-migration Kriging variance (the uncertainty maps and the derived thickness/BSS standard deviation) costs $O(N^2 \cdot n_{\text{cells}})$ and dominates the run time on large grids (GOK: ~121 s with, ~63 s without). Set `outputs.compute_uncertainty` to `false` (or pass `compute_uncertainty=False` to `Solver`) to skip it. The bedrock and thickness fields are **bit-identical** in both modes, and the diagnostic figures are still saved (the uncertainty panels show a placeholder). If an uncertainty raster export is requested (`outputs.save_thickness_uncertainty` or `outputs.save_basal_shear_stress_uncertainty`), the evaluation is re-enabled automatically and a warning is logged.
+
+---
+*Report filed in PySole Documentation: [pysole_interpolation_practice_guide.md](pysole_interpolation_practice_guide.md).*

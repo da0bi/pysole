@@ -17,11 +17,16 @@ class TestSolverWuk(unittest.TestCase):
         self.wuk_outline = os.path.join(self.data_dir, "wuk_outline_clean.csv")
         self.wuk_survey = os.path.join(self.data_dir, "wuk_survey_clean.csv")
 
+        # All outputs (logs, figures, rasters) must go to a throw-away directory, never to the repo / examples.
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.output_dir = os.path.join(self._tmp.name, "out")
+
     def test_full_solver_workflow_wuk(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = pathlib.Path(tmp_dir)
 
-            model = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline, perform_migration=True)
+            model = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline, perform_migration=True, output_dir=self.output_dir)
             self.assertEqual(model.dem_grid.shape, (179, 213))
             self.assertEqual(model.dx, 5.0)
             self.assertEqual(model.dy, 5.0)
@@ -55,6 +60,7 @@ class TestSolverWuk(unittest.TestCase):
             post_kriging_method="universal",
             post_drift_terms=["sia"],
             perform_migration=True,
+            output_dir=self.output_dir,
         )
         model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
         model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)
@@ -71,6 +77,7 @@ class TestSolverWuk(unittest.TestCase):
             pre_zero_boundary=True,
             post_zero_boundary=True,
             perform_migration=True,
+            output_dir=self.output_dir,
         )
         model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
         model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)
@@ -81,7 +88,7 @@ class TestSolverWuk(unittest.TestCase):
 
     def test_bedrock_dem_smoothing_wuk(self):
         dem, meta = pysole.load_dem(self.wuk_dem)
-        model = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline)
+        model = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline, output_dir=self.output_dir)
 
         g_smoothed = model.smooth_bedrock_dem(dem, method="gaussian", sigma=1.5)
         self.assertEqual(g_smoothed.shape, dem.shape)
@@ -98,6 +105,7 @@ class TestSolverWuk(unittest.TestCase):
             pre_interpolation_target="T",
             post_interpolation_target="D",
             perform_migration=True,
+            output_dir=self.output_dir,
         )
         self.assertEqual(model.pre_interpolation_target, "T")
         self.assertEqual(model.post_interpolation_target, "D")
@@ -111,7 +119,7 @@ class TestSolverWuk(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(model.kriged_bedrock)))
 
     def test_solver_summary_and_results(self):
-        model = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline)
+        model = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline, output_dir=self.output_dir)
         summary_txt = model.summary()
         self.assertIn("PYSOLE SOLVER EXECUTION SUMMARY", summary_txt)
         res_dict = model.results
@@ -121,7 +129,7 @@ class TestSolverWuk(unittest.TestCase):
 
     def test_missing_dem_path_raises_value_error(self):
         with self.assertRaises(ValueError) as ctx:
-            pysole.Solver.from_config({"inputs": {"dem_path": None}})
+            pysole.Solver.from_config({"inputs": {"dem_path": None}, "outputs": {"output_dir": self.output_dir}})
         self.assertIn("Missing required 'dem_path'", str(ctx.exception))
 
 

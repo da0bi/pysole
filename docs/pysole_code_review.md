@@ -1,5 +1,7 @@
 # Professional Code Review & Technical Audit Report: `PySole` v0.1.0
 
+> **Historical document.** This report was written against an earlier development state of PySole and is kept for traceability only. Findings listed here were addressed in later releases (see [CHANGELOG](../CHANGELOG.md) and [pysole_v043_final_audit.md](pysole_v043_final_audit.md)); line numbers and parameter names may no longer match the current code.
+
 **Target Package:** `PySole` (Physically-Informed Bedrock Interpolation & 3D Migration)  
 **Version:** `v0.1.0`  
 **Reviewer:** Senior AI Software Engineer & Geostatistical Systems Architect  
@@ -56,7 +58,7 @@ graph TD
 
 | Domain Requirement | Methodological Implementation in `PySole` | Audit Findings & Compliance |
 | :--- | :--- | :--- |
-| **Shallow Ice Approximation (SIA) Physical Drift** | Inverse relation $D \propto \sin(\alpha_{\text{opt}})^{-1}$ enforced as custom drift term (`"sia_thickness"`) in Universal Kriging. | **Compliant.** Produces terrain-conforming background trends without requiring prior assumptions on absolute basal shear stress $\tau_b$. |
+| **Shallow Ice Approximation (SIA) Physical Drift** | Inverse relation $D \propto \sin(\alpha_{\text{opt}})^{-1}$ enforced as custom drift term (`"sia"`) in Universal Kriging. | **Compliant.** Produces terrain-conforming background trends without requiring prior assumptions on absolute basal shear stress $\tau_b$. |
 | **Variogram Lag Binning & Thresholding** | Dynamic calculation $\text{nrbins} = \max(3, \lfloor N_{\text{pairs}} / 30 \rfloor)$ based on point pair count $N_{\text{pairs}} = \frac{N(N-1)}{2}$. | **Compliant.** Aligns with Central Limit Theorem ($N(h) \ge 30$) and Journel & Huijbregts (1978) to prevent erratic semivariance estimates. |
 | **Metric Projected CRS Enforcement** | `check_projected_metric_crs()` verifies `crs.is_projected` and inspects numerical bounds to reject unprojected Lat/Lon degrees ($[-180, 180] \times [-90, 90]$). | **Compliant.** Prevents invalid Euclidean distance calculations in variograms and depth derivations. |
 | **Duplicate Point Deduplication** | `load_survey_points()` rounds coordinates to $0.1\,\text{m}$ ($1\,\text{dm}$) and averages observed traveltimes/depths. | **Compliant.** Prevents zero-distance singular rows in sample covariance matrix $\mathbf{K}$. |

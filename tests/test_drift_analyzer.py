@@ -19,11 +19,17 @@ class TestDriftAnalyzer(unittest.TestCase):
         self.wuk_outline = os.path.join(self.data_dir, "wuk_outline_clean.csv")
         self.wuk_survey = os.path.join(self.data_dir, "wuk_survey_clean.csv")
 
+        # Keep logs / figures / rasters out of the repository tree
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.output_dir = os.path.join(self._tmp.name, "out")
+
     def test_drift_analyzer_initialization_and_evaluation(self):
         model = pysole.Solver(
             dem=self.wuk_dem,
             outline=self.wuk_outline,
             perform_migration=True,
+            output_dir=self.output_dir,
         )
         mig_pts = model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
         model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)
@@ -60,6 +66,7 @@ class TestDriftAnalyzer(unittest.TestCase):
             dem=self.wuk_dem,
             outline=self.wuk_outline,
             perform_migration=True,
+            output_dir=self.output_dir,
         )
         mig_pts = model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
         profile_ids = np.random.choice([1, 2, 3, 4], size=len(mig_pts))
@@ -96,6 +103,7 @@ class TestDriftAnalyzer(unittest.TestCase):
             dem=self.wuk_dem,
             outline=self.wuk_outline,
             perform_migration=True,
+            output_dir=self.output_dir,
         )
         model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
         model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)

@@ -80,7 +80,7 @@ def plot_unfiltered_product_variogram(
     try:
         import matplotlib.pyplot as plt
 
-        fig = plt.figure("Isotropic Variogram Analysis", figsize=(7, 5))
+        plt.figure("Isotropic Variogram Analysis", figsize=(7, 5))
         plt.clf()
         plt.plot(distances, semivars, "ob", markersize=6, label="Experimental Variogram")
         plt.plot(model_curve["h"], model_curve["gamma"], "-r", linewidth=2, label="Fitted Model (Spherical)")
@@ -276,6 +276,29 @@ def plot_migration_displacement_vectors(
         warnings.warn(f"Plotting skipped: {e}", UserWarning)
 
 
+UNCERTAINTY_PLACEHOLDER_TEXT = "Uncertainty not computed\n(outputs.compute_uncertainty = false)"
+
+
+def _uncertainty_unavailable(grid: np.ndarray | None) -> bool:
+    """True if an uncertainty grid is missing or contains no finite value (Kriging variance skipped)."""
+    return grid is None or not np.any(np.isfinite(grid))
+
+
+def _draw_uncertainty_placeholder(ax, plot_extent: list[float] | None, title: str) -> None:
+    """Fills an uncertainty panel with a labelled placeholder (never an all-zero uncertainty map)."""
+    if plot_extent is not None and len(plot_extent) == 4:
+        ax.set_xlim(plot_extent[0], plot_extent[1])
+        ax.set_ylim(plot_extent[2], plot_extent[3])
+    ax.set_facecolor("#f1f5f9")
+    ax.text(
+        0.5, 0.5, UNCERTAINTY_PLACEHOLDER_TEXT,
+        transform=ax.transAxes, ha="center", va="center", fontsize=10, color="#475569",
+    )
+    ax.set_title(title)
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]")
+
+
 def plot_kriging_bedrock_and_uncertainty(
     kriged_bedrock: np.ndarray,
     kriged_std: np.ndarray | None = None,
@@ -296,7 +319,7 @@ def plot_kriging_bedrock_and_uncertainty(
         elif kriged_std is not None:
             unc_grid = kriged_std
         else:
-            unc_grid = np.zeros_like(kriged_bedrock)
+            unc_grid = np.full_like(kriged_bedrock, np.nan, dtype=float)
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
@@ -310,18 +333,21 @@ def plot_kriging_bedrock_and_uncertainty(
         fig.colorbar(im1, ax=ax1, label="Elevation [m]")
 
         cmap2 = _get_transparent_cmap("plasma")
-        valid_unc = unc_grid[np.isfinite(unc_grid) & (unc_grid > 0)]
-        if len(valid_unc) > 0:
-            vmax2 = float(np.percentile(valid_unc, 98.5))
-            vmax2 = max(vmax2, 1.0)
+        if _uncertainty_unavailable(unc_grid):
+            _draw_uncertainty_placeholder(ax2, plot_extent, "Kriging Standard Uncertainty")
         else:
-            vmax2 = None
+            valid_unc = unc_grid[np.isfinite(unc_grid) & (unc_grid > 0)]
+            if len(valid_unc) > 0:
+                vmax2 = float(np.percentile(valid_unc, 98.5))
+                vmax2 = max(vmax2, 1.0)
+            else:
+                vmax2 = None
 
-        im2 = ax2.imshow(unc_grid, extent=plot_extent, origin="lower", cmap=cmap2, vmin=0, vmax=vmax2)
-        ax2.set_title("Kriging Standard Uncertainty")
-        ax2.set_xlabel("X [m]")
-        ax2.set_ylabel("Y [m]")
-        fig.colorbar(im2, ax=ax2, label="Standard Uncertainty [\u00b1 m]", extend="max" if vmax2 is not None else "neither")
+            im2 = ax2.imshow(unc_grid, extent=plot_extent, origin="lower", cmap=cmap2, vmin=0, vmax=vmax2)
+            ax2.set_title("Kriging Standard Uncertainty")
+            ax2.set_xlabel("X [m]")
+            ax2.set_ylabel("Y [m]")
+            fig.colorbar(im2, ax=ax2, label="Standard Uncertainty [\u00b1 m]", extend="max" if vmax2 is not None else "neither")
 
         plt.tight_layout()
 
@@ -476,28 +502,31 @@ def plot_final_ice_thickness_and_uncertainty(
         ax1.set_ylabel("Y [m]")
 
         cmap2 = _get_transparent_cmap("magma")
-        valid_unc = kriged_std[np.isfinite(kriged_std) & (kriged_std > 0)]
-        if len(valid_unc) > 0:
-            vmax2 = float(np.percentile(valid_unc, 98.5))
-            vmax2 = max(vmax2, 1.0)
+        if _uncertainty_unavailable(kriged_std):
+            _draw_uncertainty_placeholder(ax2, plot_extent, "Mean Kriging Uncertainty: n/a")
         else:
-            vmax2 = None
+            valid_unc = kriged_std[np.isfinite(kriged_std) & (kriged_std > 0)]
+            if len(valid_unc) > 0:
+                vmax2 = float(np.percentile(valid_unc, 98.5))
+                vmax2 = max(vmax2, 1.0)
+            else:
+                vmax2 = None
 
-        im2 = ax2.imshow(kriged_std, extent=plot_extent, origin="lower", cmap=cmap2, vmin=0, vmax=vmax2)
-        fig.colorbar(im2, ax=ax2, label="Kriging Uncertainty [\u00b1 m]", extend="max" if vmax2 is not None else "neither")
-        if outline_mask is not None:
-            ax2.contour(
-                outline_mask,
-                levels=[0.5],
-                extent=plot_extent,
-                origin="lower",
-                colors="black",
-                linewidths=1.5,
-                linestyles="--",
-            )
-        ax2.set_title(f"Mean Kriging Uncertainty: \u00b1{int(round(mean_unc))} m")
-        ax2.set_xlabel("X [m]")
-        ax2.set_ylabel("Y [m]")
+            im2 = ax2.imshow(kriged_std, extent=plot_extent, origin="lower", cmap=cmap2, vmin=0, vmax=vmax2)
+            fig.colorbar(im2, ax=ax2, label="Kriging Uncertainty [\u00b1 m]", extend="max" if vmax2 is not None else "neither")
+            if outline_mask is not None:
+                ax2.contour(
+                    outline_mask,
+                    levels=[0.5],
+                    extent=plot_extent,
+                    origin="lower",
+                    colors="black",
+                    linewidths=1.5,
+                    linestyles="--",
+                )
+            ax2.set_title(f"Mean Kriging Uncertainty: \u00b1{int(round(mean_unc))} m")
+            ax2.set_xlabel("X [m]")
+            ax2.set_ylabel("Y [m]")
 
         plt.tight_layout()
 
@@ -615,28 +644,31 @@ def plot_final_basal_shear_stress_and_uncertainty(
         ax1.set_ylabel("Y [m]")
 
         cmap2 = _get_transparent_cmap("plasma")
-        valid_unc = bss_std[np.isfinite(bss_std) & (bss_std > 0)]
-        if len(valid_unc) > 0:
-            vmax2 = float(np.percentile(valid_unc, 98.5))
-            vmax2 = max(vmax2, 0.1)
+        if _uncertainty_unavailable(bss_std):
+            _draw_uncertainty_placeholder(ax2, plot_extent, "Mean BSS Uncertainty: n/a")
         else:
-            vmax2 = None
+            valid_unc = bss_std[np.isfinite(bss_std) & (bss_std > 0)]
+            if len(valid_unc) > 0:
+                vmax2 = float(np.percentile(valid_unc, 98.5))
+                vmax2 = max(vmax2, 0.1)
+            else:
+                vmax2 = None
 
-        im2 = ax2.imshow(bss_std, extent=plot_extent, origin="lower", cmap=cmap2, vmin=0, vmax=vmax2)
-        fig.colorbar(im2, ax=ax2, label="BSS Standard Uncertainty [\u00b1 kPa]", extend="max" if vmax2 is not None else "neither")
-        if outline_mask is not None:
-            ax2.contour(
-                outline_mask,
-                levels=[0.5],
-                extent=plot_extent,
-                origin="lower",
-                colors="black",
-                linewidths=1.5,
-                linestyles="--",
-            )
-        ax2.set_title(f"Mean BSS Uncertainty: \u00b1{mean_bss_unc:.1f} kPa")
-        ax2.set_xlabel("X [m]")
-        ax2.set_ylabel("Y [m]")
+            im2 = ax2.imshow(bss_std, extent=plot_extent, origin="lower", cmap=cmap2, vmin=0, vmax=vmax2)
+            fig.colorbar(im2, ax=ax2, label="BSS Standard Uncertainty [\u00b1 kPa]", extend="max" if vmax2 is not None else "neither")
+            if outline_mask is not None:
+                ax2.contour(
+                    outline_mask,
+                    levels=[0.5],
+                    extent=plot_extent,
+                    origin="lower",
+                    colors="black",
+                    linewidths=1.5,
+                    linestyles="--",
+                )
+            ax2.set_title(f"Mean BSS Uncertainty: \u00b1{mean_bss_unc:.1f} kPa")
+            ax2.set_xlabel("X [m]")
+            ax2.set_ylabel("Y [m]")
 
         plt.tight_layout()
 

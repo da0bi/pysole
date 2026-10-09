@@ -12,6 +12,50 @@ import numpy as np
 from .logging import logger, setup_logging
 
 
+class ConfigError(ValueError):
+    """Raised for an invalid PySole configuration (unreadable JSON, wrongly typed parameter value)."""
+
+
+_TRUE_STRINGS = frozenset({"true", "yes", "on", "1"})
+_FALSE_STRINGS = frozenset({"false", "no", "off", "0"})
+
+
+def coerce_bool(value: Any, name: str, default: bool) -> bool:
+    """
+    Interprets a configuration value as a boolean.
+
+    ``bool`` and ``numpy.bool_`` pass through, ``None`` (JSON ``null``) selects ``default``, the integers 0/1 and the
+    case-insensitive strings ``true/false/yes/no/on/off/1/0`` are converted. Anything else raises ``ConfigError``
+    (a plain ``bool("false")`` would silently be ``True``).
+    """
+    if value is None:
+        return bool(default)
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)) and int(value) in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in _TRUE_STRINGS:
+            return True
+        if s in _FALSE_STRINGS:
+            return False
+    raise ConfigError(f"Configuration parameter '{name}' must be a boolean (true/false), got {value!r}.")
+
+
+def _coerce_bool_leaves(config: dict[str, Any], defaults: dict[str, Any], prefix: str = "") -> None:
+    """Validates / converts, in place, every config value whose default is a boolean."""
+    for key, default in defaults.items():
+        if key not in config:
+            continue
+        name = f"{prefix}{key}"
+        if isinstance(default, dict):
+            if isinstance(config[key], dict):
+                _coerce_bool_leaves(config[key], default, name + ".")
+        elif isinstance(default, bool):
+            config[key] = coerce_bool(config[key], name, default)
+
+
 @dataclass
 class OutputsConfig:
     """Structured configuration parameters for PySole output exports."""
@@ -26,6 +70,7 @@ class OutputsConfig:
     save_basal_shear_stress: bool = False
     save_basal_shear_stress_uncertainty: bool = False
     save_bedrock_elevation_map: bool = True
+    compute_uncertainty: bool = True
 
     @property
     def save_ice_thickness_map(self) -> bool:
@@ -35,13 +80,31 @@ class OutputsConfig:
     def save_basal_shear_stress_map(self) -> bool:
         return self.save_basal_shear_stress
 
+    @property
+    def uncertainty_rasters_requested(self) -> bool:
+        """True if any exported uncertainty raster needs the Kriging estimation variance."""
+        return bool(self.save_thickness_uncertainty or self.save_basal_shear_stress_uncertainty)
+
+    @property
+    def effective_compute_uncertainty(self) -> bool:
+        """
+        Whether the Kriging variance is evaluated. ``compute_uncertainty=False`` is overridden
+        (auto-enabled) when an uncertainty raster export is requested, since those need the variance.
+        """
+        return bool(self.compute_uncertainty or self.uncertainty_rasters_requested)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "OutputsConfig":
         """Constructs an OutputsConfig instance from a parameters dictionary."""
         if not data:
             return cls()
-        valid_keys = cls.__dataclass_fields__.keys()
-        filtered = {k: v for k, v in data.items() if k in valid_keys}
+        valid_keys = cls.__dataclass_fields__
+        filtered = {}
+        for k, v in data.items():
+            if k not in valid_keys:
+                continue
+            default = valid_keys[k].default
+            filtered[k] = coerce_bool(v, f"outputs.{k}", default) if isinstance(default, bool) else v
         return cls(**filtered)
 
     def active_exports(self) -> dict[str, bool]:
@@ -63,6 +126,7 @@ class OutputsConfig:
             "output_format": self.output_format,
             "output_prefix": self.output_prefix,
             "plots_dir": self.plots_dir,
+            "compute_uncertainty": self.compute_uncertainty,
             **self.active_exports(),
         }
 
@@ -144,6 +208,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "save_basal_shear_stress": False,
         "save_basal_shear_stress_uncertainty": False,
         "save_bedrock_elevation_map": True,
+        "compute_uncertainty": True,
     },
 }
 
@@ -224,6 +289,53 @@ def resolve_path(
     return str(eff_dir / path_obj)
 
 
+def resolve_plots_dir(
+    plots_dir: Any = None,
+    output_prefix: str | Path | os.PathLike | None = None,
+    output_dir: str | Path | os.PathLike | None = None,
+    survey_data_path: str | Path | os.PathLike | None = None,
+    config_path: str | Path | os.PathLike | None = None,
+) -> str:
+    """
+    Resolves the directory for diagnostic figures so that they are saved next to the data files.
+
+    Rules
+    -----
+    1. An absolute ``plots_dir`` is used as is.
+    2. A relative or unset ``plots_dir`` (``None`` is equivalent to ``"figures"``) is resolved against the
+       directory holding the data files: the parent folder of ``output_prefix`` if it is an absolute path,
+       otherwise the effective ``output_dir``.
+    """
+    target = Path(plots_dir if plots_dir else "figures").expanduser()
+    if target.is_absolute():
+        return str(target)
+
+    if output_prefix:
+        prefix_path = Path(output_prefix).expanduser()
+        if prefix_path.is_absolute():
+            return str(prefix_path.parent / target)
+
+    return str(resolve_path(target, output_dir=output_dir, survey_data_path=survey_data_path, config_path=config_path))
+
+
+def configured_output_dir(config: dict[str, Any]) -> str | None:
+    """
+    Returns the explicitly configured base output folder, or None for the default ``<survey dir>/pysole``.
+
+    ``outputs.output_dir`` (or legacy ``inputs.output_dir``) wins; otherwise an absolute ``outputs.output_prefix``
+    makes its parent folder the base, so data files, figures and the log file all live together.
+    """
+    outputs = config.get("outputs", {}) or {}
+    inputs = config.get("inputs", {}) or {}
+    explicit = outputs.get("output_dir") or inputs.get("output_dir")
+    if explicit:
+        return str(explicit)
+    prefix_raw = outputs.get("output_prefix")
+    if prefix_raw and Path(prefix_raw).expanduser().is_absolute():
+        return str(Path(prefix_raw).expanduser().parent)
+    return None
+
+
 def _deep_merge_dict(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     """Recursively merges source dictionary into target dictionary in-place."""
     for k, v in source.items():
@@ -236,7 +348,7 @@ def _deep_merge_dict(target: dict[str, Any], source: dict[str, Any]) -> dict[str
 
 def load_config(
     config_path: str | Path | os.PathLike | dict[str, Any] = "pysole.json",
-    log_level: str | None = None,
+    log_level: str | int | None = None,
 ) -> dict[str, Any]:
     """
     Loads pysole.json configuration file or dictionary, falling back to default configuration values.
@@ -260,17 +372,23 @@ def load_config(
     elif config_path:
         cfg_p = Path(config_path).expanduser()
         if cfg_p.exists():
-            with open(cfg_p, "r") as f:
-                user_config = json.load(f)
+            try:
+                with open(cfg_p, "r") as f:
+                    user_config = json.load(f)
+            except json.JSONDecodeError as exc:
+                raise ConfigError(f"Invalid JSON in configuration file '{cfg_p}': {exc}") from exc
+            if not isinstance(user_config, dict):
+                raise ConfigError(f"Configuration file '{cfg_p}' must contain a JSON object at the top level.")
 
     if user_config:
         _deep_merge_dict(config, user_config)
+    _coerce_bool_leaves(config, DEFAULT_CONFIG)
 
     # Automatically align Kriging defaults based on interpolation_target if method was not explicitly user-defined
     kp = config.get("kriging_parameters", {})
     user_kp = (user_config or {}).get("kriging_parameters", {})
 
-    for section_name, target_key, direct_target_char in [("pre_migration", "pre_migration", "T"), ("post_migration", "post_migration", "D")]:
+    for section_name, direct_target_char in [("pre_migration", "T"), ("post_migration", "D")]:
         sec = kp.get(section_name, {})
         user_sec = user_kp.get(section_name, {})
         target = str(sec.get("interpolation_target", "P")).upper()
@@ -286,8 +404,7 @@ def load_config(
                     sec["drift_terms"] = []
 
     inputs = config.get("inputs", {})
-    outputs = config.get("outputs", {})
-    output_dir = outputs.get("output_dir")
+    output_dir = configured_output_dir(config)
     survey_data_path = inputs.get("survey_data_path")
     cfg_file = config_path if not isinstance(config_path, dict) else None
     log_file = resolve_path("pysole.log", output_dir=output_dir, survey_data_path=survey_data_path, config_path=cfg_file)
@@ -352,7 +469,9 @@ def main_cli() -> None:
     import sys
 
     parser = argparse.ArgumentParser(
-        description="PySole: Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Geophysical Datasets."
+        description="PySole: Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Geophysical Datasets.",
+        epilog="Subcommand: 'pysole plan-survey --dem DEM [options]' runs the unprobed glacier survey planner "
+        "(see 'pysole plan-survey --help').",
     )
     parser.add_argument(
         "config",
@@ -404,9 +523,10 @@ def main_cli() -> None:
         help="Specifies the survey profile column name in the survey dataset CSV.",
     )
 
-    # Subparsers for plan-survey CLI
-    subparsers = parser.add_subparsers(dest="subcommand", help="Optional subcommands.")
-    plan_parser = subparsers.add_parser("plan-survey", help="Run the unprobed glacier survey planner.")
+    # ``plan-survey`` is dispatched manually: an optional positional ``config`` combined with an argparse
+    # sub-parser makes argparse treat ``pysole <config.json>`` as an invalid sub-command.
+    argv = sys.argv[1:]
+    plan_parser = argparse.ArgumentParser(prog="pysole plan-survey", description="Run the unprobed glacier survey planner.")
     plan_parser.add_argument("--dem", required=True, help="Path to surface DEM raster.")
     plan_parser.add_argument("--outline", default=None, help="Path to glacier boundary outline.")
     plan_parser.add_argument("--kc", type=float, default=0.0314, help="FFT corner wavenumber cutoff k_c [rad/m] (default: 0.0314 rad/m, cutoff wavelength lambda_c ≈ 200m).")
@@ -417,35 +537,47 @@ def main_cli() -> None:
     plan_parser.add_argument("--plots-dir", default=None, help="Plots output directory.")
     plan_parser.add_argument("--format", default="tif", help="Output raster format (tif, asc).")
 
-    args = parser.parse_args()
+    plan_args = None
+    if "plan-survey" in argv:
+        idx = argv.index("plan-survey")
+        plan_args = plan_parser.parse_args(argv[idx + 1 :])
+        argv = argv[:idx]
+
+    args = parser.parse_args(argv)
+    args.subcommand = "plan-survey" if plan_args is not None else None
 
     if args.init:
-        from .logging import logger
         target = create_template_config(args.config if args.config != "pysole.json" else "pysole.json")
-        logger.info(f"Created template configuration file at: {target}")
+        print(f"Created template configuration file at: {target}")
         sys.exit(0)
 
-    if args.subcommand == "plan-survey":
-        from .survey_planner import SurveyPlanner
-        planner = SurveyPlanner(dem=args.dem, outline=args.outline)
-        planner.plan_survey(
-            kc=args.kc,
-            tau_0=args.tau * 1000.0,
-            max_length_km=args.max_km,
-            output_prefix=args.prefix,
-            output_dir=args.out_dir,
-            plots_dir=args.plots_dir,
-            output_format=args.format,
+    try:
+        if args.subcommand == "plan-survey":
+            from .survey_planner import SurveyPlanner
+            planner = SurveyPlanner(dem=plan_args.dem, outline=plan_args.outline)
+            planner.plan_survey(
+                kc=plan_args.kc,
+                tau_0=plan_args.tau * 1000.0,
+                max_length_km=plan_args.max_km,
+                output_prefix=plan_args.prefix,
+                output_dir=plan_args.out_dir,
+                plots_dir=plan_args.plots_dir,
+                output_format=plan_args.format,
+            )
+            sys.exit(0)
+
+        log_level = "DEBUG" if args.debug else None
+        from .pipeline import run_from_config
+        run_from_config(
+            args.config,
+            log_level=log_level,
+            is_batch=args.batch,
+            drift_analyzer=True if args.drift_analyzer else None,  # None -> keep the config-file value
+            survey_profile_column=args.survey_profile_column,
         )
-        sys.exit(0)
-
-    log_level = "DEBUG" if args.debug else None
-    from .pipeline import run_from_config
-    run_from_config(
-        args.config,
-        log_level=log_level,
-        is_batch=args.batch,
-        drift_analyzer=args.drift_analyzer,
-        survey_profile_column=args.survey_profile_column,
-    )
+    except (ConfigError, FileNotFoundError) as exc:
+        if args.debug:
+            raise
+        print(f"pysole: error: {exc}", file=sys.stderr)
+        sys.exit(1)
 

@@ -10,7 +10,7 @@
 
 During testing of the Goldbergkees (GOK) glacier example dataset, an unexpected maximum ice thickness of **~160 m** was observed at pixel `(132, 271)`. Crucially, this peak occurred **10 m (2 pixels)** away from the glacier boundary outline, rather than in the deep, central basin of the glacier where the greatest ice thickness was glaciologically expected.
 
-A comprehensive mathematical and physical investigation revealed that this anomaly was caused by a **$\frac{1}{\sin^2(\alpha)}$ double-scaling artifact** occurring during Pass 2 (post-migration Kriging) when Universal Kriging with Shallow Ice Approximation (`sia_thickness`) drift was applied to the slope-scaled Basal Shear Stress (BSS) product field $P(x,y)$.
+A comprehensive mathematical and physical investigation revealed that this anomaly was caused by a **$\frac{1}{\sin^2(\alpha)}$ double-scaling artifact** occurring during Pass 2 (post-migration Kriging) when Universal Kriging with Shallow Ice Approximation (`sia`) drift was applied to the slope-scaled Basal Shear Stress (BSS) product field $P(x,y)$.
 
 Following the correction of Pass 2 Kriging dynamics to **Ordinary Kriging** (or non-slope spatial drifts), the maximum ice thickness on Goldbergkees shifted to **110.15 m** located at pixel `(259, 219)` in the widest central basin of the glacier (**195.0 m** inside the outline).
 
@@ -25,11 +25,11 @@ Following the correction of Pass 2 Kriging dynamics to **Ordinary Kriging** (or 
    $$P(x, y) = D(x, y) \cdot \sin(\alpha(x, y)) = \frac{\tau_{\text{basal}}}{\rho_{\text{ice}} \cdot g}$$
 
 2. **SIA Drift Term Definition**:
-   The `sia_thickness` drift term represents the Shallow Ice Approximation thickness proxy:
+   The `sia` drift term represents the Shallow Ice Approximation thickness proxy:
    $$h_{\text{SIA}}(x, y) = \frac{\tau}{\rho_{\text{ice}} \cdot g \cdot \sin(\alpha(x, y))}$$
 
 3. **Trend Model Fitting**:
-   When Universal Kriging was configured for Pass 2 with `"drift_terms": ["sia_thickness"]`, the trend model fitted the product field $P(x,y)$ as a linear function of $h_{\text{SIA}}$:
+   When Universal Kriging was configured for Pass 2 with `"drift_terms": ["sia"]`, the trend model fitted the product field $P(x,y)$ as a linear function of $h_{\text{SIA}}$:
    $$P(x, y) \approx \beta_0 + \beta_1 \cdot h_{\text{SIA}}(x,y) = \beta_0 + \beta_1 \cdot \frac{\tau}{\rho_{\text{ice}} \cdot g \cdot \sin(\alpha(x, y))}$$
 
 4. **Thickness Reconstruction**:
@@ -54,7 +54,7 @@ This created an unintentional **$\frac{1}{\sin^2(\alpha)}$ amplification factor*
 For the BSS product field $P(x, y) = D(x, y) \cdot \sin(\alpha(x, y)) = \frac{\tau}{\rho_{\text{ice}} g}$, substituting the SIA thickness equation gives:
 $$P_{\text{SIA}}(x, y) = \left( \frac{\tau}{\rho_{\text{ice}} g \sin(\alpha)} \right) \cdot \sin(\alpha) = \frac{\tau}{\rho_{\text{ice}} g} = \text{constant}$$
 
-Thus, the SIA physical drift for the product field $P(x,y)$ is **constant**. This constant trend is inherently represented by **Ordinary Kriging**. `sia_thickness` drift ($1/\sin\alpha$) is designed for direct Depth $D(x,y)$ Kriging, not BSS Product $P(x,y)$ Kriging.
+Thus, the SIA physical drift for the product field $P(x,y)$ is **constant**. This constant trend is inherently represented by **Ordinary Kriging**. `sia` drift ($1/\sin\alpha$) is designed for direct Depth $D(x,y)$ Kriging, not BSS Product $P(x,y)$ Kriging.
 
 ---
 

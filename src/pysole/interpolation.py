@@ -199,12 +199,26 @@ def blend_margin_topography(
     weight = np.clip(dist_from_margin / max(margin_width, 1e-6), 0.0, 1.0)
     weight = 0.5 * (1.0 - np.cos(np.pi * weight))
 
+    tapered_thickness = thickness_grid * weight
     sigma_px = (max(margin_width / (3.0 * abs(dy)), 0.5), max(margin_width / (3.0 * abs(dx)), 0.5))
     smoothed_thickness = gaussian_filter(tapered_thickness, sigma=sigma_px)
     final_thickness = weight * thickness_grid + (1.0 - weight) * smoothed_thickness
     final_thickness[~boundary_mask] = 0.0
 
     return dem - final_thickness
+
+
+CURVATURE_DRIFT_TERMS: frozenset[str] = frozenset(
+    {
+        "curvature_dem",
+        "sia_curvature_dem",
+        "z_dem_curvature_dem",
+        "sia_z_dem_curvature_dem",
+        "full_physical",
+        "full_spatial_physical",
+    }
+)
+"""Drift term names (primitive and compound) whose expansion includes the surface-curvature raster."""
 
 
 def built_in_kriging_interpolation(
@@ -218,6 +232,7 @@ def built_in_kriging_interpolation(
     variogram_params: tuple[float, float, float] | dict[str, float] | None = None,
     n_cores: int = -1,
     show_progress: bool = True,
+    return_variance: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Robust native NumPy/SciPy Ordinary & Universal Kriging solver with zero-centered
@@ -225,6 +240,48 @@ def built_in_kriging_interpolation(
     Supports default quadratic spatial drift terms (1, x, y, x^2, y^2, x*y), custom external drifts
     (e.g., elevation z_surface, SIA thickness, surface curvature), and multi-drift combinations.
     Accelerated with multi-core CPU chunk parallelization via n_cores.
+
+    Parameters
+    ----------
+    sample_points : np.ndarray, shape (N, >=3)
+        Observations with columns ``[x, y, value, ...]``. Rows containing NaN in x, y or value are dropped;
+        additional columns (e.g. a profile ID) are ignored.
+    x_coords, y_coords : np.ndarray
+        1-D cell-centre coordinates [m] of the output grid; the result has shape
+        ``(len(y_coords), len(x_coords))``.
+    method : str, default "universal"
+        ``"ordinary"`` (constant unknown mean) or ``"universal"`` / ``"sia"`` (drift model). Universal Kriging
+        needs at least 4 valid points and is also selected automatically whenever an external drift is supplied.
+    variogram_model : str, default "spherical"
+        ``"spherical"``, ``"exponential"``, ``"gaussian"`` or ``"linear"`` (see Notes for the caveat).
+    external_drift_grid : np.ndarray or dict[str, np.ndarray], optional
+        One ``(M, N)`` grid or a dict of named grids used as external drifts. Each grid is standardised and
+        adds one drift column; grids without spatial variance are skipped with a warning.
+    drift_terms : list of str, optional
+        ``"linear_xy"`` adds x, y; ``"quadratic_xy"`` adds x, y, x², y², xy. Without external drifts and
+        without terms, Universal Kriging uses the full quadratic drift (6 columns incl. the constant);
+        with only ``"linear_xy"`` it uses 3 columns.
+    variogram_params : tuple (range, sill, nugget) or dict, optional
+        Variogram parameters (dict keys ``"range"``, ``"sill"``, ``"nugget"``). If omitted:
+        range = 0.6 x the largest inter-point distance, sill = variance of the values, nugget = 0.
+    n_cores : int, default -1
+        Number of worker threads for the grid evaluation (-1 uses all CPUs).
+    show_progress : bool, default True
+        Show a progress bar.
+    return_variance : bool, default True
+        If True, the Kriging estimation variance is evaluated, which requires the explicit
+        inverse of the augmented Kriging matrix and an extra O((N+d)^2) work per grid cell.
+        If False, only the O(N) dual-kriging weight dot product is evaluated and the
+        returned variance grid is filled with NaN (so that it cannot be misread as zero
+        uncertainty). Use False whenever uncertainty maps are not requested.
+
+    Notes
+    -----
+    The ``"linear"`` variogram model is the bounded 1-D profile model
+    ``gamma(h) = nugget + sill * min(h / range, 1)``. It is not a conditionally negative
+    definite function in two dimensions, so the 2-D Kriging system may be indefinite and
+    the estimation variance may be clamped to zero. Prefer ``"spherical"``,
+    ``"exponential"`` or ``"gaussian"`` for areal interpolation.
     """
     valid = ~np.isnan(sample_points[:, 0]) & ~np.isnan(sample_points[:, 1]) & ~np.isnan(sample_points[:, 2])
     pts = sample_points[valid]
@@ -262,6 +319,13 @@ def built_in_kriging_interpolation(
         nugget = 0.0
 
     from .variogram import evaluate_variogram_model
+
+    if str(variogram_model).lower().strip() == "linear":
+        logger.warning(
+            "   [Variogram Warning] The 'linear' variogram model is a bounded 1-D profile model and is not "
+            "positive-definite in 2-D. The 2-D Kriging system may be indefinite and the variance may collapse to 0. "
+            "Prefer 'spherical', 'exponential' or 'gaussian' for areal interpolation."
+        )
 
     def variogram_func(h: np.ndarray) -> np.ndarray:
         gamma = evaluate_variogram_model(h, variogram_model, range_a, sill, nugget)
@@ -370,13 +434,16 @@ def built_in_kriging_interpolation(
     z_aug = np.zeros(N_pts + n_drift, dtype=np.float64)
     z_aug[:N_pts] = pts[:, 2]
 
+    K_inv = None
     try:
         lu_piv = lu_factor(K)
         w_z = lu_solve(lu_piv, z_aug)  # Dual Kriging 1D weight vector
-        K_inv = lu_solve(lu_piv, np.eye(N_pts + n_drift))
+        if return_variance:
+            K_inv = lu_solve(lu_piv, np.eye(N_pts + n_drift))
     except Exception:
         w_z = np.linalg.lstsq(K, z_aug, rcond=None)[0]
-        K_inv = np.linalg.pinv(K)
+        if return_variance:
+            K_inv = np.linalg.pinv(K)
 
     xx, yy = np.meshgrid(x_coords, y_coords)
     xx_flat = xx.ravel()
@@ -384,14 +451,14 @@ def built_in_kriging_interpolation(
 
     chunk_size = max(500, min(10000, 5000000 // max(N_pts, 1)))
     z_interp_flat = np.zeros(M_grid, dtype=np.float64)
-    var_interp_flat = np.zeros(M_grid, dtype=np.float64)
+    var_interp_flat = np.full(M_grid, np.nan, dtype=np.float64)
 
     chunks = [(start_idx, min(start_idx + chunk_size, M_grid)) for start_idx in range(0, M_grid, chunk_size)]
 
     w_sample = w_z[:N_pts]
     w_drift = w_z[N_pts:]
 
-    def _process_chunk(chunk_tuple: tuple[int, int]) -> tuple[int, int, np.ndarray, np.ndarray]:
+    def _process_chunk(chunk_tuple: tuple[int, int]) -> tuple[int, int, np.ndarray, np.ndarray | None]:
         start_idx, end_idx = chunk_tuple
         sub_size = end_idx - start_idx
         sub_x = xx_flat[start_idx:end_idx]
@@ -427,6 +494,10 @@ def built_in_kriging_interpolation(
 
         # High-performance Dual Kriging elevation prediction (O(N) 1D dot product)
         z_sub = np.dot(w_sample, K_grid_sub) + np.dot(w_drift, K_rhs_drift_sub)
+
+        if K_inv is None:
+            # Conditional variance: skip the O((N+d)^2) per-cell variance GEMM entirely
+            return start_idx, end_idx, z_sub, None
 
         # Estimation variance computation via thread-safe precomputed K_inv
         K_rhs_sub = np.zeros((N_pts + n_drift, sub_size), dtype=np.float64)
@@ -465,7 +536,8 @@ def built_in_kriging_interpolation(
 
     for start_idx, end_idx, z_sub, var_sub in chunk_results:
         z_interp_flat[start_idx:end_idx] = z_sub
-        var_interp_flat[start_idx:end_idx] = var_sub
+        if var_sub is not None:
+            var_interp_flat[start_idx:end_idx] = var_sub
 
     z_interp = z_interp_flat.reshape((M, N))
     var_interp = var_interp_flat.reshape((M, N))
@@ -602,6 +674,7 @@ def kriging_interpolation(
     slope_floor_deg: float = 5.0,
     show_progress: bool = True,
     external_drift_grid: np.ndarray | dict[str, np.ndarray] | None = None,
+    return_variance: bool = True,
 ) -> KrigingResult:
     """
     Applies Kriging spatial interpolation on scattered points supporting four distinct approaches:
@@ -612,6 +685,53 @@ def kriging_interpolation(
 
     When include_zero_boundary_condition is True, enforces zero-value boundary points (T=0 ns or D=0 m)
     along both the outer perimeter and any interior rock outcrop/nunatak margin boundaries.
+
+    Parameters
+    ----------
+    sample_points : np.ndarray, shape (N, >=3)
+        Observations ``[x, y, value, ...]`` (NaN rows are dropped, extra columns ignored).
+    geometry : GridGeometry
+        Output grid definition (shape, spacing, cell-centre coordinates).
+    method : str, default "universal"
+        ``"ordinary"``, ``"universal"``, ``"sia"`` or ``"regression"`` (the ``*_kriging`` spellings are accepted).
+    variogram_model : str, default "spherical"
+        ``"spherical"``, ``"exponential"``, ``"gaussian"`` or ``"linear"``.
+    variogram_params : tuple (range, sill, nugget) or dict, optional
+        Variogram parameters passed to the engine; if omitted the native engine uses data-driven defaults
+        (see ``built_in_kriging_interpolation``).
+    dem_grid : np.ndarray, optional
+        Surface DEM, required for the ``"z_dem"`` / ``"curvature_dem"`` drifts (and for ``"sia"`` when no
+        ``opt_slope_grid`` is given).
+    opt_slope_grid : np.ndarray, optional
+        Optimised smoothed slope grid [rad] used to build the SIA drift ``1 / sin(alpha)``.
+    drift_terms : list of str, optional
+        Drift basis names (primitives such as ``"sia"``, ``"z_dem"``, ``"curvature_dem"``, ``"linear_xy"`` or the
+        compound shortcuts ``"sia_space"``, ``"sia_z_dem"``, ``"full_physical"``, ...). An unknown name raises
+        ``ValueError``.
+    outline_mask : np.ndarray, optional
+        Boolean glacier mask; also defines the boundary used for the zero-value boundary condition.
+    include_zero_boundary_condition : bool, default True
+        Add zero-value pseudo-observations along the mask boundary.
+    n_cores : int, default -1
+        Worker threads (-1 uses all CPUs).
+    engine : str, default "native"
+        ``"native"`` (NumPy/SciPy) or ``"pykrige"``.
+    slope_floor_deg : float, default 5.0
+        Lower bound of the surface slope [deg] when forming the SIA drift (avoids ``1/sin(alpha)`` blow-up).
+    show_progress : bool, default True
+        Show a progress bar.
+    external_drift_grid : np.ndarray or dict[str, np.ndarray], optional
+        Additional user-supplied external drift grid(s) of the DEM shape.
+    return_variance : bool, default True
+        Native engine only. If False, the O(N^2) per-cell Kriging variance evaluation is skipped and
+        ``KrigingResult.variance_grid`` is filled with NaN. Set False when uncertainty maps are not needed.
+
+    Notes
+    -----
+    ``variogram_model="linear"`` selects the bounded 1-D profile model
+    ``gamma(h) = nugget + sill * min(h / range, 1)`` in the native engine. This model is not
+    conditionally negative definite in 2-D, so areal Kriging systems may be indefinite and the variance
+    may be clamped to zero (a runtime warning is logged). Prefer 'spherical', 'exponential' or 'gaussian'.
     """
     M, N = geometry.shape
     x_coords = geometry.x_coords
@@ -760,6 +880,7 @@ def kriging_interpolation(
             variogram_params=variogram_params,
             n_cores=n_cores,
             show_progress=show_progress,
+            return_variance=return_variance,
         )
     return KrigingResult(bedrock_grid=z_b, variance_grid=v_b)
 
@@ -822,8 +943,8 @@ def random_forest_hole_filling(
 
     train_indices = np.where(valid_train)[0]
     if n_valid > 20000:
-        np.random.seed(42)
-        train_indices = np.random.choice(train_indices, size=20000, replace=False)
+        rng = np.random.default_rng(42)
+        train_indices = rng.choice(train_indices, size=20000, replace=False)
 
     effective_n_cores = (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
 

@@ -72,11 +72,13 @@ class TestSurveyPlanner(unittest.TestCase):
             model = pysole.Solver(
                 dem=self.wuk_dem,
                 outline=self.wuk_outline,
+                output_dir=str(tmp_path),
             )
 
             res = model.plan_survey(output_prefix=out_prefix, output_format="tif")
             self.assertIn("tracks", res)
             self.assertTrue(os.path.exists(f"{out_prefix}_sia_modelled_depth.tif"))
+            self.assertTrue(os.path.exists(os.path.join(tmp_dir, "figures", "test_run_survey_plan_map.png")))
 
     def test_automatic_survey_planner_dispatch(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

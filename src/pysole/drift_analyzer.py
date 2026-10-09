@@ -6,7 +6,6 @@ and recommend optimal single and multi-drift models for Universal Kriging.
 
 from dataclasses import dataclass
 from typing import Any
-import logging
 import sys
 import numpy as np
 import pandas as pd
@@ -90,7 +89,7 @@ class DriftAnalyzer:
             X_others = np.delete(X_drift, i, axis=1)
             A = np.column_stack([np.ones(n_samples), X_others])
             try:
-                coef, residuals, rank, s = np.linalg.lstsq(A, y_i, rcond=None)
+                coef = np.linalg.lstsq(A, y_i, rcond=None)[0]
                 y_pred = A @ coef
                 ss_tot = np.sum((y_i - np.mean(y_i)) ** 2)
                 if ss_tot <= 1e-12:
@@ -223,7 +222,7 @@ class DriftAnalyzer:
                 continue
 
             X_drift = drift_basis.evaluate(x_pts, y_pts)
-            vif_max, vifs = self.calculate_vif(X_drift)
+            vif_max, _ = self.calculate_vif(X_drift)
             is_multicollinear = vif_max > self.vif_threshold
 
             preds = np.full(n_points, np.nan)
