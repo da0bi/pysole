@@ -570,7 +570,7 @@ The exact calculation of the estimation variance depends on the selected `interp
   </p>
 
 - **BSS-derived Product Target Interpolation (`interpolation_target`: `"P"`)**:
-  When interpolating the BSS product field $P(x,y) = D \cdot \sin(\alpha_{\text{opt}})$ (or $$P(x,y) = T \cdot \sin(\alpha_{\text{opt}})$$), Kriging calculates the product variance $\sigma_{\text{P}}^2(x,y)$. The 2D estimation variance is derived via linear error propagation with the optimal surface slope field $\sin(\alpha_{\text{opt}}(x,y))$:
+  When interpolating the BSS product field $P(x,y) = D \cdot \sin(\alpha_{\text{opt}})$, or $$P(x,y) = T \cdot \sin(\alpha_{\text{opt}})$$, Kriging calculates the product variance $\sigma_{\text{P}}^2(x,y)$. The 2D estimation variance is derived via linear error propagation with the optimal surface slope field $\sin(\alpha_{\text{opt}}(x,y))$:
 
   <p align="center">
   $$\sigma_{\text{D or T}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m² or s²}]$$
