@@ -23,7 +23,8 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[6. Robust Baseline Interpolation Strategies](#interpolation-strategies)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[7. Universal Kriging Drift Models](#universal-kriging-drift-models)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[8. Depth Uncertainty Derivation](#depth-uncertainty-derivation)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[9. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[9. Memory Guard and Kriging Uncertainty](#memory-guard-and-uncertainty)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[10. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Command-Line Interface (CLI) Execution](#cli-execution)<br><br>
 [Python API & Quick Start](#python-api-and-quick-start)<br><br>
@@ -571,8 +572,20 @@ $$\sigma_{\text{D}}(x,y) = \sqrt{\sigma_{\text{D}}^2(x,y)} \quad [\pm\,\text{m}]
 
 Under Gaussian linear estimation theory, $\pm 1.00$ $\sigma_{\text{D}}(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96$ $\sigma_{\text{D}}(x,y)$ represents the 95% confidence margin of error.
 
+<a id="memory-guard-and-uncertainty"></a>
+#### 9. Memory Guard and Kriging Uncertainty
+The Kriging uncertainty (thickness, basal shear stress) is **always computed** in the post-migration pass and **always shown** in the diagnostic figures; the `save_*_uncertainty` options only control whether the rasters are exported. The traveltime uncertainty $\sigma_{\text{T}}$ is exported on request but never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
+
+The native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM (cgroup limits are respected). If the estimate does not fit:
+
+1. the number of worker threads is reduced first (this does not change the results),
+2. only if even a single thread with variance does not fit, the variance is skipped. The uncertainty panels then show *"Uncertainty not available"* and uncertainty rasters are not exported (a warning is logged),
+3. if nothing fits, the run continues with one thread and no variance, and a warning is logged.
+
+If the available RAM cannot be determined, the guard is disabled. Unknown keys in a configuration file never stop a run: they are reported in a single warning and ignored.
+
 <a id="dem-spatial-smoothing"></a>
-#### 9. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
+#### 10. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
 The depth field $D(x,y)$ is obtained by dividing the Kriged product field $P_{\text{D}}(x,y)$ with the optimally smoothed surface slope field $\sin(\alpha_{\text{opt}}(x,y))$. When post-processing DEM spatial smoothing is enabled (`smooth_bedrock: true`), `PySole` applies the spatial smoothing operator $S$ **directly to the ice depth field $D(x,y)$**:
 
 <p align="center">
@@ -584,17 +597,7 @@ Z_{\text{bed}}(x,y) &= Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)
 
 Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual $Z_{\text{surface}} - S(Z_{\text{surface}})$ from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
 
-<a id="memory-guard-and-uncertainty"></a>
-#### 10. Memory Guard and Uncertainty
-The Kriging uncertainty (thickness, basal shear stress) is **always computed** in the post-migration pass and **always shown** in the diagnostic figures; the `save_*_uncertainty` options only control whether the rasters are exported. The traveltime uncertainty $\sigma_{\text{T}}$ is exported on request but never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
 
-The native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM (cgroup limits are respected). If the estimate does not fit:
-
-1. the number of worker threads is reduced first (this does not change the results),
-2. only if even a single thread with variance does not fit, the variance is skipped. The uncertainty panels then show *"Uncertainty not available"* and uncertainty rasters are not exported (a warning is logged),
-3. if nothing fits, the run continues with one thread and no variance, and a warning is logged.
-
-If the available RAM cannot be determined, the guard is disabled. Unknown keys in a configuration file never stop a run: they are reported in a single warning and ignored.
 
 ---
 
