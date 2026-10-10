@@ -429,7 +429,8 @@ When Kriging estimation variance (&sigma;<sub>Kriging</sub><sup>2</sup>) is requ
 $$\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{grid}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{grid}}$$
 </p>
 
-where <i>C</i>(0) is the zero-distance spatial covariance (the total variogram sill <i>S</i> representing maximum prior uncertainty), and <i>k</i><sub>grid</sub><sup>T</sup> <i>K</i><sup>−1</sup> <i>k</i><sub>grid</sub> is the variance reduction gained from nearby sample measurements. To prevent multi-threading memory race conditions inside concurrent LAPACK (*Linear Algebra Package*) solver workspace buffers (which cause horizontal seam artifacts under parallel CPU execution), `PySole` pre-computes the explicit inverse matrix <i>K</i><sup>−1</sup> via `lu_solve(lu_piv, np.eye(N_aug))` **once** prior to grid chunking.
+where <i>C</i>(0) is the zero-distance spatial covariance (the total variogram sill <i>S</i> representing maximum prior uncertainty), and <i>k</i><sub>grid</sub><sup>T</sup> <i>K</i><sup>−1</sup> <i>k</i><sub>grid</sub> is the variance reduction gained from nearby sample measurements.
+To prevent multi-threading memory race conditions inside concurrent LAPACK (*Linear Algebra Package*) solver workspace buffers (which cause horizontal seam artifacts under parallel CPU execution), `PySole` pre-computes the explicit inverse matrix <i>K</i><sup>−1</sup> via `lu_solve(lu_piv, np.eye(N_aug))` **once** prior to grid chunking.
 
 Parallel worker threads (`ThreadPoolExecutor`) assemble target vectors across sub-grid chunks into <i>K</i><sub>rhs,sub</sub> and evaluate chunk variance weights via lock-free, read-only Level-3 BLAS matrix products:
 
