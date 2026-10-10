@@ -409,7 +409,7 @@ where:
 - <i>w</i><sub>z</sub> = [<i>w</i><sub>sample</sub><sup>T</sup>, <i>w</i><sub>drift</sub><sup>T</sup>]<sup>T</sup> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>, <i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>]<sup>T</sup> is the single global dual weight vector solved via *Lower-Upper* (LU) matrix decomposition (`scipy.linalg.lu_factor`).
 
 ##### Unified 1D Vector Dot Product Prediction
-Once the global dual weight vector <i>w</i><sub>z</sub> is computed, spatial point estimation at any target grid node (<i>x</i>, <i>y</i>) simplifies to a single *Basic Linear Algebra Subprograms* (BLAS)-accelerated 1D vector dot product of <i>w</i><sub>z</sub> with the target node RHS vector <i>k</i><sub>grid</sub>:
+Once the global dual weight vector <i>w</i><sub>z</sub> is computed, spatial point estimation at any target grid node (<i>x</i>, <i>y</i>) simplifies to a single *Basic Linear Algebra Subprograms* (BLAS)-accelerated 1D vector dot product of <i>w</i><sub>z</sub> with the target node right-hand-side (RHS) vector <i>k</i><sub>grid</sub>:
 
 <p align="center">
 $$Z_{\text{grid}} = \mathbf{w}_z \cdot \mathbf{k}_{\text{grid}} = \mathbf{w}_{\text{sample}} \cdot \boldsymbol{\Gamma}_{\text{grid}} + \mathbf{w}_{\text{drift}} \cdot \mathbf{F}_{\text{grid}}$$
