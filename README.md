@@ -113,7 +113,15 @@ The Kriging standard error for the interpolated depths is converted to meters to
 <a id="installation"></a>
 ## Installation
 
-### Standard Installation via PyPI <strong><i> -> !!! NOT AVAILABLE YET !!!</i></strong>
+### Direct Installation from GitHub (Recommended)
+
+You can install `PySole` directly from GitHub using `pip`:
+
+```bash
+pip install git+https://github.com/da0bi/pysole.git
+```
+
+### PyPI Installation <strong><i> -> !!! NOT AVAILABLE YET !!!</i></strong>
 
 ```bash
 pip install pysole
@@ -121,7 +129,7 @@ pip install pysole
 
 ### Local / Development Installation
 
-To install `PySole` directly from source in editable mode:
+To clone and install `PySole` directly from source in editable mode:
 
 ```bash
 git clone https://github.com/da0bi/pysole.git
@@ -633,8 +641,6 @@ Z_{\text{bed}}(x,y) &= Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)
 </p>
 
 Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual $Z_{\text{surface}} - S(Z_{\text{surface}})$ from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
-
-
 
 ---
 
