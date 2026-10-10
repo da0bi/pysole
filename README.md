@@ -403,20 +403,35 @@ Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns 
 $$\mathbf{K} \mathbf{w}_{\text{z}} = \mathbf{z}_{\text{aug}}$$
 </p>
 
-where <i>K</i> is the augmented sample-to-sample covariance/variogram matrix, <i>z</i><sub>aug</sub> = [<i>z</i><sub>1</sub>, ..., <i>z</i><sub><i>N</i></sub>, 0, ..., 0]<sup>T</sup> contains the known data points augmented with zero drift constraints, and <i>w</i><sub>z</sub> = [<i>w</i><sub>sample</sub><sup>T</sup>, <i>w</i><sub>drift</sub><sup>T</sup>]<sup>T</sup> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>, <i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>]<sup>T</sup> is the single global dual weight vector solved via <i>Lower-Upper</i> (LU) matrix decomposition. Once <i>w</i><sub>z</sub> is computed, spatial interpolation across all target grid nodes simplifies to a single <i>Basic Linear Algebra Subprograms</i> (BLAS)-accelerated 1D vector dot product:
+where $\mathbf{K}$ is the augmented sample-to-sample covariance/variogram matrix, $\mathbf{z}_{\text{aug}} = [z_1, \dots, z_N, 0, \dots, 0]^T$ contains the known data points augmented with zero drift constraints, and $\mathbf{w}_{\text{z}} = [\mathbf{w}_{\text{sample}}^T, \mathbf{w}_{\text{drift}}^T]^T = [b_1, \dots, b_N, a_1, \dots, a_L]^T$ is the single global dual weight vector solved via *Lower-Upper* (LU) matrix decomposition (`scipy.linalg.lu_factor`). Once $\mathbf{w}_{\text{z}}$ is computed, spatial point estimation across all target grid nodes simplifies to a single *Basic Linear Algebra Subprograms* (BLAS)-accelerated 1D vector dot product:
 
 <p align="center">
 $$Z_{\text{grid}} = \mathbf{w}_{\text{sample}} \cdot \boldsymbol{\Gamma}_{\text{grid}} + \mathbf{w}_{\text{drift}} \cdot \mathbf{F}_{\text{grid}}$$
 </p>
 
 where:
-- <i>Z</i><sub>grid</sub> is the predicted output value (e.g., bedrock elevation or depth) at target grid node (<i>x</i>, <i>y</i>).
-- <i>w</i><sub>sample</sub> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>] are the solved dual spatial weights for each of the <i>N</i> data points.
-- <i>Γ</i><sub>grid</sub> = [&gamma;(<i>x</i><sub>1</sub>, <i>x</i><sub>grid</sub>), ..., &gamma;(<i>x</i><sub><i>N</i></sub>, <i>x</i><sub>grid</sub>)]<sup>T</sup> is the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each data point and target node (<i>x</i>, <i>y</i>).
-- <i>w</i><sub>drift</sub> = [<i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>] are the solved dual drift model coefficients.
-- <i>F</i><sub>grid</sub> is the drift function vector evaluated at target node (<i>x</i>, <i>y</i>) (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
+- $Z_{\text{grid}}$ is the predicted output value (e.g., bedrock elevation or depth) at target grid node $(x, y)$.
+- $\mathbf{w}_{\text{sample}} = [b_1, \dots, b_N]^T$ are the solved dual spatial weights for each of the $N$ data points.
+- $\boldsymbol{\Gamma}_{\text{grid}} = [\gamma(x_1, x_{\text{grid}}), \dots, \gamma(x_N, x_{\text{grid}})]^T$ is the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each data point and target node $(x, y)$.
+- $\mathbf{w}_{\text{drift}} = [a_1, \dots, a_L]^T$ are the solved dual drift model coefficients.
+- $\mathbf{F}_{\text{grid}}$ is the drift function vector evaluated at target node $(x, y)$ (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
 
-To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a small offset (10<sup>−6</sup>) to the main diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization and multi-threaded CPU chunk parallelization (`ThreadPoolExecutor`), PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds) while maintaining complete mathematical parity with standard Universal Kriging.
+##### Thread-Safe Uncertainty Evaluation & Level-3 BLAS Engine
+When Kriging estimation variance ($\sigma_{\text{Kriging}}^2$) is requested (`return_variance=True`), per-grid node variance requires evaluating:
+
+<p align="center">
+$$\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{rhs}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{rhs}}$$
+</p>
+
+where $\mathbf{k}_{\text{rhs}} = [\boldsymbol{\Gamma}_{\text{grid}}^T, \mathbf{F}_{\text{grid}}^T]^T$. To prevent multi-threading memory race conditions inside concurrent LAPACK solver workspace buffers (which cause horizontal seam artifacts under parallel CPU execution), `PySole` pre-computes the explicit inverse matrix $\mathbf{K}^{-1} = \text{lu\_solve}(\text{lu\_piv}, \mathbf{I}_{N_{\text{aug}}})$ **once** prior to grid chunking. Parallel worker threads (`ThreadPoolExecutor`) evaluate per-chunk variance weights via lock-free, read-only Level-3 BLAS matrix products:
+
+<p align="center">
+$$\mathbf{W}_{\text{sub}} = \mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}$$
+</p>
+
+This architecture eliminates lock contention, leverages SIMD hardware acceleration, and guarantees exact numerical invariance ($\Delta \sigma^2 < 10^{-12}$) and seamless spatial continuity across arbitrary thread counts and grid boundaries.
+
+To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a relative offset ($10^{-6} \cdot \text{sill}$) to the sample block diagonal of $\mathbf{K}$, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization, PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds).
 
 <a id="interpolation-strategies"></a>
 #### 6. Robust Baseline Interpolation Strategies
