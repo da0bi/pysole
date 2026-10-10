@@ -123,8 +123,8 @@ pip install git+https://github.com/da0bi/pysole.git
 
 ### PyPI Installation
 
-> [!CAUTION]
-> 🚨 NOT AVAILABLE YET !!!
+> [!IMPORTANT]
+> 🚨 NOT AVAILABLE YET 🚨
 
 ```bash
 pip install pysole
