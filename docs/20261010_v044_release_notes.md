@@ -29,7 +29,7 @@ This is the **first official release of PySole (v0.4.4)**!
 - 🏞️ **Outcrop Boundaries, ML Gap Filling & Margin Tapering** to assure a continuous bedrock smoothly embedded in the surface DEM.
 
 > 📖 **Methodological & Mathematical Details**:
-> For detailed equations, theoretical derivations, parameter references, and step-by-step guides, please consult the [README.md](README.md) and the [`Documentation Manual`](docs/drift_analyzer_&_survey_planner.md).
+> For detailed equations, theoretical derivations, parameter references, and step-by-step guides, please consult the [README.md](../README.md) and the [`Documentation Manual`](drift_analyzer_&_survey_planner.md).
 
 ---
 
