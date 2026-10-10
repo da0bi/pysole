@@ -144,7 +144,7 @@ pip install -e .
 <a id="json-configuration"></a>
 ## JSON Configuration File
 
-All execution options can be fully defined in a single JSON configuration file, which by default is named `pysole.json`:
+All execution options can be fully defined in a single JSON configuration file, which by default is named `pysole.json`. Unknown keys in the configuration file never stop a `PySole` run - they are reported in a single warning and ignored.
 
 ```json
 {
@@ -623,13 +623,13 @@ Under Gaussian linear estimation theory, $\pm 1.00 \, \sigma(x,y)$ represents th
 #### 9. Memory Guard and Kriging Uncertainty
 The Kriging uncertainty is **always computed** and **always shown** in the diagnostic figures for the post-migration products; the `save_*_uncertainty` options only control whether the rasters are exported. The traveltime uncertainty $\sigma_{\text{T}}$ is exported on request but never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
 
-The native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM (cgroup limits are respected). If the estimate does not fit:
+The native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM. Control group (*cgroup*) limits are respected, thus runs safely inside Docker, Kubernetes, and HPC clusters without exceeding assigned container memory quotas. If the estimate does not fit:
 
 1. the number of worker threads is reduced first (this does not change the results),
 2. only if even a single thread with variance does not fit, the variance is skipped. The uncertainty panels then show *"Uncertainty not available"* and uncertainty rasters are not exported (a warning is logged),
 3. if nothing fits, the run continues with one thread and no variance, and a warning is logged.
 
-If the available RAM cannot be determined, the guard is disabled. Unknown keys in a configuration file never stop a run: they are reported in a single warning and ignored.
+If the available RAM cannot be determined, the guard is disabled.
 
 <a id="dem-spatial-smoothing"></a>
 #### 10. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
