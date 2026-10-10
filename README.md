@@ -123,7 +123,7 @@ pip install git+https://github.com/da0bi/pysole.git
 
 ### PyPI Installation
 
-🚨 NOT AVAILABLE YET 🚨
+🚨 *NOT AVAILABLE YET* 🚨
 
 ```bash
 pip install pysole
