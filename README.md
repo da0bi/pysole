@@ -400,10 +400,10 @@ Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns 
 `PySole` features a native, numerically optimized geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike standard Kriging implementations (Primal Kriging) that solve node-specific linear systems point-by-point for every target grid node (requiring millions of repetitive matrix inversions across a high-resolution DEM), Dual Kriging solves the global linear system only once for the entire sample observation set:
 
 <p align="center">
-$$\mathbf{K} \mathbf{w}_{\text{z}} = \mathbf{z}_{\text{aug}}$$
+$$\mathbf{K} \mathbf{w}_z = \mathbf{z}_{\text{aug}}$$
 </p>
 
-where $\mathbf{K}$ is the augmented sample-to-sample covariance/variogram matrix, $\mathbf{z}_{\text{aug}} = [z_1, \dots, z_N, 0, \dots, 0]^T$ contains the known data points augmented with zero drift constraints, and $\mathbf{w}_{\text{z}} = [\mathbf{w}_{\text{sample}}^T, \mathbf{w}_{\text{drift}}^T]^T = [b_1, \dots, b_N, a_1, \dots, a_L]^T$ is the single global dual weight vector solved via *Lower-Upper* (LU) matrix decomposition (`scipy.linalg.lu_factor`). Once $\mathbf{w}_{\text{z}}$ is computed, spatial point estimation across all target grid nodes simplifies to a single *Basic Linear Algebra Subprograms* (BLAS)-accelerated 1D vector dot product:
+where $\mathbf{K}$ is the augmented sample-to-sample covariance/variogram matrix, $\mathbf{z}_{\text{aug}} = [z_1, \dots, z_N, 0, \dots, 0]^T$ contains the known data points augmented with zero drift constraints, and $\mathbf{w}_z = [\mathbf{w}_{\text{sample}}^T, \mathbf{w}_{\text{drift}}^T]^T = [b_1, \dots, b_N, a_1, \dots, a_L]^T$ is the single global dual weight vector solved via *Lower-Upper* (LU) matrix decomposition (`scipy.linalg.lu_factor`). Once $\mathbf{w}_z$ is computed, spatial point estimation across all target grid nodes simplifies to a single *Basic Linear Algebra Subprograms* (BLAS)-accelerated 1D vector dot product:
 
 <p align="center">
 $$Z_{\text{grid}} = \mathbf{w}_{\text{sample}} \cdot \boldsymbol{\Gamma}_{\text{grid}} + \mathbf{w}_{\text{drift}} \cdot \mathbf{F}_{\text{grid}}$$
@@ -423,7 +423,7 @@ When Kriging estimation variance ($\sigma_{\text{Kriging}}^2$) is requested (`re
 $$\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{rhs}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{rhs}}$$
 </p>
 
-where $\mathbf{k}_{\text{rhs}} = [\boldsymbol{\Gamma}_{\text{grid}}^T, \mathbf{F}_{\text{grid}}^T]^T$. To prevent multi-threading memory race conditions inside concurrent LAPACK solver workspace buffers (which cause horizontal seam artifacts under parallel CPU execution), `PySole` pre-computes the explicit inverse matrix $\mathbf{K}^{-1} = \text{lu\_solve}(\text{lu\_piv}, \mathbf{I}_{N_{\text{aug}}})$ **once** prior to grid chunking. Parallel worker threads (`ThreadPoolExecutor`) evaluate per-chunk variance weights via lock-free, read-only Level-3 BLAS matrix products:
+where $\mathbf{k}_{\text{rhs}} = [\boldsymbol{\Gamma}_{\text{grid}}^T, \mathbf{F}_{\text{grid}}^T]^T$. To prevent multi-threading memory race conditions inside concurrent LAPACK solver workspace buffers (which cause horizontal seam artifacts under parallel CPU execution), `PySole` pre-computes the explicit inverse matrix $\mathbf{K}^{-1}$ via `lu_solve(lu_piv, np.eye(N_aug))` **once** prior to grid chunking. Parallel worker threads (`ThreadPoolExecutor`) evaluate per-chunk variance weights via lock-free, read-only Level-3 BLAS matrix products:
 
 <p align="center">
 $$\mathbf{W}_{\text{sub}} = \mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}$$
@@ -431,7 +431,7 @@ $$\mathbf{W}_{\text{sub}} = \mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}$$
 
 This architecture eliminates lock contention, leverages SIMD hardware acceleration, and guarantees exact numerical invariance ($\Delta \sigma^2 < 10^{-12}$) and seamless spatial continuity across arbitrary thread counts and grid boundaries.
 
-To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a relative offset ($10^{-6} \cdot \text{sill}$) to the sample block diagonal of $\mathbf{K}$, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization, PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds).
+To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a relative offset ($10^{-6} \cdot \text{sill}$) to the sample block diagonal of $\mathbf{K}$, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization, `PySole`'s Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds).
 
 <a id="interpolation-strategies"></a>
 #### 6. Robust Baseline Interpolation Strategies
