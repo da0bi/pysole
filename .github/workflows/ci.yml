@@ -30,7 +30,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel pytest
-        pip install -e .
+        pip install --prefer-binary -e .
 
     - name: Run unit test suite
       run: |
