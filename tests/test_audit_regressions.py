@@ -1166,8 +1166,35 @@ class TestAuditRegressions(unittest.TestCase):
             saved = solver.export_outputs(stage="migration")
             self.assertTrue(any("traveltime_uncertainty" in f for f in saved), saved)
 
+    def test_kriging_variance_thread_safety_and_chunk_invariance(self):
+        """41. Option B Thread Safety: Verifies 1-thread vs multi-thread variance equality and chunk seam invariance."""
+        geom = GridGeometry.create((40, 40), dx=5.0, dy=5.0, bounds=(0, 0, 200, 200))
+        np.random.seed(42)
+        X = np.random.uniform(20, 180, 40)
+        Y = np.random.uniform(20, 180, 40)
+        Z = np.random.uniform(10, 100, 40)
+        pts = np.column_stack((X, Y, Z))
+
+        # 1-thread evaluation
+        z_1, var_1 = built_in_kriging_interpolation(
+            pts, geom.x_coords, geom.y_coords, method="universal",
+            variogram_model="spherical", return_variance=True, n_cores=1, show_progress=False
+        )
+
+        # 8-thread evaluation
+        z_8, var_8 = built_in_kriging_interpolation(
+            pts, geom.x_coords, geom.y_coords, method="universal",
+            variogram_model="spherical", return_variance=True, n_cores=8, show_progress=False
+        )
+
+        # Asserts exact numeric equality between 1 thread and 8 threads
+        np.testing.assert_allclose(z_1, z_8, atol=1e-12)
+        np.testing.assert_allclose(var_1, var_8, atol=1e-12)
+        self.assertTrue(np.all(np.isfinite(var_8)))
+        self.assertTrue(np.all(var_8 >= 0.0))
 
 
 if __name__ == "__main__":
     unittest.main()
+
 

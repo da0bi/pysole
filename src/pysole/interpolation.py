@@ -462,22 +462,21 @@ def built_in_kriging_interpolation(
     z_aug = np.zeros(N_pts + n_drift, dtype=np.float64)
     z_aug[:N_pts] = pts[:, 2]
 
-    # The LU factorisation is kept (read-only, thread-safe) only if the variance is evaluated; the
-    # per-chunk variance solves use it directly, so no explicit N x N inverse is ever formed.
-    lu_piv = None
+    # Pre-compute inverse matrix K_inv when return_variance is True to ensure
+    # 100% thread-safe Level-3 BLAS matrix multiplication across parallel worker threads.
     K_inv = None
     try:
         lu_piv = lu_factor(K)
         w_z = lu_solve(lu_piv, z_aug)  # Dual Kriging 1D weight vector
-        K = None  # the factorisation holds everything that is still needed
+        if return_variance:
+            K_inv = lu_solve(lu_piv, np.eye(N_pts + n_drift, dtype=np.float64))
+        del lu_piv
+        K = None
     except Exception:
-        lu_piv = None
         w_z = np.linalg.lstsq(K, z_aug, rcond=None)[0]
         if return_variance:
             K_inv = np.linalg.pinv(K)
         K = None
-    if not return_variance:
-        lu_piv = None  # weights are known; release the factorisation before the grid evaluation
 
     xx, yy = np.meshgrid(x_coords, y_coords)
     xx_flat = xx.ravel()
@@ -533,15 +532,12 @@ def built_in_kriging_interpolation(
             # Conditional variance: skip the O((N+d)^2) per-cell variance solve entirely
             return start_idx, end_idx, z_sub, None
 
-        # Estimation variance via the thread-safe, read-only LU factorisation (no explicit inverse)
+        # Estimation variance via thread-safe BLAS matrix multiplication with precomputed K_inv
         K_rhs_sub = np.zeros((N_pts + n_drift, sub_size), dtype=np.float64)
         K_rhs_sub[:N_pts, :] = K_grid_sub
         K_rhs_sub[N_pts:, :] = K_rhs_drift_sub
 
-        if lu_piv is not None:
-            W_sub = lu_solve(lu_piv, K_rhs_sub)
-        else:
-            W_sub = np.dot(K_inv, K_rhs_sub)
+        W_sub = np.dot(K_inv, K_rhs_sub)
 
         weights_sub = W_sub[:N_pts, :]
         mu_drift_sub = np.sum(W_sub[N_pts:, :] * K_rhs_drift_sub, axis=0)
