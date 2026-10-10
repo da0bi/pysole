@@ -423,7 +423,7 @@ where:
   - <i>F</i><sub>grid</sub> = [<i>f</i><sub>1</sub>(<i>x</i>,<i>y</i>), ..., <i>f</i><sub><i>L</i></sub>(<i>x</i>,<i>y</i>)]<sup>T</sup>: the drift function vector evaluated at target node (<i>x</i>, <i>y</i>) (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
 
 ##### Thread-Safe Uncertainty Evaluation & Level-3 BLAS Engine
-When Kriging estimation variance (&sigma;<sub>Kriging</sub><sup>2</sup>) is requested (`return_variance=True`), per-grid node variance is evaluated using the exact same target node vector <i>k</i><sub>grid</sub>:
+When Kriging estimation variance (&sigma;<sub>Kriging</sub><sup>2</sup>) is requested, per-grid node variance is evaluated using the exact same target node vector <i>k</i><sub>grid</sub>:
 
 <p align="center">
 $$\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{grid}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{grid}}$$
