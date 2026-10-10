@@ -113,7 +113,7 @@ The Kriging standard error for the interpolated depths is converted to meters to
 <a id="installation"></a>
 ## Installation
 
-### Direct Installation from GitHub (Recommended)
+### Direct Installation from GitHub <i>Recommended</i>
 
 You can install `PySole` directly from GitHub using `pip`:
 
