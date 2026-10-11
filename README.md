@@ -387,19 +387,19 @@ When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `n
 - **Minimum Frequency Cutoff <i>k</i><sub>c,min</sub> and Maximum Wavelength <i>&lambda;</i><sub>max</sub>**:
    - **`kc_min` Default (Half-Domain Limit)**: Defaults to the Half-Domain scaling limit:
      <p align="center">
-     $$k_{\text{c,min}} = \frac{4\pi}{L_{\text{DEM,max}}} \quad [\text{rad/m}]$$
+     $$k_{\text{c,min}} = \frac{4\pi}{L_{\text{max}}} \quad [\text{rad/m}]$$
      </p>
-     This constrains the maximum filter wavelength to half the physical DEM extent (<i>&lambda;</i><sub>max</sub> = <i>L</i><sub>DEM,max</sub> / 2).
+     This constrains the maximum filter wavelength to half the physical DEM extent (<i>&lambda;</i><sub>max</sub> = <i>L</i><sub>max</sub> / 2).
    - **`lambda_max` Wavelength Metric & Fallback**: If the user provides a custom <i>&lambda;</i><sub>max</sub> [m], it converts directly to wavenumber as <i>k</i><sub>c,min</sub> = 2&pi; / <i>&lambda;</i><sub>max</sub> for the FFT filtering. When `lambda_max` is `null`, `PySole` falls back directly to `kc_min` (4&pi; / <i>L</i><sub>max</sub>).
 
 - **Evaluation Step Count `n_steps` (Discrete Fourier Mode Counting)**:
-   - When `n_steps` is `null`, `PySole` dynamically calculates the number of integer Fourier modes spanning the frequency search range [<i>k</i><sub>c,min</sub>, <i>k</i><sub>c,max</sub>] over the maximum domain length <i>L</i><sub>DEM,max</sub>:
+   - When `n_steps` is `null`, `PySole` dynamically calculates the number of integer Fourier modes spanning the frequency search range [<i>k</i><sub>c,min</sub>, <i>k</i><sub>c,max</sub>] over the maximum domain length <i>L</i><sub>max</sub>:
      <p align="center">
      $$n_{\text{modes}} = \left\lfloor \frac{(k_{\text{c,max}} - k_{\text{c,min}}) \cdot L_{\text{max}}}{2\pi} \right\rfloor$$
      </p>
-   - The evaluation step count is then dynamically clamped between a minimum floor of 10 steps and a maximum ceiling of 50 steps:
+   - The evaluation step count is then dynamically constrained between a minimum floor of 10 steps and a maximum ceiling of 50 steps:
      <p align="center">
-     $$n_{\text{steps}} = \text{clip}(n_{\text{modes}}, 10, 50)$$
+     $$n_{\text{steps}} = \min(50,\ \max(10,\ n_{\text{modes}}))$$
      </p>
    - The candidate corner frequency vector <b>k</b><sub>c</sub> is generated as a logarithmically/geometrically spaced array (`np.geomspace`) from <i>k</i><sub>c,max</sub> down to <i>k</i><sub>c,min</sub> with <i>n</i><sub>steps</sub> evaluation passes.
 
