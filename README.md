@@ -93,7 +93,7 @@ While users are free to apply any available interpolation strategy, two **robust
   $$T(x,y) = \frac{P_{\text{T}}(x,y)}{\sin(\alpha_{\text{opt}}(x,y))}$$
   </p>
 
-- **Direct `"T"` Baseline**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> using <b>Universal Kriging</b> with the physically-informed <b>SIA drift model</b> ([[`"sia"`](#universal-kriging-drift-models)]) by default, modeling the inverse relationship between traveltime and surface slope.
+- **Direct `"T"` Baseline**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> using <b>Universal Kriging</b> with the physically-informed <b>SIA drift model</b> ([`["sia"]`](#universal-kriging-drift-models)) by default, modeling the inverse relationship between traveltime and surface slope.
 
 - **Smoothed Surface Slope Safeguard**: A user-defined slope floor (`slope_floor_deg`, default <i>5°</i>) clamps low-gradient slope angles prior to division, preventing numerical singularities.
 
@@ -114,7 +114,7 @@ Reconstructs continuous thickness <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevat
   $$D(x,y) = \frac{P_{\text{D}}(x,y)}{\sin(\alpha_{\text{opt}}(x,y))}$$
   </p>
 
-- **Direct `"D"` Baseline**: Directly interpolates (migrated) survey point depths <i>D</i><sub>i</sub> using <b>Universal Kriging</b> with the physically-informed <b>SIA drift model</b> ([[`"sia"`](#universal-kriging-drift-models)]) by default.
+- **Direct `"D"` Baseline**: Directly interpolates (migrated) survey point depths <i>D</i><sub>i</sub> using <b>Universal Kriging</b> with the physically-informed <b>SIA drift model</b> ([`["sia"]`](#universal-kriging-drift-models)) by default.
 
 Alongside depth predictions, the Kriging estimation variance is converted to standard error in meters ($\sigma_{\text{depth}} = \sqrt{\sigma^2}$) to map spatial depth uncertainty across the entire domain - see [here](#kriging-uncertainty-derivation) for details.
 
