@@ -48,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Scoped `drift_analyzer` strictly per-pass under `kriging_parameters`: `pre_migration.drift_analyzer` (Pass 1) and `post_migration.drift_analyzer` (Pass 2).
   - Added `pre_drift_analyzer` and `post_drift_analyzer` parameters to `Solver.__init__` and propagated pass configs from `Solver.from_config()`.
   - Retained CLI `--drift-analyzer` flag as an on-the-fly master override enabling the Drift Analyzer across all Universal Kriging passes during runtime.
-  - Updated `README.md` parameter reference table and CLI command documentation.
+- **[DEM Half-Domain Limits Logging] (`src/pysole/variogram.py`)**:
+  - `optimize_bss_variance()` now logs `DEM Domain Extent Lx=...m, Ly=...m -> Half-Domain Limits: k_c,min = ... rad/m, λ_max = ... m` immediately after the Nyquist limits line, pairing both the high-frequency and low-frequency spectral search bounds for the BSS variogram optimization filter.
 - **[Docs] (`README.md`, `docs/`)**: removed `compute_uncertainty`, documented `max_memory_fraction`, per-pass `drift_analyzer`, σ_T units, and the memory guard; the README `Solver` example uses `calculate_bedrock()` / `finalize_bedrock()`; practice guide section 6 rewritten.
 
 ## [0.4.3] - 2026-10-08

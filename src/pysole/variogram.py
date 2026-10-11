@@ -423,6 +423,14 @@ def optimize_bss_variance(
         f"   DEM Spatial Resolution dx={dx:.1f}m, dy={dy:.1f}m -> Nyquist Limits: "
         f"k_Nyquist = {k_nyquist:.4f} rad/m, λ_Nyquist = {lambda_nyquist:.1f} m"
     )
+    Lx = abs(dx) * N_cols
+    Ly = abs(dy) * M_rows
+    k_half_domain = 4.0 * np.pi / L_max
+    lambda_half_domain = L_max / 2.0
+    logger.info(
+        f"   DEM Domain Extent Lx={Lx:.1f}m, Ly={Ly:.1f}m -> Half-Domain Limits: "
+        f"k_c,min = {k_half_domain:.4f} rad/m, λ_max = {lambda_half_domain:.1f} m"
+    )
 
     use_wavelength = (str(fft_filter_metric).lower().strip() == "wavelength")
 
