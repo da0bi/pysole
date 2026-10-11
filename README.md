@@ -461,7 +461,7 @@ $$\mathbf{W}_{\text{sub}} = \mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}$$
 
 Level-3 BLAS matrix products (such as `np.dot`) use SIMD (*Single Instruction, Multiple Data*) instruction sets to process multiple floating-point values simultaneously per CPU clock cycle. This architecture eliminates lock contention, leverages SIMD hardware acceleration, and guarantees exact numerical invariance (&Delta;&sigma;<sup>2</sup> &lt; 10<sup>−12</sup>) and seamless spatial continuity across arbitrary thread counts and grid boundaries.
 
-To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a relative offset (10<sup>−6</sup> &middot; sill) to the sample block diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization, PySole's Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds).
+To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a relative offset (10<sup>−6</sup> &middot; sill) to the sample block diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization, `PySole`'s Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds).
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Drift Models
