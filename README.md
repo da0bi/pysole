@@ -77,7 +77,7 @@
 #### 1. DEM Loading & Metadata
 Grid spacing (`dx`, `dy`) and spatial bounds are automatically extracted from GeoTIFF and ESRI ASCII DEM metadata headers (and autodetected for 3-column `.csv` tables). If target `dx` and `dy` pixel resolutions are specified, 2D bilinear grid resampling is performed automatically.
 
-For headerless DEM formats (2D `.csv` matrices, `.npy`, or `np.ndarray`), spatial parameters (`origin`, `crs`, `dx`, `dy`) should be provided under `spatial_parameters` to build the spatial metadata object.
+For headerless DEM formats (2D `.csv` matrices, `.npy`, or `np.ndarray`), spatial parameters (`origin`, `crs`, `dx`, `dy`) should be provided under `spatial_parameters` to build the spatial metadata object. See [here](#supported-dem-formats) for more details.
 
 > [!CAUTION]
 > All input datasets (DEM, survey data, and outline geometries) **must share the same projected, metric coordinate reference system** ( `"crs"`, e.g. 'Universal Transverse Mercator' (UTM)). Geographic coordinates (latitude/longitude in degrees) will cause invalid distance, surface slope, and basal shear stress calculations.
@@ -98,7 +98,7 @@ While users are free to apply any available interpolation strategy, two **robust
 - **Smoothed Surface Slope Safeguard**: A user-defined slope floor (`slope_floor_deg`, default <i>5°</i>) clamps low-gradient slope angles prior to division, preventing numerical singularities.
 
 > [!CAUTION]
-> Avoid interpolating a BSS-derived product target (`"P"`) with Universal Kriging applying the `"sia"` drift model! This introduces an unphysical $1/\sin^2(\alpha)$ double-scaling artifact that leads to implausibly large values at low slopes. Use `"sia"` drift only with direct targets (`"T"` or `"D"`).
+> Avoid interpolating a BSS-derived product target (`"P"`) with Universal Kriging applying the `["sia"]` drift model! This introduces an unphysical $1/\sin^2(\alpha)$ double-scaling artifact that leads to implausibly large values at low slopes. Use `["sia"]` drift only with direct targets (`"T"` or `"D"`).
 
 #### 3. 3D Ray-Based Migration
 The migration algorithm solves the Eikonal equation to relocate subsurface reflection points, particularly improving the imaging of steep slopes and overdeepenings. An interactive mode allows users to test different signal propagation velocities and evaluate them through visualizations of migrated depths and the corresponding horizontal survey point displacements induced by the migration process.
