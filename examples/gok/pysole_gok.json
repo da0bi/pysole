@@ -9,8 +9,7 @@
         "g": 9.81,
         "n_cores": -1,
         "log_level": "INFO",
-        "show_progress": true,
-        "drift_analyzer": false
+        "show_progress": true
     },
     "spatial_parameters": {
         "dx": null,

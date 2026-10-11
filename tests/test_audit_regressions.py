@@ -684,14 +684,16 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertTrue(any(f.endswith(".png") for f in os.listdir(out)))
 
     def test_outputs_config_and_defaults_have_no_compute_uncertainty(self):
-        """27. The compute_uncertainty option is gone; max_memory_fraction and inputs.drift_analyzer are in the defaults."""
+        """27. The compute_uncertainty option is gone; inputs.drift_analyzer removed from defaults."""
         from pysole.config import ConfigError, DEFAULT_CONFIG, OutputsConfig, load_config
 
         self.assertNotIn("compute_uncertainty", DEFAULT_CONFIG["outputs"])
         self.assertNotIn("compute_uncertainty", OutputsConfig.__dataclass_fields__)
         self.assertNotIn("compute_uncertainty", OutputsConfig.from_dict({}).to_dict())
         self.assertEqual(DEFAULT_CONFIG["kriging_parameters"]["max_memory_fraction"], 0.5)
-        self.assertIs(DEFAULT_CONFIG["inputs"]["drift_analyzer"], False)
+        self.assertNotIn("drift_analyzer", DEFAULT_CONFIG["inputs"])
+        self.assertIs(DEFAULT_CONFIG["kriging_parameters"]["pre_migration"]["drift_analyzer"], False)
+        self.assertIs(DEFAULT_CONFIG["kriging_parameters"]["post_migration"]["drift_analyzer"], False)
         for bad in (0, -0.1, 0.95, "abc", None):
             with self.assertRaises(ConfigError, msg=repr(bad)):
                 load_config({"kriging_parameters": {"max_memory_fraction": bad}})
@@ -1193,8 +1195,47 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(var_8)))
         self.assertTrue(np.all(var_8 >= 0.0))
 
+    def test_drift_analyzer_parameter_scoping(self):
+        """inputs.drift_analyzer is pruned without backwards compatibility; pre/post migration are scoped per-pass."""
+        from pysole.config import sanitize_config
+        from pysole.solver import Solver
+
+        # 1. Pruned as unknown key from inputs
+        cleaned, unknown = sanitize_config({"inputs": {"drift_analyzer": True}})
+        self.assertIn("inputs.drift_analyzer", unknown)
+        self.assertNotIn("drift_analyzer", cleaned["inputs"])
+
+        # 2. Solver initialization respects per-pass settings
+        dem = np.full((10, 10), 100.0, dtype=np.float64)
+        solver = Solver(
+            dem=dem,
+            dx=5.0,
+            dy=5.0,
+            pre_drift_analyzer=True,
+            post_drift_analyzer=False,
+            show_progress=False,
+        )
+        self.assertTrue(solver.pre_drift_analyzer)
+        self.assertFalse(solver.post_drift_analyzer)
+        self.assertFalse(solver.drift_analyzer)
+
+        # 3. Solver.from_config correctly passes per-pass settings
+        cfg = {
+            "inputs": {"dem_path": "dummy.tif"},
+            "kriging_parameters": {
+                "pre_migration": {"drift_analyzer": False},
+                "post_migration": {"drift_analyzer": True},
+            },
+        }
+        with patch("pysole.solver.load_dem", return_value=(dem, {"dx": 5.0, "dy": 5.0})):
+            solver_cfg = Solver.from_config(cfg)
+            self.assertFalse(solver_cfg.pre_drift_analyzer)
+            self.assertTrue(solver_cfg.post_drift_analyzer)
+            self.assertFalse(solver_cfg.drift_analyzer)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

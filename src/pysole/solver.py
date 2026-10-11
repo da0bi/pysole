@@ -46,11 +46,13 @@ class Solver:
         pre_variogram_model: str = "spherical",
         pre_zero_boundary: bool = True,
         pre_interpolation_target: str = "P",
+        pre_drift_analyzer: bool = False,
         post_kriging_method: str = "universal",
         post_drift_terms: list[str] | None = None,
         post_variogram_model: str = "spherical",
         post_zero_boundary: bool = True,
         post_interpolation_target: str = "P",
+        post_drift_analyzer: bool = False,
         perform_migration: bool = True,
         survey_data_type: str = "one_way_traveltime",
         plots_dir: str | Path | None = None,
@@ -95,6 +97,8 @@ class Solver:
         pre_interpolation_target : str
             Quantity interpolated in the 1st pass: 'P' (default; BSS product P = T * sin(alpha_opt)) or
             'T' (direct traveltimes), see the README parameter reference.
+        pre_drift_analyzer : bool
+            If True, runs the interactive Universal Kriging Drift Analyzer for the 1st pre-migration pass. Default False.
         post_kriging_method : str
             2nd-pass post-migration Kriging approach ('universal', 'ordinary', 'regression'). Default 'universal'.
         post_drift_terms : list of str, optional
@@ -106,6 +110,8 @@ class Solver:
         post_interpolation_target : str
             Quantity interpolated in the 2nd pass: 'P' (default; product P = D * sin(alpha_opt)) or
             'D' (direct migrated depths), see the README parameter reference.
+        post_drift_analyzer : bool
+            If True, runs the interactive Universal Kriging Drift Analyzer for the 2nd post-migration pass. Default False.
         perform_migration : bool
             If True (default), performs 3D Eikonal ray migration on travel times. If False, skips migration.
         survey_data_type : str
@@ -176,12 +182,14 @@ class Solver:
         self.pre_variogram_model = pre_variogram_model
         self.pre_zero_boundary = bool(pre_zero_boundary)
         self.pre_interpolation_target = str(pre_interpolation_target).upper().strip()
+        self.pre_drift_analyzer = bool(pre_drift_analyzer)
 
         self.post_kriging_method = post_kriging_method
         self.post_drift_terms = post_drift_terms if post_drift_terms is not None else ["sia"]
         self.post_variogram_model = post_variogram_model
         self.post_zero_boundary = bool(post_zero_boundary)
         self.post_interpolation_target = str(post_interpolation_target).upper().strip()
+        self.post_drift_analyzer = bool(post_drift_analyzer)
 
         self.perform_migration = perform_migration
         self.survey_data_type = survey_data_type
@@ -667,12 +675,14 @@ class Solver:
         pre_drifts = pre_krig_cfg.get("drift_terms", ["sia"] if str(pre_target).upper() == "T" else [])
         pre_var_model = pre_krig_cfg.get("variogram_model", "spherical")
         pre_zero_boundary = pre_krig_cfg.get("include_zero_boundary_condition", True)
+        pre_drift_analyzer = pre_krig_cfg.get("drift_analyzer", False)
 
         post_target = post_krig_cfg.get("interpolation_target", "P")
         post_method = post_krig_cfg.get("method", "universal" if str(post_target).upper() == "D" else "ordinary")
         post_drifts = post_krig_cfg.get("drift_terms", ["sia"] if str(post_target).upper() == "D" else [])
         post_var_model = post_krig_cfg.get("variogram_model", "spherical")
         post_zero_boundary = post_krig_cfg.get("include_zero_boundary_condition", True)
+        post_drift_analyzer = post_krig_cfg.get("drift_analyzer", False)
 
         opt_cfg = cfg.get("optimization_parameters", {})
         n_cores = inputs.get("n_cores", -1)
@@ -696,11 +706,13 @@ class Solver:
             pre_variogram_model=pre_var_model,
             pre_zero_boundary=pre_zero_boundary,
             pre_interpolation_target=pre_target,
+            pre_drift_analyzer=pre_drift_analyzer,
             post_kriging_method=post_method,
             post_drift_terms=post_drifts,
             post_variogram_model=post_var_model,
             post_zero_boundary=post_zero_boundary,
             post_interpolation_target=post_target,
+            post_drift_analyzer=post_drift_analyzer,
             perform_migration=migration_cfg.get("perform_migration", True),
             survey_data_type=survey_dtype,
             plots_dir=outputs.get("plots_dir", None),
@@ -717,7 +729,6 @@ class Solver:
         )
         solver.config = cfg
         solver.config_path = str(config_path)
-        solver.drift_analyzer = bool(inputs.get("drift_analyzer", False))
         return solver
 
     def get_sample_points(self, stage: str, target_type: str = "P") -> np.ndarray:
@@ -814,7 +825,8 @@ class Solver:
                 )
 
         pass_cfg = self.config.get("kriging_parameters", {}).get(stage_key, {})
-        run_analyzer = bool(pass_cfg.get("drift_analyzer", False) or getattr(self, "drift_analyzer", False))
+        pass_analyzer = self.pre_drift_analyzer if is_pre else self.post_drift_analyzer
+        run_analyzer = bool(getattr(self, "drift_analyzer", False) or pass_analyzer or pass_cfg.get("drift_analyzer", False))
 
         if krig_method.lower() == "ordinary":
             if run_analyzer:

@@ -202,7 +202,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "n_cores": -1,
         "log_level": "INFO",
         "show_progress": True,
-        "drift_analyzer": False,
     },
     "spatial_parameters": {
         "dx": None,

@@ -168,8 +168,7 @@ All execution options can be fully defined in a single JSON configuration file, 
         "g": 9.81,
         "n_cores": -1,
         "log_level": "INFO",
-        "show_progress": true,
-        "drift_analyzer": false
+        "show_progress": true
     },
     "spatial_parameters": {
         "dx": null,
@@ -257,7 +256,6 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
 | | `log_level` | `str` | `"INFO"` | Package logging level verbosity: `"INFO"` (default), `"DEBUG"`, `"WARNING"`, `"ERROR"`, or `"CRITICAL"`. Appends timestamped logs to `pysole.log`. |
 | | `show_progress` | `bool` | `true` | If `true` (default), displays terminal progress bars during heavy processing steps. Set to `false` if running `PySole` in batch processing scripts. |
-| | `drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` for both Kriging passes (same as the `--drift-analyzer` CLI flag or the pass-level `drift_analyzer` options below). |
 | **`spatial_parameters`** | `dx` | `float` | `null` | Target grid resolution along X in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `dy` | `float` | `null` | Target grid resolution along Y in meters. If defined, automatically resamples the DEM grid. If `null`, native resolution is kept. |
 | | `bounds` | `list[float]` | `null` | Optional spatial bounding box `[minx, miny, maxx, maxy]`. Leave `null` by default. Use only to manually override invalid or missing spatial bounds in DEM raster headers (`.asc`, `.tif`). `bounds` are automatically calculated from `origin`, `dx`, `dy`, and grid dimensions for headerless DEMs (`.csv`, `.npy`). |
@@ -719,7 +717,7 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole pysole.json --drift-analyzer
   ```
-  *Runs the Drift Analyzer helper before each Universal Kriging pass. Equivalent to `inputs.drift_analyzer: true`; omitting the flag keeps the value from `pysole.json`. Automatically skipped for Ordinary Kriging.*
+  *Runs the Drift Analyzer helper before each Universal Kriging pass as an on-the-fly override across all passes (equivalent to enabling `drift_analyzer: true` on both Kriging passes). Omitting the flag preserves the per-pass `drift_analyzer` settings configured in `pysole.json`. Automatically skipped for Ordinary Kriging.*
 
   ```bash
   pysole pysole.json --drift-analyzer --profile-col profile_name
