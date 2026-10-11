@@ -86,7 +86,7 @@ For headerless DEM formats (2D `.csv` matrices, `.npy`, or `np.ndarray`), spatia
 #### 2. Pre-Migration Traveltime Interpolation
 Across spatial wavenumber cutoffs <i>k</i><sub>c</sub>, the point products of traveltime observations and corresponding low-pass filtered surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), are evaluated. Once the optimization criterion is satisfied, the optimally smoothed surface slope field, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), is deployed in the subsequent Kriging interpolation.
 
-`PySole` provides two **robust baseline interpolation strategies** depending on `pre_migration.interpolation_target` (users can also test alternative drift configurations using the [Drift Analyzer](#drift-analyzer)):
+While users are free to apply any available interpolation strategy, two **robust baseline interpolation strategies** depending on `pre_migration.interpolation_target` are recommended:
 - **BSS-derived Product `"P"` (Default Baseline)**: `PySole` interpolates <i>P</i><sub>T,i</sub> using <b>Ordinary Kriging</b> (assuming a constant local mean without external drift) with optional zero-traveltime boundary conditions (<i>T</i> = 0 s) to produce the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous signal traveltime field <i>T</i>(<i>x</i>,<i>y</i>) is then reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimally smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)):
 
   <p align="center">
@@ -465,6 +465,8 @@ To guarantee numerical stability during matrix decomposition, diagonal Tikhonov 
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Drift Models
+In principle, the `Drift Analyzer` provides automated ranking of candidate Universal Kriging drift models using quantitative statistical metrics - see [here](docs/drift_analyzer_&_survey_planner.md) for details. However, statistical rankings should not replace glaciological and physical judgment. Users are encouraged to familiarize themselves with the governing assumptions and domain behaviors of each available drift model:
+
 `PySole` provides the following **Single Drift Models**:
 
 - **Shallow Ice Approximation Physical Drift Model (`["sia"]`)**:
