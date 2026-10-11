@@ -25,8 +25,8 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[8. Memory Guard and Kriging Uncertainty](#memory-guard-and-uncertainty)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[9. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br><br>
 [Package Architecture](#package-architecture)<br><br>
-[Command-Line Interface (CLI) Execution](#cli-execution)<br><br>
-[Python API & Quick Start](#python-api-and-quick-start)<br><br>
+[Command Line Interface](#cli)<br><br>
+[Python API & Quick Start](#api)<br><br>
 [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)<br><br>
 [Citation & References](#citation-and-references)
 
@@ -35,7 +35,7 @@
 <a id="key-features"></a>
 ## Key Features
 
-* **JSON Configuration & Terminal CLI Driven:** All processing workflow options can be defined in a [`pysole.json`](#json-configuration) file and executed via Python Application Programming Interface ([API](#python-api-and-quick-start)) or directly from the terminal using the `pysole` command line interface ([CLI](#cli-execution)).
+* **JSON Configuration & Terminal CLI Driven:** All processing workflow options can be defined in a [`pysole.json`](#json-configuration) file and executed via Python Application Programming Interface ([API](#api)) or directly from the terminal using the `pysole` command line interface ([CLI](#cli)).
 * **Multi-Core Parallel Acceleration:** `PySole` supports multi-core CPU parallelization across computationally intensive processing steps.
 * **Automated High-Resolution Diagnostic Plots:** Automatically generates and exports diagnostic figures for each key processing milestone.
 * **5 Supported Digital Elevation Model (DEM) Input and Output Formats:** Seamless loading and exporting of GeoTIFFs (`.tif`), ESRI ASCII Grids (`.asc`, `.txt`), 3-column-CSV matrices (`.csv`, [X, Y, Z]), 2D-CSV matrices (`.csv`, [Z<sub>nx</sub> × Z<sub>ny</sub>]), NumPy binary arrays (`.npy`), and in-memory NumPy 2D arrays (`np.ndarray`) - see [here](#supported-dem-formats) for details.
@@ -658,8 +658,8 @@ Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM 
 
 ---
 
-<a id="cli-execution"></a>
-## Command-Line Interface (CLI) Execution
+<a id="cli"></a>
+## Command Line Interface
 
 `PySole` provides a convenient terminal entry point for executing processing workflows directly from your command line without writing Python scripts.
 
@@ -747,8 +747,8 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
 
 ---
 
-<a id="python-api-and-quick-start"></a>
-## Python API & Quick Start
+<a id="api"></a>
+## Application Programming Interface
 
 `PySole` provides a dual-layer Python API: a **High-Level Solver Orchestrator** for streamlined pipeline execution, and **Decoupled Specialized Sub-Engines** for custom advanced research workflows.
 
