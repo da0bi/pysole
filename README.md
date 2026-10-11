@@ -719,19 +719,20 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole pysole.json --drift-analyzer
   ```
-  *Runs the Drift Analyzer helper (cross-validated ranking of candidate drift models) before each Universal Kriging pass. Equivalent to `inputs.drift_analyzer: true`; omitting the flag keeps the value from `pysole.json`. Automatically skipped for Ordinary Kriging.*
+  *Runs the Drift Analyzer helper before each Universal Kriging pass. Equivalent to `inputs.drift_analyzer: true`; omitting the flag keeps the value from `pysole.json`. Automatically skipped for Ordinary Kriging.*
 
-* **Select the Survey Profile Column for Profile-Wise Cross-Validation:**
   ```bash
-  pysole pysole.json --profile-col profile_name
+  pysole pysole.json --drift-analyzer --profile-col profile_name
   ```
-  *Names the column of the survey CSV that identifies the survey profile / line (matched by header name, so it may be at any position; numeric or text IDs are supported). It enables leave-one-profile-out (LOPO) cross-validation in the Drift Analyzer and overrides `inputs.survey_profile_column`.*
+  *Names the column of the survey data CSV that identifies the survey profile / line. It enables leave-one-profile-out (LOPO) cross-validation in the Drift Analyzer and overrides `inputs.survey_profile_column`.*
+
+  *See [here](docs/drift_analyzer_&_survey_planner.md) for full details and CLI options.*
 
 * **Survey Planner (no survey data required):**
   ```bash
   pysole plan-survey --dem dem.tif --outline outline.geojson --kc 0.0314 --tau 100 --max-km 5 --out-dir results --format tif
   ```
-  *Computes a SIA thickness model and proposes survey tracks within a length budget. For full details and CLI options, see the [`documentation manual`](docs/drift_analyzer_&_survey_planner.md).*
+  *Computes a SIA thickness model and proposes survey tracks within a length budget. See [here](docs/drift_analyzer_&_survey_planner.md) for full details and CLI options.*
 
 * **Show the Installed Version:**
   ```bash
