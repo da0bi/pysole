@@ -465,7 +465,7 @@ To guarantee numerical stability during matrix decomposition, diagonal Tikhonov 
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Drift Models
-In principle, the `Drift Analyzer` provides automated ranking of candidate Universal Kriging drift models using quantitative statistical metrics - see [here](docs/drift_analyzer_&_survey_planner.md) for details. However, statistical rankings should not replace glaciological and physical judgment. Users are encouraged to familiarize themselves with the governing assumptions and domain behaviors of each available drift model:
+In principle, the `Drift Analyzer` provides automated ranking of candidate Universal Kriging drift models using quantitative statistical metrics - see [here](docs/drift_analyzer_&_survey_planner.md) for details. However, statistical rankings should not replace glaciological and physical judgment. Users are therefore encouraged to check the governing assumptions and spatial behavior of whichever drift model they consider applying.
 
 `PySole` provides the following **Single Drift Models**:
 
