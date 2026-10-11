@@ -26,7 +26,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;[9. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Command Line Interface](#cli)<br><br>
-[Python API & Quick Start](#api)<br><br>
+[Application Programming Interface](#api)<br><br>
 [Real-World Example: Wurtenkees Glacier](#real-world-example-wurtenkees-glacier)<br><br>
 [Citation & References](#citation-and-references)
 
