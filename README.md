@@ -375,7 +375,7 @@ Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and c
 
 #### Derivation of FFT Filter Parameter Defaults (`kc_max`, `kc_min`, `lambda_min`, `lambda_max`, `n_steps`)
 
-When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` dynamically derives physically sound parameter defaults based on the DEM spatial resolution (&Delta;<i>x</i>, &Delta;<i>y</i>) and total domain extent (<i>L</i><sub>max</sub> = max(<i>N</i><sub>x</sub> &middot; |<i>dx</i>|, <i>M</i><sub>y</sub> &middot; |<i>dy</i>|)). The DEM spatial boundaries as well as the active cutoff wavenumbers ($k_{\text{Nyquist}}$, $k_{\text{c,min}}$) and wavelengths ($\lambda_{\text{Nyquist}}$, $\lambda_{\text{c,max}}$) defining the default spectral search range are logged to the console and in `pysole.log`.
+When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` dynamically derives physically sound parameter defaults based on the DEM spatial resolution (&Delta;<i>x</i>, &Delta;<i>y</i>) and total domain extent (<i>L</i><sub>max</sub> = max(<i>N</i><sub>x</sub> &middot; |<i>dx</i>|, <i>M</i><sub>y</sub> &middot; |<i>dy</i>|)). The DEM spatial boundaries as well as the active cutoff wavenumbers ($k_{\text{c,min}}$, $k_{\text{Nyquist}}$) and wavelengths ($\lambda_{\text{Nyquist}}$, $\lambda_{\text{c,max}}$) defining the default spectral search range are logged to the console and in `pysole.log`.
 
 - **Maximum Frequency Cutoff <i>k</i><sub>c,max</sub> and Minimum Wavelength <i>&lambda;</i><sub>min</sub>**:
    - **`kc_max` Default**: Defaults to the spatial Nyquist wavenumber limit of the DEM grid:
