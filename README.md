@@ -744,6 +744,7 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole --help
   ```
+  *Prints the complete list of available CLI flags, arguments, and usage descriptions and exits (`-h` is equivalent).*
 
 > **Error handling:** a missing configuration file, invalid JSON, or an invalid configuration value (e.g. a non-boolean value such as `"maybe"` for a boolean parameter) is reported as a single `pysole: error: ...` line on stderr with exit status 1. Add `-v` / `--debug` to get the full traceback. Boolean parameters accept JSON `true`/`false` (also `0`/`1` and the strings `"true"`/`"false"`, `"yes"`/`"no"`, `"on"`/`"off"`, case-insensitive); `null` falls back to the default.
 
