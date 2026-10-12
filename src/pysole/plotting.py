@@ -19,8 +19,27 @@ import numpy as np
 from .logging import logger
 
 
-def _save_figure(plt_obj, plots_dir: str | Path | os.PathLike | None, filename: str) -> Path | None:
-    """Helper to save Matplotlib figures to target directory using pathlib.Path."""
+def _save_figure(plt_obj: Any, plots_dir: str | Path | os.PathLike | None, filename: str) -> Path | None:
+    """
+    Save an active Matplotlib figure to the specified directory.
+
+    Creates parent directories if necessary and renders the figure at 300 DPI
+    with tight bounding box cropping.
+
+    Parameters
+    ----------
+    plt_obj : Any
+        Matplotlib `pyplot` module or `Figure` object.
+    plots_dir : str, Path, os.PathLike, or None
+        Destination directory path. If None or empty, no file is saved.
+    filename : str
+        Target image filename (e.g., '01_unfiltered_variogram.png').
+
+    Returns
+    -------
+    target_path : Path or None
+        Resolved `Path` of the saved figure, or None if `plots_dir` was empty.
+    """
     if not plots_dir:
         return None
     target_dir = Path(plots_dir).expanduser().resolve()
@@ -32,7 +51,20 @@ def _save_figure(plt_obj, plots_dir: str | Path | os.PathLike | None, filename: 
 
 
 def _safe_interactive_pause(plt_obj: Any, duration: float = 0.5) -> None:
-    """Safe wrapper for interactive Matplotlib rendering that avoids warnings on Agg backend."""
+    """
+    Safely trigger interactive figure rendering without emitting warnings on headless backends.
+
+    Parameters
+    ----------
+    plt_obj : Any
+        Matplotlib `pyplot` module.
+    duration : float, default=0.5
+        Pause duration in seconds for GUI event loop processing.
+
+    Returns
+    -------
+    None
+    """
     try:
         if str(matplotlib.get_backend()).lower() != "agg":
             plt_obj.draw()
@@ -41,8 +73,20 @@ def _safe_interactive_pause(plt_obj: Any, duration: float = 0.5) -> None:
         pass
 
 
-def _get_transparent_cmap(cmap_name: str):
-    """Returns a Matplotlib colormap with transparent NaN background."""
+def _get_transparent_cmap(cmap_name: str) -> matplotlib.colors.Colormap:
+    """
+    Return a Matplotlib colormap configured with a fully transparent NaN background.
+
+    Parameters
+    ----------
+    cmap_name : str
+        Name of the base Matplotlib colormap (e.g., 'plasma', 'viridis', 'magma').
+
+    Returns
+    -------
+    matplotlib.colors.Colormap
+        Colormap copy with the 'bad' (NaN / NoData) color assigned an alpha of 0.0.
+    """
     cmap = plt.get_cmap(cmap_name).copy()
     if hasattr(cmap, "with_extremes"):
         return cmap.with_extremes(bad=(1.0, 1.0, 1.0, 0.0))
@@ -53,7 +97,21 @@ def _get_transparent_cmap(cmap_name: str):
 
 
 def _get_cell_edge_extent(x_coords: np.ndarray, y_coords: np.ndarray) -> list[float]:
-    """Calculates cell-edge extent [left, right, bottom, top] from grid cell center coordinates."""
+    """
+    Calculate cell-edge spatial extent [left, right, bottom, top] from cell centers.
+
+    Parameters
+    ----------
+    x_coords : np.ndarray
+        1D array of length N_cols with cell center X coordinates in meters.
+    y_coords : np.ndarray
+        1D array of length M_rows with cell center Y coordinates in meters.
+
+    Returns
+    -------
+    list of float
+        Four-element bounding extent [minx, maxx, miny, maxy] in meters for `plt.imshow`.
+    """
     dx = abs(x_coords[1] - x_coords[0]) if len(x_coords) > 1 else 1.0
     dy = abs(y_coords[1] - y_coords[0]) if len(y_coords) > 1 else 1.0
     return [
@@ -75,8 +133,43 @@ def plot_unfiltered_product_variogram(
     prefix: str = "01_",
     stage_name: str = "stage1",
     interactive: bool = False,
-):
-    """Plots the experimental isotropic variogram and fitted theoretical model for initial product."""
+) -> None:
+    """
+    Plot the experimental isotropic variogram and fitted theoretical model for the product field.
+
+    Visualizes the empirical semivariance values across discrete lag distance bins
+    alongside the fitted theoretical curve (e.g., spherical variogram model) and marks
+    the calculated spatial correlation range.
+
+    Parameters
+    ----------
+    distances : np.ndarray
+        1D array of lag bin centers h in meters.
+    semivars : np.ndarray
+        1D array of empirical semivariance values gamma(h).
+    model_curve : dict of str to np.ndarray
+        Dictionary containing fine-resolution model evaluation vectors:
+        - ``'h'``: Dense lag distance array in meters.
+        - ``'gamma'``: Evaluated model semivariance array.
+    a_range : float
+        Fitted spatial correlation range parameter a in meters.
+    sill : float
+        Fitted structural sill variance parameter c.
+    nugget : float
+        Fitted nugget variance parameter c0.
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    prefix : str, default="01_"
+        File prefix for ordering diagnostic plots.
+    stage_name : str, default="stage1"
+        Stage name identifier included in the plot filename.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
 
@@ -110,8 +203,40 @@ def plot_bss_kc_optimization_variograms(
     prefix: str = "01_",
     stage_name: str = "stage1",
     interactive: bool = False,
-):
-    """Plots normalized product variogram comparison for ALL evaluated corner frequencies kc."""
+) -> None:
+    """
+    Plot normalized product variograms and variance curve across candidate corner frequencies kc.
+
+    Generates a 2-panel diagnostic figure:
+    - Panel 1: Normalized semivariance curves gamma(h) / Mean^2 for all tested cutoff
+      wavenumbers, highlighting the optimum minimum-variance kc.
+    - Panel 2: Product field variance plotted as a function of corner frequency kc (rad/m),
+      marking the global minimum identified by the spectral optimization.
+
+    Parameters
+    ----------
+    evaluated_variograms : list of dict
+        List of dictionaries for each tested corner frequency, each containing:
+        - ``'kc'``: Corner wavenumber in rad/m.
+        - ``'distance'``: Lag distances array in meters.
+        - ``'gamma_norm'``: Normalized semivariance array.
+    best_kc : float
+        Optimal corner frequency wavenumber kc in rad/m minimizing product field variance.
+    all_kc_variances : list of tuple of (float, float)
+        List of (kc, variance) pairs evaluated during the frequency sweep.
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    prefix : str, default="01_"
+        File prefix for ordering diagnostic plots.
+    stage_name : str, default="stage1"
+        Stage name identifier included in the plot filename.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
 
@@ -168,8 +293,44 @@ def plot_migration_displacement_vectors(
     outline_mask: np.ndarray | None = None,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
-):
-    """Plots 2-panel figure matching MIG.m: traveltime field with horizontal ray displacement vectors and migrated survey points."""
+) -> None:
+    """
+    Plot 3D ray-tracing migration displacement vectors and migrated sounding depths.
+
+    Generates a 2-panel glaciological diagnostic figure:
+    - Upper Panel: Interpolated two-way traveltime field (in nanoseconds) overlaid with
+      horizontal displacement vectors (quiver arrows) illustrating the lateral shift
+      from apex points to true basal reflection points driven by cross-profile slope.
+    - Lower Panel: Spatial scatter plot comparing pre-migrated surface sounding locations
+      (black dots) with migrated bed reflection points colored by true bedrock depth (in meters).
+
+    Parameters
+    ----------
+    travel_time_grid : np.ndarray
+        2D array of interpolated two-way traveltimes in nanoseconds (ns) of shape (M_rows, N_cols).
+    survey_points : np.ndarray
+        Pre-migration survey point coordinates of shape (N, >=2) in projected meters.
+    migrated_points : np.ndarray
+        Migrated point array of shape (N, 4) containing [x_mig, y_mig, z_surf, depth_mig].
+    dxi : np.ndarray
+        Horizontal displacement components along the easting/X axis in meters.
+    dyi : np.ndarray
+        Horizontal displacement components along the northing/Y axis in meters.
+    x_coords : np.ndarray
+        1D array of cell center X coordinates in meters.
+    y_coords : np.ndarray
+        1D array of cell center Y coordinates in meters.
+    outline_mask : np.ndarray, optional
+        2D boolean active domain mask of shape (M_rows, N_cols).
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
         from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -280,12 +441,42 @@ UNCERTAINTY_PLACEHOLDER_TEXT = "Uncertainty not available\n(see log)"
 
 
 def _uncertainty_unavailable(grid: np.ndarray | None) -> bool:
-    """True if an uncertainty grid is missing or contains no finite value (Kriging variance skipped)."""
+    """
+    Check if an uncertainty grid is missing or lacks finite numerical values.
+
+    Parameters
+    ----------
+    grid : np.ndarray or None
+        2D uncertainty array to inspect.
+
+    Returns
+    -------
+    bool
+        True if grid is None or contains no finite values; False otherwise.
+    """
     return grid is None or not np.any(np.isfinite(grid))
 
 
-def _draw_uncertainty_placeholder(ax, plot_extent: list[float] | None, title: str) -> None:
-    """Fills an uncertainty panel with a labelled placeholder (never an all-zero uncertainty map)."""
+def _draw_uncertainty_placeholder(ax: Any, plot_extent: list[float] | None, title: str) -> None:
+    """
+    Fill an uncertainty panel with a clean diagnostic placeholder when variance was skipped.
+
+    Prevents rendering confusing all-zero uncertainty maps when variance computation
+    was disabled for memory savings or speed.
+
+    Parameters
+    ----------
+    ax : Any
+        Matplotlib axis object.
+    plot_extent : list of float or None
+        Spatial extent [minx, maxx, miny, maxy] in meters.
+    title : str
+        Panel title string.
+
+    Returns
+    -------
+    None
+    """
     if plot_extent is not None and len(plot_extent) == 4:
         ax.set_xlim(plot_extent[0], plot_extent[1])
         ax.set_ylim(plot_extent[2], plot_extent[3])
@@ -307,8 +498,36 @@ def plot_kriging_bedrock_and_uncertainty(
     kriged_variance: np.ndarray | None = None,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
-):
-    """Plots 2-panel figure showing interpolated bedrock elevation and Kriging standard uncertainty (± m)."""
+) -> None:
+    """
+    Plot 2-panel figure showing Kriging-interpolated bedrock elevation and standard uncertainty.
+
+    Visualizes:
+    - Left Panel: Predicted bedrock topography in meters with scattered survey point overlays.
+    - Right Panel: Kriging standard error field (+- meters), representing spatial interpolation
+      uncertainty conditioned on data spacing and variogram structure.
+
+    Parameters
+    ----------
+    kriged_bedrock : np.ndarray
+        2D array of interpolated bedrock elevations in meters of shape (M_rows, N_cols).
+    kriged_std : np.ndarray, optional
+        2D array of Kriging standard deviation (+- meters). If None, calculated from `kriged_variance`.
+    pts : np.ndarray, optional
+        Scattered survey points coordinates of shape (N, >=2) in meters.
+    plot_extent : list of float, optional
+        Four-element bounding box [minx, maxx, miny, maxy] in meters.
+    kriged_variance : np.ndarray, optional
+        2D array of Kriging estimation variance in meters^2.
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
 
@@ -369,8 +588,34 @@ def plot_calculated_bedrock_map(
     smoothing_sigma: float = 1.5,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
-):
-    """Plots calculated bedrock elevation with surrounding terrain contours."""
+) -> None:
+    """
+    Plot calculated bedrock elevation map with surrounding terrain contours.
+
+    Visualizes the raw unblended bedrock elevation grid overlaid with 10-meter
+    topographic contour lines and the active body boundary outline.
+
+    Parameters
+    ----------
+    bedrock_grid : np.ndarray
+        2D array of bedrock elevations in meters of shape (M_rows, N_cols).
+    outline_mask : np.ndarray or None
+        2D boolean active domain mask of shape (M_rows, N_cols).
+    plot_extent : list of float
+        Four-element bounding box [minx, maxx, miny, maxy] in meters.
+    smooth_bedrock : bool, default=False
+        If True, applies a Gaussian filter to the contouring grid to produce smooth lines.
+    smoothing_sigma : float, default=1.5
+        Standard deviation in pixel units for Gaussian contour smoothing filter.
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
 
@@ -440,8 +685,29 @@ def plot_final_blended_bedrock_map(
     plot_extent: list[float],
     plots_dir: str | Path | None = None,
     interactive: bool = False,
-):
-    """Plots final geomorphologically blended bedrock elevation raster."""
+) -> None:
+    """
+    Plot final geomorphologically blended bedrock elevation raster.
+
+    Displays the seamlessly blended continuous bedrock topography where internal
+    interpolated bed elevations taper smoothly into the ice-free proglacial DEM
+    along the perimeter margins.
+
+    Parameters
+    ----------
+    blended_bedrock : np.ndarray
+        2D array of blended bedrock elevations in meters of shape (M_rows, N_cols).
+    plot_extent : list of float
+        Four-element bounding box [minx, maxx, miny, maxy] in meters.
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
 
@@ -473,8 +739,39 @@ def plot_final_ice_thickness_and_uncertainty(
     mean_unc: float,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
-):
-    """Plots final ice thickness map and Kriging standard uncertainty field (+- meters)."""
+) -> None:
+    """
+    Plot 2-panel figure showing final ice thickness map and Kriging standard uncertainty.
+
+    Generates:
+    - Left Panel: Continuous ice thickness distribution H(x, y) = S(x, y) - B(x, y) in meters,
+      masked to the active glacier perimeter with reported domain-average mean thickness.
+    - Right Panel: Kriging standard uncertainty field (+- meters), highlighting regions of
+      dense sounding coverage (low uncertainty) versus unprobed tributary basins (high uncertainty).
+
+    Parameters
+    ----------
+    final_thickness : np.ndarray
+        2D array of ice thickness in meters of shape (M_rows, N_cols).
+    kriged_std : np.ndarray
+        2D array of Kriging standard uncertainty (+- meters) of shape (M_rows, N_cols).
+    outline_mask : np.ndarray or None
+        2D boolean active domain mask of shape (M_rows, N_cols).
+    plot_extent : list of float
+        Four-element bounding box [minx, maxx, miny, maxy] in meters.
+    mean_thick : float
+        Mean ice thickness across active glacier pixels in meters.
+    mean_unc : float
+        Mean Kriging uncertainty across active glacier pixels in meters.
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
 
@@ -546,8 +843,31 @@ def plot_final_ice_thickness_histogram(
     mean_thick: float,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
-):
-    """Plots individual histogram of final ice depth distribution indicating mean ice depth."""
+) -> None:
+    """
+    Plot statistical frequency histogram of the final ice thickness distribution.
+
+    Renders a binned frequency distribution of ice depth across active glacier pixels,
+    marking the domain mean with a dashed line and providing summary statistics
+    (mean, median, standard deviation, and maximum ice thickness in meters).
+
+    Parameters
+    ----------
+    final_thickness : np.ndarray
+        2D array of ice thickness in meters of shape (M_rows, N_cols).
+    outline_mask : np.ndarray or None
+        2D boolean active domain mask of shape (M_rows, N_cols).
+    mean_thick : float
+        Mean ice thickness across active glacier pixels in meters.
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
 
@@ -612,8 +932,39 @@ def plot_final_basal_shear_stress_and_uncertainty(
     mean_bss_unc: float,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
-):
-    """Plots 2-panel figure showing Basal Shear Stress distribution (\u03c4b [kPa]) and Kriging BSS uncertainty (\u00b1 kPa)."""
+) -> None:
+    """
+    Plot 2-panel figure showing Basal Shear Stress distribution and propagated Kriging uncertainty.
+
+    Generates:
+    - Left Panel: Basal shear stress field tau_b(x, y) = rho_ice * g * H * sin(alpha) in kPa
+      across the glaciated body, with domain-average mean stress reported in the header.
+    - Right Panel: Propagated standard uncertainty field (+- kPa) derived from Kriging bed
+      elevation variance and local surface slope.
+
+    Parameters
+    ----------
+    final_bss : np.ndarray
+        2D array of basal shear stress in kPa of shape (M_rows, N_cols).
+    bss_std : np.ndarray
+        2D array of propagated BSS standard uncertainty (+- kPa) of shape (M_rows, N_cols).
+    outline_mask : np.ndarray or None
+        2D boolean active domain mask of shape (M_rows, N_cols).
+    plot_extent : list of float
+        Four-element bounding box [minx, maxx, miny, maxy] in meters.
+    mean_bss : float
+        Domain-average mean basal shear stress in kPa.
+    mean_bss_unc : float
+        Domain-average mean BSS standard uncertainty in kPa.
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
 
@@ -688,8 +1039,31 @@ def plot_final_basal_shear_stress_histogram(
     mean_bss: float,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
-):
-    """Plots individual histogram of Basal Shear Stress distribution (\u03c4b [kPa]) indicating mean BSS value."""
+) -> None:
+    """
+    Plot statistical frequency histogram of the final Basal Shear Stress distribution.
+
+    Renders a binned frequency distribution of basal shear stress values across active
+    glacier pixels in kPa, marking the domain mean and providing key summary statistics
+    (mean, median, standard deviation, and peak driving stress).
+
+    Parameters
+    ----------
+    final_bss : np.ndarray
+        2D array of basal shear stress in kPa of shape (M_rows, N_cols).
+    outline_mask : np.ndarray or None
+        2D boolean active domain mask of shape (M_rows, N_cols).
+    mean_bss : float
+        Mean basal shear stress across active glacier pixels in kPa.
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+
+    Returns
+    -------
+    None
+    """
     try:
         import matplotlib.pyplot as plt
 

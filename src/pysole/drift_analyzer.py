@@ -18,7 +18,35 @@ from .interpolation import DriftBasis, DualKrigingSolver
 
 @dataclass
 class CandidateDriftResult:
-    """Diagnostic evaluation metrics for a candidate Universal Kriging drift model."""
+    """
+    Diagnostic evaluation metrics for a candidate Universal Kriging drift model.
+
+    Attributes
+    ----------
+    name : str
+        Candidate model identifier (e.g. 'sia', 'linear_xy', 'full_physical').
+    terms : list of str
+        List of individual primitive drift term names included in this model.
+    n_terms : int
+        Total number of drift feature columns added to the Kriging system.
+    vif_max : float
+        Maximum Variance Inflation Factor across all drift covariates.
+        Values exceeding 5.0 to 10.0 indicate high multicollinearity.
+    is_multicollinear : bool
+        True if `vif_max` exceeds the configured multicollinearity threshold.
+    cv_rmse : float
+        Cross-validation Root Mean Squared Error [m or ns].
+    cv_mae : float
+        Cross-validation Mean Absolute Error [m or ns].
+    cv_r2 : float
+        Cross-validation Coefficient of Determination :math:`R^2` (dimensionless).
+    aicc : float
+        Corrected Akaike Information Criterion balancing goodness-of-fit against model complexity.
+    is_penalized : bool, default False
+        True if the candidate was penalized due to severe multicollinearity or physical invalidity.
+    warning_msg : str or None, optional
+        Diagnostic warning note (e.g. SIA slope double-scaling warning on product target).
+    """
     name: str
     terms: list[str]
     n_terms: int
@@ -52,6 +80,33 @@ CANDIDATE_DRIFT_MODELS: list[dict[str, Any]] = [
 class DriftAnalyzer:
     """
     Automated diagnostic recommendation engine for Universal Kriging drift models.
+
+    Assists glaciologists and geophysicists in selecting the physically most sound and
+    statistically robust drift model for Universal Kriging. It evaluates:
+    1. **Multicollinearity via Variance Inflation Factors (VIF)**: Identifies redundant
+       covariates that cause ill-conditioned Kriging covariance matrices.
+    2. **Spatial Cross-Validation (LOPO-CV & Buffer LOOCV)**: Computes out-of-sample
+       prediction accuracy (RMSE, MAE, R²) using spatial blocking.
+    3. **Model Parsimony via AICc**: Balances reconstruction fidelity against parameter
+       count to prevent overfitting to sparse radar profiles.
+
+    Parameters
+    ----------
+    mode : str, default "pre_migration"
+        Processing stage: 'pre_migration' (traveltimes) or 'post_migration' (bedrock depths).
+    target_name : str, default "traveltime"
+        Physical target quantity name ('traveltime' or 'depth').
+    interpolation_target : str, default "P"
+        Interpolation target variable: 'P' (product :math:`P = D \\cdot \\sin\\alpha` or :math:`T \\cdot \\sin\\alpha`)
+        or direct measurement ('T' or 'D').
+    include_zero_boundary : bool, default True
+        Whether zero-value boundary constraints on the glacier outline are active.
+    survey_profile_column : str, optional
+        CSV column name identifying individual survey profiles for Leave-One-Profile-Out CV.
+    vif_threshold : float, default 10.0
+        Variance Inflation Factor threshold above which models are flagged as multicollinear.
+    slope_floor_deg : float, default 5.0
+        Minimum slope angle in degrees [°] for stabilizing the SIA drift denominator.
     """
 
     def __init__(
@@ -74,7 +129,28 @@ class DriftAnalyzer:
 
     def calculate_vif(self, X_drift: np.ndarray) -> tuple[float, list[float]]:
         """
-        Calculates Variance Inflation Factor (VIF) for each column in a drift basis matrix using exact linear least-squares regression.
+        Calculates Variance Inflation Factor (VIF) for each column in a drift basis matrix.
+
+        The Variance Inflation Factor for covariate :math:`i` is:
+        .. math::
+            \\text{VIF}_i = \\frac{1}{1 - R_i^2}
+
+        where :math:`R_i^2` is the coefficient of determination from regressing column :math:`i`
+        against all remaining drift columns. A VIF exceeding 5 to 10 indicates that the
+        covariate is largely collinear with other terms, which can cause Kriging systems
+        to become singular or produce wild extrapolation artifacts.
+
+        Parameters
+        ----------
+        X_drift : np.ndarray
+            Evaluated drift covariate matrix with shape ``(n_samples, n_features)``.
+
+        Returns
+        -------
+        max_vif : float
+            Maximum VIF value across all evaluated covariates.
+        vif_list : list of float
+            Individual VIF values for each covariate column.
         """
         n_samples, n_features = X_drift.shape
         if n_features <= 1:
@@ -114,7 +190,24 @@ class DriftAnalyzer:
         target_values: np.ndarray,
     ) -> pd.DataFrame:
         """
-        Computes linear Partial Correlations (Pearson & Spearman) and Random Forest Permutation Importances.
+        Computes correlation statistics and Random Forest permutation importances.
+
+        Screens potential drift covariates by calculating:
+        - Pearson linear correlation coefficient :math:`r`.
+        - Spearman non-parametric rank correlation :math:`\\rho`.
+        - Random Forest permutation feature importance (mean decrease in accuracy).
+
+        Parameters
+        ----------
+        covariates_df : pd.DataFrame
+            DataFrame of spatial covariate columns extracted at survey pick locations.
+        target_values : np.ndarray
+            1D array of observed target values (traveltimes [ns] or depths [m]).
+
+        Returns
+        -------
+        importance_df : pd.DataFrame
+            Ranked table of features ordered by Random Forest permutation importance.
         """
         feature_cols = [c for c in covariates_df.columns if c not in ["X", "Y"]]
         if not feature_cols:
@@ -177,7 +270,48 @@ class DriftAnalyzer:
         profile_ids: np.ndarray | None = None,
     ) -> list[CandidateDriftResult]:
         """
-        Runs fast Dual Kriging Spatial Cross-Validation across candidate single/multi-drift models.
+        Executes fast Dual Kriging Spatial Cross-Validation across candidate drift models.
+
+        Supports two spatial validation strategies:
+        1. **Leave-One-Profile-Out (LOPO-CV)**: Systematically leaves out entire radar
+           profiles to measure how well the drift model predicts unprobed glacier sectors.
+        2. **Spatial Buffer LOOCV**: Leaves out individual points plus all neighbors
+           within a spatial buffer radius :math:`r_{\\text{buffer}} \\approx a_0 / 2`
+           (half the variogram range) to eliminate spatial autocorrelation leakage.
+
+        Parameters
+        ----------
+        x_pts : np.ndarray
+            X coordinates of survey observations [m].
+        y_pts : np.ndarray
+            Y coordinates of survey observations [m].
+        z_values : np.ndarray
+            Target values (traveltimes [ns] or depths [m]).
+        dem_grid : np.ndarray
+            2D surface DEM elevation grid [m].
+        dx : float
+            DEM spatial resolution along X [m].
+        dy : float
+            DEM spatial resolution along Y [m].
+        bounds : tuple of float
+            DEM bounding box ``(minx, miny, maxx, maxy)`` [m].
+        alpha_opt_deg : np.ndarray
+            2D optimal surface slope grid in degrees [°].
+        variogram_model : str
+            Variogram model name (e.g. 'spherical').
+        variogram_params : dict of str to float
+            Fitted variogram parameters ('range', 'sill', 'nugget').
+        cv_mode : str, default "buffer"
+            Cross-validation mode: 'lopo' or 'buffer'.
+        buffer_radius_m : float, default 50.0
+            Spatial exclusion buffer radius [m] for buffer LOOCV.
+        profile_ids : np.ndarray, optional
+            Profile ID labels for each survey point.
+
+        Returns
+        -------
+        ranked_candidates : list of CandidateDriftResult
+            Sorted list of candidate drift models, ranked from best to worst.
         """
         n_points = len(z_values)
         c0 = variogram_params.get("nugget", 0.0)
@@ -372,7 +506,43 @@ class DriftAnalyzer:
         interactive: bool = True,
     ) -> list[CandidateDriftResult]:
         """
-        Executes complete diagnostic pipeline and handles interactive terminal session.
+        Executes the full diagnostic workflow and presents candidate drift model rankings.
+
+        Extracts spatial covariates, performs multicollinearity checks, conducts spatial
+        cross-validation (LOPO-CV or buffer LOOCV), computes AICc parsimony scores, and
+        provides an interactive command-line selection interface.
+
+        Parameters
+        ----------
+        x_pts : np.ndarray
+            X coordinates of survey soundings [m].
+        y_pts : np.ndarray
+            Y coordinates of survey soundings [m].
+        z_values : np.ndarray
+            Observed target values (traveltime [ns] or depth [m]).
+        dem_grid : np.ndarray
+            2D surface digital elevation model [m].
+        dx : float
+            Raster spatial resolution along X [m].
+        dy : float
+            Raster spatial resolution along Y [m].
+        bounds : tuple of float
+            Raster bounding box ``(minx, miny, maxx, maxy)`` [m].
+        alpha_opt_deg : np.ndarray
+            2D surface slope grid in degrees [°].
+        variogram_model : str
+            Fitted variogram model name (e.g. 'spherical').
+        variogram_params : dict of str to float
+            Fitted variogram parameters dictionary containing 'range', 'sill', 'nugget'.
+        profile_data : np.ndarray, optional
+            Profile ID labels for each sounding point.
+        interactive : bool, default True
+            If True and in an interactive terminal, displays interactive model selection prompt.
+
+        Returns
+        -------
+        recommendations : list of CandidateDriftResult
+            Ranked list of evaluated candidate models, with the recommended model at index 0.
         """
         t_char = "T" if "travel" in str(self.target_name).lower() else "D"
         target_descr = f"Product P(x,y) = {t_char}*sin(alpha)" if self.interpolation_target == "P" else f"Direct Field {self.interpolation_target}(x,y)"

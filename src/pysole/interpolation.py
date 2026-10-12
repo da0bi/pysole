@@ -1,8 +1,14 @@
 """
-Interpolation, Margin Blending, Kriging, and Random Forest Hole Filling.
-Ported from MATLAB script INTERPOL.m by Daniel Binder (2011) and PySole modern workflow.
-Supports Ordinary Kriging, Universal Kriging (default SIA physical drift & quadratic drift), and Regression Kriging.
-Uses high-performance built-in vector Dual Kriging.
+Geostatistical Kriging Interpolation, Physical SIA Drift Modeling, Margin Blending, and ML Gap Filling.
+
+Provides advanced spatial interpolation routines for reconstructing continuous bedrock
+topography from scattered radar or seismic sounding soundings:
+- Ordinary Kriging assuming constant local or global mean.
+- Universal Kriging incorporating glaciological Shallow Ice Approximation (SIA) physical
+  drift (U_sia = 1 / sin(alpha)), surface elevation, surface curvature, and spatial polynomials.
+- Dual Kriging vector solver for high-performance chunked parallel grid evaluation.
+- Geomorphological perimeter margin blending ensuring smooth transitions to proglacial terrain.
+- Random Forest machine learning for intelligent gap filling across unmeasured basins.
 """
 
 from dataclasses import dataclass
@@ -26,15 +32,34 @@ from .memory import MAX_FRACTION_CAP, kriging_chunk_size, plan_native_kriging, r
 class KrigingResult:
     """
     Typed data container storing Kriging bedrock elevation and variance interpolation outputs.
+
+    Parameters
+    ----------
+    bedrock_grid : np.ndarray
+        2D array of shape (M_rows, N_cols) containing interpolated bedrock elevations in meters.
+    variance_grid : np.ndarray
+        2D array of shape (M_rows, N_cols) containing Kriging estimation variance in meters^2,
+        or filled with NaNs if variance computation was skipped or disabled.
     """
     bedrock_grid: np.ndarray   # Interpolated bedrock elevation grid [m]
-    variance_grid: np.ndarray  # Kriging estimation variance grid [\sigma^2]
+    variance_grid: np.ndarray  # Kriging estimation variance grid [\sigma^2 in m^2]
 
 
 class KrigingEngine:
     """
-    Specialized engine executing Ordinary & Universal Kriging,
-    Shallow Ice Approximation (SIA) physical drift interpolation, and bedrock reconstruction.
+    Specialized interpolation engine executing Ordinary and Universal Kriging.
+
+    Encapsulates grid geometry, surface DEM, and boundary mask to perform geostatistical
+    interpolation with optional Shallow Ice Approximation (SIA) physical drift modeling.
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        2D surface DEM grid of shape (M_rows, N_cols) in meters.
+    geometry : GridGeometry
+        Standardized spatial grid metadata container.
+    outline_mask : np.ndarray, optional
+        2D boolean active domain mask of shape (M_rows, N_cols).
     """
 
     def __init__(
@@ -59,7 +84,35 @@ class KrigingEngine:
         engine: str = "native",
         show_progress: bool = True,
     ) -> KrigingResult:
-        """Executes Kriging interpolation using engine spatial geometry settings."""
+        """
+        Execute Kriging spatial interpolation using this engine's spatial geometry and DEM.
+
+        Parameters
+        ----------
+        sample_points : np.ndarray
+            Array of shape (N, >=3) containing survey points [x, y, value, ...].
+        method : {"universal", "sia", "ordinary", "regression"}, default="universal"
+            Kriging formulation.
+        variogram_model : {"spherical", "exponential", "gaussian", "linear"}, default="spherical"
+            Theoretical semivariogram model function.
+        opt_slope_grid : np.ndarray, optional
+            Smoothed surface slope grid in radians for SIA drift calculation.
+        drift_terms : list of str, optional
+            List of drift basis names (e.g., ['sia', 'linear_xy', 'curvature_dem']).
+        include_zero_boundary_condition : bool, default=True
+            Whether to enforce zero ice thickness along the perimeter mask boundary.
+        n_cores : int, default=-1
+            Number of CPU threads for parallel grid evaluation (-1 uses all available).
+        engine : {"native", "pykrige"}, default="native"
+            Underlying Kriging computation backend.
+        show_progress : bool, default=True
+            Whether to display a progress bar during computation.
+
+        Returns
+        -------
+        KrigingResult
+            Object holding predicted `bedrock_grid` [m] and estimation `variance_grid` [m^2].
+        """
         return kriging_interpolation(
             sample_points=sample_points,
             geometry=self.geometry,
@@ -78,8 +131,19 @@ class KrigingEngine:
 
 class BedrockFinalizer:
     """
-    Specialized post-processing engine handling Random Forest gap filling,
-    geomorphological margin blending, and spatial DEM smoothing.
+    Specialized post-processing engine handling ML gap filling and geomorphological blending.
+
+    Executes Random Forest machine learning hole filling, perimeter margin blending,
+    and geomorphological terrain smoothing.
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        2D surface DEM grid of shape (M_rows, N_cols) in meters.
+    geometry : GridGeometry
+        Standardized spatial grid metadata container.
+    outline_mask : np.ndarray, optional
+        2D boolean active domain mask of shape (M_rows, N_cols).
     """
 
     def __init__(
@@ -93,7 +157,23 @@ class BedrockFinalizer:
         self.outline_mask = outline_mask
 
     def fill_holes(self, bedrock_grid: np.ndarray, n_cores: int = -1, show_progress: bool = True) -> np.ndarray:
-        """Trains Random Forest ML model to fill bedrock holes inside creeping body."""
+        """
+        Train a Random Forest model on known bedrock soundings to predict unmeasured interior gaps.
+
+        Parameters
+        ----------
+        bedrock_grid : np.ndarray
+            2D array of bedrock elevations in meters containing holes or missing data.
+        n_cores : int, default=-1
+            Number of CPU cores for parallel tree training (-1 for all cores).
+        show_progress : bool, default=True
+            Whether to display a progress bar.
+
+        Returns
+        -------
+        np.ndarray
+            2D array of bedrock elevations in meters with missing gaps filled by ML predictions.
+        """
         return random_forest_hole_filling(
             dem=self.dem,
             bedrock_grid=bedrock_grid,
@@ -108,7 +188,21 @@ class BedrockFinalizer:
         bedrock_input: np.ndarray | tuple[np.ndarray, ...],
         min_gap_dist: float | None = None,
     ) -> np.ndarray:
-        """Applies geomorphological margin blending to surrounding terrain DEM."""
+        """
+        Apply geomorphological cosine-weighted margin blending to the surrounding terrain DEM.
+
+        Parameters
+        ----------
+        bedrock_input : np.ndarray
+            2D array of bedrock elevations in meters of shape (M_rows, N_cols) or point array.
+        min_gap_dist : float, optional
+            Margin blend transition zone width in meters. If None, defaults to 3x cell spacing.
+
+        Returns
+        -------
+        np.ndarray
+            2D array of smoothly blended continuous bedrock elevations in meters.
+        """
         return blend_margin_topography(
             dem=self.dem,
             bedrock_input=bedrock_input,
@@ -126,26 +220,29 @@ def blend_margin_topography(
     min_gap_dist: float | None = None,
 ) -> np.ndarray:
     """
-    Geomorphological margin blending: Assures a smooth transition from calculated bedrock
-    to surrounding known surface DEM at the body margin boundary, pruning bedrock within min_gap_dist.
+    Harmonize continuous bedrock topography with surrounding terrain along glacier margins.
+
+    Enforces smooth geomorphological boundary convergence by applying a cosine-weighted
+    spatial taper: ice thickness smoothly decreases to zero at the glacier outline boundary,
+    preventing non-physical cliff artifacts where the interpolated glacier bed meets the ice-free DEM.
 
     Parameters
     ----------
-    dem : 2D np.ndarray
-        Surface elevation grid (M x N).
-    bedrock_input : 2D np.ndarray or Nx4 point array
-        Continuous bedrock elevation grid (M x N) or point array [X, Y, Z_surface, depth].
-    boundary_mask : 2D np.ndarray
-        Boolean grid indicating active creeping body / glacier area.
+    dem : np.ndarray
+        2D surface DEM grid of shape (M_rows, N_cols) in meters.
+    bedrock_input : np.ndarray or tuple of np.ndarray
+        Continuous bedrock elevation grid of shape (M_rows, N_cols) or point array [x, y, z_surf, depth].
+    boundary_mask : np.ndarray
+        2D boolean grid where True indicates the active glaciated domain.
     geometry : GridGeometry
         Standardized spatial geometry container for raster grids.
     min_gap_dist : float, optional
-        Minimum gap distance / margin blend zone width [m]. Prunes bedrock within this distance from the margin.
+        Width of the margin blending transition zone in meters. Defaults to 3 * cell spacing.
 
     Returns
     -------
-    blended_dem : 2D np.ndarray
-        Harmonized continuous bedrock elevation grid.
+    blended_dem : np.ndarray
+        Harmonized continuous bedrock elevation grid of shape (M_rows, N_cols) in meters.
     """
     dx = geometry.dx
     dy = geometry.dy
@@ -291,6 +388,16 @@ def built_in_kriging_interpolation(
         Memory budget as a fraction of the currently available RAM (``0 < f <= 0.9``). If the estimated peak
         exceeds it, the number of worker threads is reduced first; only if a single thread still does not fit
         is the variance skipped (see :mod:`pysole.memory`).
+
+    Returns
+    -------
+    z_interp : np.ndarray
+        2D array of interpolated values (e.g., bedrock elevation in meters) with shape
+        ``(len(y_coords), len(x_coords))``.
+    var_interp : np.ndarray
+        2D array of Kriging estimation variances [units^2] with shape
+        ``(len(y_coords), len(x_coords))``, or filled with NaNs if variance computation
+        was skipped or disabled.
 
     Notes
     -----
@@ -587,8 +694,38 @@ def pykrige_kriging_interpolation(
     external_drift_grid: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Executes 3rd-party PyKrige Ordinary, Universal, or Regression Kriging.
-    Requires optional 'pykrige' dependency.
+    Execute 3rd-party PyKrige Ordinary, Universal, or Regression Kriging.
+
+    Provides an alternative Kriging backend leveraging the PyKrige package.
+    Supports 2D linear variogram models, regional linear drifts, user-specified
+    drift grids, and Random Forest residual Regression Kriging.
+
+    Parameters
+    ----------
+    sample_points : np.ndarray, shape (N, >=3)
+        Observations array with columns [x, y, value, ...]. NaN rows are dropped.
+    x_coords : np.ndarray
+        1D array of output cell center X coordinates in meters.
+    y_coords : np.ndarray
+        1D array of output cell center Y coordinates in meters.
+    method : {"universal", "ordinary", "regression"}, default="universal"
+        Kriging formulation.
+    variogram_model : {"spherical", "exponential", "gaussian", "linear"}, default="spherical"
+        Theoretical semivariogram model function.
+    external_drift_grid : np.ndarray or None, optional
+        2D grid of shape (len(y_coords), len(x_coords)) containing external drift covariates.
+
+    Returns
+    -------
+    z_interp : np.ndarray
+        2D array of interpolated elevations or depths of shape (len(y_coords), len(x_coords)).
+    var_interp : np.ndarray
+        2D array of estimation variance values, or filled with NaNs if unavailable (e.g. regression).
+
+    Raises
+    ------
+    ImportError
+        If the optional `pykrige` dependency is not installed.
     """
     try:
         import pykrige
@@ -764,6 +901,13 @@ def kriging_interpolation(
         Native engine only. RAM budget as a fraction of the available memory (``0 < f <= 0.9``); threads are
         reduced first, the variance is skipped only as a last resort (see ``built_in_kriging_interpolation``).
 
+    Returns
+    -------
+    KrigingResult
+        Data object containing:
+        - ``bedrock_grid``: 2D array of interpolated bedrock elevations in meters of shape (M_rows, N_cols).
+        - ``variance_grid``: 2D array of Kriging estimation variances in meters^2 (or filled with NaNs if skipped).
+
     Notes
     -----
     ``variogram_model="linear"`` is supported under ``engine="pykrige"``. Under ``engine="native"``,
@@ -922,31 +1066,34 @@ def random_forest_hole_filling(
     show_progress: bool = True,
 ) -> np.ndarray:
     """
-    Random Forest Machine Learning model for intelligent bedrock hole filling.
-    Trains on known bedrock points inside boundary_mask using spatial features (X, Y, DEM elevation, surface slope),
-    and predicts bedrock elevation across remaining unmeasured or missing data regions.
+    Intelligent Random Forest machine learning model for glaciological bedrock hole filling.
+
+    Trains a non-linear Random Forest regressor on known bedrock sounding pixels inside
+    the glacier boundary using spatial covariates (easting X, northing Y, surface elevation,
+    and local surface slope). Predicts missing ice thickness strictly across internal data gaps
+    and unprobed tributary basins, preserving measured soundings and respecting boundary margins.
 
     Parameters
     ----------
-    dem : 2D np.ndarray
-        Surface elevation grid (M x N).
-    bedrock_grid : 2D np.ndarray
-        Kriging interpolated bedrock elevation grid (M x N).
-    boundary_mask : 2D np.ndarray
-        Boolean grid of active creeping body area.
+    dem : np.ndarray
+        2D surface DEM elevation grid of shape (M_rows, N_cols) in meters.
+    bedrock_grid : np.ndarray
+        2D Kriging-interpolated bedrock elevation grid of shape (M_rows, N_cols) in meters.
+    boundary_mask : np.ndarray
+        2D boolean grid where True indicates the active glaciated domain.
     geometry : GridGeometry
         Standardized spatial geometry container for raster grids.
-    n_cores : int
+    n_cores : int, default=-1
         Number of CPU cores for parallelized tree fitting (-1 for all available cores).
-    show_progress : bool
-        If True (default), displays progress bar during tree fitting and gap prediction.
+    show_progress : bool, default=True
+        Whether to display a progress bar during model training and gap prediction.
 
     Returns
     -------
-    filled_bedrock : 2D np.ndarray
-        Seamless bedrock elevation grid with remaining holes filled by Random Forest ML predictions.
+    filled_bedrock : np.ndarray
+        Seamless bedrock elevation grid of shape (M_rows, N_cols) in meters with missing holes filled.
     """
-    # [VECTORIZATION OPTION 4]: Use cached 2D spatial meshgrid from geometry
+    # Use cached 2D spatial meshgrid from geometry
     xx, yy = geometry.meshgrid
 
     from .smoothing import compute_gradients
@@ -1006,8 +1153,31 @@ def random_forest_hole_filling(
 class DriftBasis:
     """
     Unified spatial drift basis evaluator and pre-calculated feature cache.
-    Computes drift covariates across spatial coordinates or whole DEM grids,
-    maintaining fixed global standardization statistics (mean, scale) per feature column.
+
+    Computes standardized drift covariates across spatial coordinates or whole DEM grids,
+    maintaining fixed global standardization statistics (mean, scale) per feature column
+    to ensure numerical conditioning in Universal and Dual Kriging solvers.
+
+    Parameters
+    ----------
+    drift_terms : list of str
+        List of drift covariate identifiers (e.g. ['sia', 'linear_xy', 'z_dem', 'curvature_dem']).
+    x_ref : np.ndarray
+        Reference easting coordinates in meters used to establish centering and scaling.
+    y_ref : np.ndarray
+        Reference northing coordinates in meters used to establish centering and scaling.
+    dem_grid : np.ndarray, optional
+        2D surface DEM grid of shape (M_rows, N_cols) in meters.
+    dx : float, default=10.0
+        Cell spacing along the X axis in meters.
+    dy : float, default=10.0
+        Cell spacing along the Y axis in meters.
+    bounds : tuple of float, optional
+        Four-element bounding box (minx, miny, maxx, maxy) in meters.
+    alpha_opt_deg : np.ndarray, optional
+        Optimized smoothed surface slope grid in degrees for SIA drift calculations.
+    slope_floor_deg : float, default=5.0
+        Lower cutoff angle in degrees to prevent numerical divergence in 1 / sin(alpha).
     """
     SUPPORTED_TERMS = {
         "linear_xy", "quadratic_xy", "z_dem", "sia", "curvature_dem",
@@ -1111,7 +1281,21 @@ class DriftBasis:
             self.evaluators.append(lambda x, y: self.curvature_grid[geom.coords_to_grid_indices(x, y)])
 
     def evaluate(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Evaluates and standardizes drift basis matrix for query coordinates (x, y)."""
+        """
+        Evaluate and standardize drift basis matrix for arbitrary query coordinates (x, y).
+
+        Parameters
+        ----------
+        x : np.ndarray
+            1D array of query easting coordinates in meters.
+        y : np.ndarray
+            1D array of query northing coordinates in meters.
+
+        Returns
+        -------
+        np.ndarray
+            Standardized drift design matrix of shape (len(x), n_drift_terms).
+        """
         x = np.asarray(x, dtype=np.float64)
         y = np.asarray(y, dtype=np.float64)
         n_pts = len(x)
@@ -1125,13 +1309,45 @@ class DriftBasis:
         return np.column_stack(cols)
 
 
-
-
-
 class DualKrigingSolver:
     """
     Fast Dual Kriging solver used for point validation in DriftAnalyzer cross-validation.
+
+    Computes dual kriging weights directly from the augmented kriging system, enabling
+    O(N) evaluation per validation point during spatial leave-one-out and leave-profile-out testing.
+
+    Parameters
+    ----------
+    x_pts : np.ndarray
+        1D array of training point easting coordinates in meters.
+    y_pts : np.ndarray
+        1D array of training point northing coordinates in meters.
+    z_pts : np.ndarray
+        1D array of training point values (e.g., bedrock elevation in meters or depth).
+    variogram_model : str, default="spherical"
+        Semivariogram model ('spherical', 'exponential', 'gaussian').
+    nugget : float, default=0.0
+        Variogram nugget variance parameter.
+    sill : float, default=1.0
+        Variogram sill variance parameter.
+    range_param : float, default=100.0
+        Variogram range parameter in meters.
+    drift_terms : list of str, optional
+        List of drift covariate names.
+    drift_basis : DriftBasis, optional
+        Pre-initialized `DriftBasis` instance sharing standardized parameters.
+    dem_grid : np.ndarray, optional
+        Surface DEM grid in meters.
+    dx : float, default=5.0
+        DEM grid spacing along X in meters.
+    dy : float, default=5.0
+        DEM grid spacing along Y in meters.
+    bounds : tuple of float, optional
+        Spatial bounding box (minx, miny, maxx, maxy) in meters.
+    alpha_opt_deg : np.ndarray, optional
+        Surface slope grid in degrees.
     """
+
     def __init__(
         self,
         x_pts: np.ndarray,
@@ -1225,6 +1441,31 @@ class DualKrigingSolver:
         bounds: tuple[float, float, float, float] | None = None,
         alpha_opt_deg: np.ndarray | None = None,
     ) -> np.ndarray:
+        """
+        Predict values at validation coordinates (x_val, y_val) using fitted dual kriging weights.
+
+        Parameters
+        ----------
+        x_val : np.ndarray
+            1D array of validation point eastings in meters.
+        y_val : np.ndarray
+            1D array of validation point northings in meters.
+        dem_grid : np.ndarray, optional
+            Surface DEM grid in meters.
+        dx : float, default=5.0
+            Cell resolution along X in meters.
+        dy : float, default=5.0
+            Cell resolution along Y in meters.
+        bounds : tuple of float, optional
+            Spatial bounding box in meters.
+        alpha_opt_deg : np.ndarray, optional
+            Surface slope grid in degrees.
+
+        Returns
+        -------
+        np.ndarray
+            1D array of predicted values at validation locations, or filled with NaNs if solve failed.
+        """
         if not self.success:
             return np.full_like(x_val, np.nan)
 
@@ -1254,3 +1495,4 @@ class DualKrigingSolver:
 
         F_val = np.hstack(F_list)
         return K_val @ self.b + F_val @ self.a
+

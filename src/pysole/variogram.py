@@ -24,7 +24,22 @@ from .logging import logger, get_progress_bar
 
 def compute_cutoff_wavelength(kc: float) -> float:
     """
-    Converts physical 2D corner frequency wavenumber cutoff kc [rad/m] to physical spatial wavelength lambda_c [m].
+    Converts a physical 2D corner frequency wavenumber cutoff kc to a spatial cutoff wavelength.
+
+    Calculated via the Fourier relationship:
+    .. math::
+        \\lambda_c = \\frac{2 \\pi}{k_c}
+
+    Parameters
+    ----------
+    kc : float
+        Corner frequency cutoff wavenumber :math:`k_c` in radians per meter [rad/m].
+
+    Returns
+    -------
+    wavelength : float
+        Physical spatial cutoff wavelength :math:`\\lambda_c` in meters [m].
+        Returns ``float('inf')`` if ``kc <= 0``.
     """
     if kc <= 0:
         return float("inf")
@@ -33,7 +48,22 @@ def compute_cutoff_wavelength(kc: float) -> float:
 
 def compute_cutoff_wavenumber(wavelength: float) -> float:
     """
-    Converts physical spatial wavelength lambda_c [m] to physical corner frequency wavenumber cutoff kc [rad/m].
+    Converts a physical spatial cutoff wavelength to a 2D corner frequency wavenumber cutoff.
+
+    Calculated via the inverse Fourier relationship:
+    .. math::
+        k_c = \\frac{2 \\pi}{\\lambda_c}
+
+    Parameters
+    ----------
+    wavelength : float
+        Physical spatial cutoff wavelength :math:`\\lambda_c` in meters [m].
+
+    Returns
+    -------
+    kc : float
+        Corner frequency cutoff wavenumber :math:`k_c` in radians per meter [rad/m].
+        Returns ``float('inf')`` if ``wavelength <= 0``.
     """
     if wavelength <= 0:
         return float("inf")
@@ -43,7 +73,29 @@ def compute_cutoff_wavenumber(wavelength: float) -> float:
 @dataclass
 class OptimizationResult:
     """
-    Typed data container storing BSS corner frequency slope optimization outputs.
+    Data container storing Basal Shear Stress (BSS) variance optimization results.
+
+    Attributes
+    ----------
+    optimal_kc : float
+        Optimal surface slope smoothing corner wavenumber :math:`k_c` [rad/m]
+        that minimizes the spatial variance of the BSS product field.
+    optimal_slope_grid : np.ndarray
+        2D raster grid of smoothed surface slope angles :math:`\\alpha` in radians [rad].
+    all_kc_variances : np.ndarray
+        Array of tuples ``[(kc_1, var_1), (kc_2, var_2), ...]`` evaluated during the search.
+    all_smoothed_slopes : dict of float to np.ndarray
+        Dictionary mapping evaluated wavenumbers :math:`k_c` to corresponding 2D smoothed slope grids.
+    optimal_dem_grid : np.ndarray or None, optional
+        Smoothed surface elevation DEM raster [m] at the optimal wavenumber :math:`k_c`.
+    all_smoothed_dems : dict of float to np.ndarray, optional
+        Dictionary mapping evaluated wavenumbers to smoothed DEM grids.
+    opt_variogram_params : dict of str to float, optional
+        Fitted theoretical variogram parameters ('range', 'sill', 'nugget') at the optimal wavenumber.
+    dx : float, default 1.0
+        Spatial grid spacing along X [m].
+    dy : float, default 1.0
+        Spatial grid spacing along Y [m].
     """
     optimal_kc: float
     optimal_slope_grid: np.ndarray
@@ -63,11 +115,25 @@ class OptimizationResult:
         return compute_cutoff_wavelength(self.optimal_kc)
 
 
-
 class BSSOptimizer:
     """
-    Specialized engine executing Basal Shear Stress (BSS) surface slope variance
-    optimization across frequency corner spectrum kc.
+    Engine executing Basal Shear Stress (BSS) surface slope variance optimization.
+
+    In glaciology, basal shear stress :math:`\\tau_b = \\rho_{\\text{ice}} g H \\sin\\alpha`
+    is expected to vary smoothly along a glacier bed compared to raw high-frequency
+    surface slope variations. This optimizer systematically varies the 2D Gaussian
+    low-pass smoothing wavenumber :math:`k_c` applied to the surface DEM slope
+    :math:`\\sin\\alpha`, computing the empirical variogram and sample variance of the
+    product field :math:`P = T \\cdot \\sin\\alpha` (or :math:`D \\cdot \\sin\\alpha`).
+    The wavenumber :math:`k_c` yielding minimum spatial variance identifies the
+    characteristic transition scale coupling surface topography to basal drag.
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        2D surface digital elevation model [m].
+    geometry : GridGeometry
+        Standardized spatial coordinate container.
     """
 
     def __init__(
@@ -95,7 +161,45 @@ class BSSOptimizer:
         nrbins: int | None = None,
         show_progress: bool = True,
     ) -> OptimizationResult:
-        """Executes BSS slope filter optimization across corner frequency spectrum."""
+        """
+        Executes BSS slope filter optimization across the corner frequency spectrum.
+
+        Parameters
+        ----------
+        survey_points : np.ndarray
+            Survey sounding picks array ``[X, Y, Z_surf, value, ...]``.
+        kc_max : float, optional
+            Maximum corner frequency wavenumber bound [rad/m]. If None, defaults to Nyquist limit.
+        kc_min : float, optional
+            Minimum corner frequency wavenumber bound [rad/m]. If None, defaults to half-domain limit.
+        n_steps : int, optional
+            Number of discrete spectral evaluation steps. If None, derived by discrete mode counting.
+        lambda_min : float, optional
+            Minimum cutoff wavelength bound [m] (used when `fft_filter_metric` is 'wavelength').
+        lambda_max : float, optional
+            Maximum cutoff wavelength bound [m] (used when `fft_filter_metric` is 'wavelength').
+        fft_filter_metric : str, default "wavenumber"
+            Evaluation parameter metric: 'wavenumber' (:math:`k_c` [rad/m]) or 'wavelength' (:math:`\\lambda_c` [m]).
+        plots_dir : str or Path, optional
+            Directory for saving diagnostic variogram comparison figures.
+        prefix : str, default "01_"
+            Filename prefix for generated diagnostic figures.
+        stage_name : str, default "stage1"
+            Processing stage label ('stage1' pre-migration or 'stage2' post-migration).
+        interactive : bool, default False
+            If True, presents interactive command-line prompts to adjust search bounds.
+        n_cores : int, default -1
+            Number of CPU threads for parallel grid evaluation (-1 for all cores).
+        nrbins : int, optional
+            Number of distance lag bins for empirical variogram calculation.
+        show_progress : bool, default True
+            Whether to display terminal progress bar during spectral optimization.
+
+        Returns
+        -------
+        result : OptimizationResult
+            Result container storing optimal wavenumber, slope grid, and variance trajectory.
+        """
         return optimize_bss_variance(
             dem=self.dem,
             survey_points=survey_points,
@@ -243,7 +347,36 @@ def calculate_variogram(
 
 
 def spherical_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarray:
-    """Spherical variogram model: gamma(h) = n + c * [1.5*(h/a) - 0.5*(h/a)^3] for h <= a; n + c for h > a."""
+    """
+    Evaluates the theoretical Spherical variogram model.
+
+    The classical spherical semivariance model is defined as:
+    .. math::
+        \\gamma(h) = \\begin{cases}
+            n + c \\left[ 1.5 \\frac{h}{a} - 0.5 \\left(\\frac{h}{a}\\right)^3 \\right], & 0 \\le h \\le a \\\\
+            n + c, & h > a
+        \\end{cases}
+
+    It features a strictly linear slope near the origin (:math:`h \\to 0`) and reaches
+    a well-defined plateau (sill) at lag distance :math:`h = a`.
+
+    Parameters
+    ----------
+    h : np.ndarray
+        Spatial lag separation distance array [m].
+    a : float
+        Spatial correlation range parameter :math:`a` [m].
+    c : float
+        Partial sill variance parameter :math:`c` (total sill is :math:`n + c`).
+    n : float
+        Nugget variance :math:`n` (:math:`c_0`), representing measurement noise
+        or micro-scale variability below sampling resolution.
+
+    Returns
+    -------
+    gamma : np.ndarray
+        Theoretical semivariance values :math:`\\gamma(h)`.
+    """
     h = np.asarray(h, dtype=float)
     a_eff = max(float(a), 1e-6)
     gamma = np.full_like(h, n + c)
@@ -254,14 +387,62 @@ def spherical_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarr
 
 
 def exponential_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarray:
-    """Exponential variogram model: gamma(h) = n + c * [1 - exp(-3h/a)]."""
+    """
+    Evaluates the theoretical Exponential variogram model.
+
+    Defined as:
+    .. math::
+        \\gamma(h) = n + c \\left[ 1 - \\exp\\left(-\\frac{3 h}{a}\\right) \\right]
+
+    Approaches the sill asymptotically, reaching 95% of the total sill at practical range :math:`a`.
+
+    Parameters
+    ----------
+    h : np.ndarray
+        Spatial lag separation distance array [m].
+    a : float
+        Effective spatial correlation range parameter :math:`a` [m].
+    c : float
+        Partial sill variance parameter :math:`c`.
+    n : float
+        Nugget variance parameter :math:`n`.
+
+    Returns
+    -------
+    gamma : np.ndarray
+        Theoretical semivariance values :math:`\\gamma(h)`.
+    """
     h = np.asarray(h, dtype=float)
     a_eff = max(float(a), 1e-6)
     return n + c * (1.0 - np.exp(-3.0 * h / a_eff))
 
 
 def gaussian_variogram(h: np.ndarray, a: float, c: float, n: float) -> np.ndarray:
-    """Gaussian variogram model: gamma(h) = n + c * [1 - exp(-3*(h/a)^2)]."""
+    """
+    Evaluates the theoretical Gaussian variogram model.
+
+    Defined as:
+    .. math::
+        \\gamma(h) = n + c \\left[ 1 - \\exp\\left(-3 \\left(\\frac{h}{a}\\right)^2\\right) \\right]
+
+    Exhibits parabolic behavior near the origin, representing extremely smooth spatial processes.
+
+    Parameters
+    ----------
+    h : np.ndarray
+        Spatial lag separation distance array [m].
+    a : float
+        Effective spatial correlation range parameter :math:`a` [m].
+    c : float
+        Partial sill variance parameter :math:`c`.
+    n : float
+        Nugget variance parameter :math:`n`.
+
+    Returns
+    -------
+    gamma : np.ndarray
+        Theoretical semivariance values :math:`\\gamma(h)`.
+    """
     h = np.asarray(h, dtype=float)
     a_eff = max(float(a), 1e-6)
     return n + c * (1.0 - np.exp(-3.0 * (h / a_eff)**2))
@@ -303,7 +484,27 @@ def resolve_native_variogram_model(name: str, warn: bool = True) -> str:
 def evaluate_variogram_model(
     h: np.ndarray, model_type: str, a: float, c: float, n: float
 ) -> np.ndarray:
-    """Evaluates the specified theoretical variogram model curve at lag distances h."""
+    """
+    Evaluates a theoretical variogram model curve at lag distances h.
+
+    Parameters
+    ----------
+    h : np.ndarray
+        Spatial lag distances [m].
+    model_type : str
+        Variogram model family: 'spherical', 'exponential', or 'gaussian'.
+    a : float
+        Spatial correlation range parameter [m].
+    c : float
+        Sill variance parameter.
+    n : float
+        Nugget variance parameter.
+
+    Returns
+    -------
+    gamma : np.ndarray
+        Semivariance values matching the shape of `h`.
+    """
     m_type = str(model_type).lower().strip()
     if "exp" in m_type:
         return exponential_variogram(h, a, c, n)
@@ -321,20 +522,36 @@ def fit_variogram_model(
     show_progress: bool = False,
 ) -> tuple[float, float, float, dict[str, np.ndarray]]:
     """
-    Fits a theoretical variogram model to experimental variogram data.
-    Supports Spherical, Exponential, and Gaussian model functions.
-    Scale-invariant fitting scales initial guesses and bounds relative to experimental semivariance magnitude.
+    Fits a theoretical variogram model to empirical binned semivariance observations.
+
+    Uses non-linear weighted least-squares curve fitting (:func:`scipy.optimize.curve_fit`),
+    weighting each lag bin by :math:`1/\\sqrt{N_{\\text{pairs}}}` to prioritize well-sampled
+    short-distance bins. Bounds and initial parameter guesses are dynamically scaled to the
+    experimental data magnitude.
+
+    Parameters
+    ----------
+    distances : np.ndarray
+        1D array of bin-center lag separation distances :math:`h` [m].
+    semivars : np.ndarray
+        1D array of empirical semivariance values :math:`\\gamma(h)`.
+    counts : np.ndarray, optional
+        1D array of point-pair counts per lag bin, used as fitting weights.
+    model_type : str, default "spherical"
+        Model curve to fit: 'spherical', 'exponential', or 'gaussian'.
+    show_progress : bool, default False
+        Whether to display a terminal progress bar.
 
     Returns
     -------
     a_range : float
-        Calculated spatial correlation range [m].
+        Fitted spatial correlation range :math:`a` [m].
     sill : float
-        Sill parameter C.
+        Fitted partial sill variance :math:`c`.
     nugget : float
-        Nugget variance C0.
-    model_curve : dict
-        dict with 'h' and 'gamma' fine curve points for plotting.
+        Fitted nugget variance :math:`n` (:math:`c_0`).
+    model_curve : dict of str to np.ndarray
+        Dictionary with keys ``'h'`` and ``'gamma'`` containing a fine synthetic curve for plotting.
     """
     with get_progress_bar(
         total=max(1, len(distances)),
@@ -404,9 +621,63 @@ def optimize_bss_variance(
     show_progress: bool = True,
 ) -> OptimizationResult:
     """
-    Iterative optimization process to determine optimum DEM surface slope smoothing degree.
-    Uses Half-Domain domain-scaling for minimum frequency kc_min and dynamic discrete Fourier mode counting for n_steps.
-    Supports wavelength metric with straight conversion to wavenumbers and fallback to kc_max / kc_min when null.
+    Optimizes surface slope spectral smoothing degree by minimizing BSS product field variance.
+
+    Glaciological theory assumes basal shear stress :math:`\\tau_b = \\rho g H \\sin\\alpha`
+    is relatively uniform compared to raw surface slope variations. By evaluating Gaussian
+    low-pass filters across discrete wavenumbers :math:`k_c`, this function computes the
+    product :math:`P = T \\cdot \\sin\\alpha` (or :math:`D \\cdot \\sin\\alpha`) and finds
+    the wavenumber :math:`k_c` where sample variance reaches a global minimum.
+
+    Boundary defaults:
+    - Upper wavenumber limit :math:`k_{c,\\max}` defaults to the Nyquist wavenumber
+      :math:`k_{\\text{Nyquist}} = \\pi / \\min(|dx|, |dy|)`.
+    - Lower wavenumber limit :math:`k_{c,\\min}` defaults to the Half-Domain limit
+      :math:`4\\pi / L_{\\max}` (wavelength :math:`\\lambda_{\\max} = L_{\\max}/2`).
+    - Evaluation steps :math:`n_{\\text{steps}}` defaults to discrete Fourier mode counting:
+      :math:`n_{\\text{modes}} = \\lfloor (k_{c,\\max} - k_{c,\\min}) L_{\\max} / (2\\pi) \\rfloor`
+      clamped between 10 and 50 steps.
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        2D surface DEM raster [m].
+    survey_points : np.ndarray
+        Survey sounding points array ``[X, Y, Z_surf, value, ...]``.
+    geometry : GridGeometry
+        Spatial grid geometry container.
+    kc_max : float, optional
+        Upper wavenumber search bound :math:`k_{c,\\max}` [rad/m].
+    kc_min : float, optional
+        Lower wavenumber search bound :math:`k_{c,\\min}` [rad/m].
+    n_steps : int, optional
+        Number of spectral evaluation increments.
+    lambda_min : float, optional
+        Minimum cutoff wavelength bound [m].
+    lambda_max : float, optional
+        Maximum cutoff wavelength bound [m].
+    fft_filter_metric : str, default "wavenumber"
+        Spectral parameter metric ('wavenumber' or 'wavelength').
+    plots_dir : str or Path, optional
+        Destination directory for diagnostic optimization figures.
+    prefix : str, default "01_"
+        Figure filename prefix.
+    stage_name : str, default "stage1"
+        Stage name for figures ('stage1' pre-migration or 'stage2' post-migration).
+    interactive : bool, default False
+        Whether to enable interactive CLI prompts for spectrum parameter overrides.
+    n_cores : int, default -1
+        CPU core count for parallel variogram evaluation.
+    nrbins : int, optional
+        Number of distance lag bins for experimental variograms.
+    show_progress : bool, default True
+        Whether to display terminal progress bar.
+
+    Returns
+    -------
+    result : OptimizationResult
+        Optimization result container containing optimal :math:`k_c`, optimal slope grid,
+        all tested variances, and fitted variogram parameters.
     """
     dx = geometry.dx
     dy = geometry.dy

@@ -28,22 +28,22 @@ def setup_logging(
     log_level: str | int = "INFO",
     console_output: bool = True,
 ) -> logging.Logger:
-    """Configures the PySole package logger with file and console handlers.
+    """Configures the centralized PySole package logger with file and console handlers.
 
     Parameters
     ----------
-    log_file : str | Path | None
-        Path to the log file. If set (default: 'pysole.log'), logs are appended to this file.
+    log_file : str, Path, or None, default 'pysole.log'
+        Path to the log file. If specified, logs are appended in UTF-8 format.
         If None, file logging is disabled.
-    log_level : str | int
-        Logging level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'). Default is 'INFO'.
-    console_output : bool
-        If True (default), log messages are also output to stdout.
+    log_level : str or int, default 'INFO'
+        Logging level threshold ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL').
+    console_output : bool, default True
+        If True, log messages are also formatted and directed to stdout.
 
     Returns
     -------
-    logging.Logger
-        Configured logger instance.
+    configured_logger : logging.Logger
+        Configured logger instance named 'pysole'.
     """
     if isinstance(log_level, str):
         numeric_level = getattr(logging, log_level.upper(), logging.INFO)
@@ -97,20 +97,20 @@ def get_progress_bar(
     Parameters
     ----------
     iterable : iterable, optional
-        Iterable to wrap with progress bar.
+        Iterable to wrap with progress monitoring.
     total : int, optional
-        Total number of iterations.
-    desc : str
-        Description tag shown in front of the progress bar.
-    unit : str
-        Unit label for iterations (e.g. 'kc', 'picks', 'chunks', 'bins', 'pixels').
-    disable : bool
-        If True, disables the progress bar animation entirely.
+        Total number of iteration steps if wrapping a generator or updating manually.
+    desc : str, default ""
+        Prefix description label displayed in front of the animated progress bar.
+    unit : str, default 'it'
+        Unit descriptor for iterations (e.g. 'kc', 'picks', 'chunks', 'bins', 'pixels').
+    disable : bool, default False
+        If True, suppresses progress bar animation completely (useful in non-interactive / batch modes).
 
     Returns
     -------
-    tqdm
-        Styled tqdm instance.
+    progress_bar : tqdm.std.tqdm or DummyBar
+        Configured progress bar instance.
     """
     bar_format = "{desc} {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} {unit} [{elapsed}<{remaining}, {rate_fmt}]"
     return tqdm(

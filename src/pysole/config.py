@@ -24,11 +24,33 @@ _FALSE_STRINGS = frozenset({"false", "no", "off", "0"})
 
 def coerce_bool(value: Any, name: str, default: bool) -> bool:
     """
-    Interprets a configuration value as a boolean.
+    Safely coerces a configuration setting into a strict Python boolean.
 
-    ``bool`` and ``numpy.bool_`` pass through, ``None`` (JSON ``null``) selects ``default``, the integers 0/1 and the
-    case-insensitive strings ``true/false/yes/no/on/off/1/0`` are converted. Anything else raises ``ConfigError``
-    (a plain ``bool("false")`` would silently be ``True``).
+    Interprets explicit boolean types (``bool``, ``numpy.bool_``), integer flags
+    (0 or 1), and case-insensitive string representations (``"true"``, ``"false"``,
+    ``"yes"``, ``"no"``, ``"on"``, ``"off"``). If ``value`` is ``None`` (equivalent to
+    a JSON ``null`` entry in ``pysole.json``), the specified default boolean value
+    is returned.
+
+    Parameters
+    ----------
+    value : Any
+        Raw input value parsed from configuration or command-line arguments.
+    name : str
+        Human-readable parameter path (e.g., ``'outputs.save_thickness_grid'``)
+        used for clear diagnostic messages.
+    default : bool
+        Fallback boolean value returned when ``value`` is ``None``.
+
+    Returns
+    -------
+    coerced_bool : bool
+        Validated boolean value.
+
+    Raises
+    ------
+    ConfigError
+        If ``value`` cannot be unambiguous coerced into a boolean.
     """
     if value is None:
         return bool(default)
@@ -46,7 +68,29 @@ def coerce_bool(value: Any, name: str, default: bool) -> bool:
 
 
 def validate_memory_fraction(value: Any, name: str = "kriging_parameters.max_memory_fraction") -> float:
-    """Returns ``value`` as float if it satisfies ``0 < value <= 0.9``, otherwise raises ``ConfigError``."""
+    """
+    Validates that a memory budget fraction falls within safe limits.
+
+    Ensures the user-configured RAM budget fraction satisfies ``0.0 < value <= 0.9``,
+    leaving at least 10% of physical memory for operating system services.
+
+    Parameters
+    ----------
+    value : Any
+        Numeric fraction of available system memory.
+    name : str, default "kriging_parameters.max_memory_fraction"
+        Configuration key name used in diagnostic error messages.
+
+    Returns
+    -------
+    fraction : float
+        Validated memory budget fraction as a float.
+
+    Raises
+    ------
+    ConfigError
+        If ``value`` is non-numeric or outside the valid range ``(0.0, 0.9]``.
+    """
     try:
         frac = float(value)
     except (TypeError, ValueError):
@@ -287,9 +331,28 @@ def resolve_output_dir(
     config_path: str | Path | os.PathLike | None = None,
 ) -> Path:
     """
-    If output_dir is explicitly specified, returns output_dir as a Path (resolved relative to config_path if relative).
-    If output_dir is None, creates and returns a 'pysole' folder inside the survey_data_path parent directory,
-    and a 'figures' subfolder inside the pysole directory.
+    Resolves the primary workspace output directory on disk.
+
+    Resolution logic:
+    1. If ``output_dir`` is explicitly provided and relative, it is resolved relative
+       to the parent directory of ``config_path`` (or the current working directory).
+    2. If ``output_dir`` is None, a dedicated ``pysole/`` subdirectory is created
+       beside ``survey_data_path`` (or inside the config folder), containing a
+       ``figures/`` subfolder.
+
+    Parameters
+    ----------
+    output_dir : str, Path, or os.PathLike, optional
+        Explicitly configured output directory.
+    survey_data_path : str, Path, or os.PathLike, optional
+        Path to input survey dataset used for automatic directory co-location.
+    config_path : str, Path, or os.PathLike, optional
+        Path to JSON configuration file used for relative path anchoring.
+
+    Returns
+    -------
+    resolved_path : Path
+        Guaranteed existing Path object pointing to the effective output directory.
     """
     cfg_parent = _get_config_parent(config_path)
 
@@ -318,7 +381,26 @@ def resolve_input_path(
     path: Any,
     config_path: str | Path | os.PathLike | None = None,
 ) -> Any:
-    """Resolves an input file path relative to config_path parent directory or working directory."""
+    """
+    Resolves an input file path relative to the configuration file directory.
+
+    If ``path`` is an in-memory NumPy array or None, it is passed through unchanged.
+    Absolute paths remain untouched. Relative paths are first checked relative to
+    the parent folder of ``config_path``; if found, that resolved absolute path is
+    returned.
+
+    Parameters
+    ----------
+    path : str, Path, os.PathLike, np.ndarray, or None
+        Input file path or raster array.
+    config_path : str, Path, or os.PathLike, optional
+        Path to the configuration file.
+
+    Returns
+    -------
+    resolved_path : str, np.ndarray, or None
+        Resolved absolute string filepath or original object.
+    """
     if path is None or isinstance(path, np.ndarray):
         return path
     path_obj = Path(path).expanduser()
@@ -338,7 +420,25 @@ def resolve_path(
     survey_data_path: str | Path | os.PathLike | None = None,
     config_path: str | Path | os.PathLike | None = None,
 ) -> Any:
-    """Resolves an output file or directory path relative to the effective output_dir."""
+    """
+    Resolves an output file or directory path within the effective output directory.
+
+    Parameters
+    ----------
+    path : str, Path, os.PathLike, or None
+        Target output file or subdirectory name.
+    output_dir : str, Path, or os.PathLike, optional
+        Base output directory override.
+    survey_data_path : str, Path, or os.PathLike, optional
+        Survey file path used for fallback co-location.
+    config_path : str, Path, or os.PathLike, optional
+        Configuration file path used for anchoring relative paths.
+
+    Returns
+    -------
+    resolved_path : str or Any
+        Absolute string path anchored in the effective output directory.
+    """
     if path is None or isinstance(path, np.ndarray):
         return path
     path_obj = Path(path).expanduser()
@@ -357,14 +457,30 @@ def resolve_plots_dir(
     config_path: str | Path | os.PathLike | None = None,
 ) -> str:
     """
-    Resolves the directory for diagnostic figures so that they are saved next to the data files.
+    Resolves the destination folder for diagnostic plots and figures.
 
-    Rules
-    -----
-    1. An absolute ``plots_dir`` is used as is.
-    2. A relative or unset ``plots_dir`` (``None`` is equivalent to ``"figures"``) is resolved against the
-       directory holding the data files: the parent folder of ``output_prefix`` if it is an absolute path,
-       otherwise the effective ``output_dir``.
+    Ensures diagnostic plots (PNG figures) are saved adjacent to exported rasters:
+    1. If ``plots_dir`` is an absolute path, it is used directly.
+    2. If ``output_prefix`` is an absolute path, ``plots_dir`` is placed in its parent directory.
+    3. Otherwise, ``plots_dir`` is placed within the effective output directory.
+
+    Parameters
+    ----------
+    plots_dir : str, Path, or None, default "figures"
+        Subdirectory or absolute directory name for figures.
+    output_prefix : str, Path, or os.PathLike, optional
+        Configured output file prefix.
+    output_dir : str, Path, or os.PathLike, optional
+        Base output directory.
+    survey_data_path : str, Path, or os.PathLike, optional
+        Survey file path for co-location.
+    config_path : str, Path, or os.PathLike, optional
+        Configuration file path.
+
+    Returns
+    -------
+    plots_path : str
+        Resolved absolute string directory path for saving figures.
     """
     target = Path(plots_dir if plots_dir else "figures").expanduser()
     if target.is_absolute():
@@ -380,10 +496,22 @@ def resolve_plots_dir(
 
 def configured_output_dir(config: dict[str, Any]) -> str | None:
     """
-    Returns the explicitly configured base output folder, or None for the default ``<survey dir>/pysole``.
+    Extracts the user-configured base output directory string from a configuration dict.
 
-    ``outputs.output_dir`` wins; otherwise an absolute ``outputs.output_prefix``
-    makes its parent folder the base, so data files, figures and the log file all live together.
+    Priority order:
+    1. Explicit ``outputs.output_dir`` setting.
+    2. Parent directory of an absolute ``outputs.output_prefix``.
+    3. None (indicating default automatic co-location beside survey data).
+
+    Parameters
+    ----------
+    config : dict
+        Parsed configuration dictionary.
+
+    Returns
+    -------
+    base_dir : str or None
+        Resolved base directory path or None.
     """
     outputs = config.get("outputs", {}) or {}
     explicit = outputs.get("output_dir")

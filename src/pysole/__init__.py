@@ -1,5 +1,11 @@
 """
 PySole: Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Datasets.
+
+PySole is a high-performance Python package for reconstructing high-resolution glacier
+and ice-cap bedrock topography from sparse ground-penetrating radar (GPR) or seismic
+soundings. It integrates 3D Eikonal normal ray migration, physical Basal Shear Stress (BSS)
+spectral slope optimization, Dual Kriging geostatistical interpolation, machine learning
+void filling, and geomorphological boundary margin blending.
 """
 
 from .solver import Solver

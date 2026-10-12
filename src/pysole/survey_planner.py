@@ -20,7 +20,22 @@ from .smoothing import compute_gradients, fft_gaussian_smooth
 
 @dataclass
 class PlannedProfileTrack:
-    """Structure representing a planned GPR/seismic survey track."""
+    """
+    Structure representing a planned geophysical GPR or seismic survey track.
+
+    Attributes
+    ----------
+    track_id : str
+        Unique identifier for the profile track (e.g. 'L1_longitudinal', 'T1_transverse').
+    track_type : str
+        Track geometry classification: 'longitudinal' (along flowline) or 'transverse' (cross-valley).
+    length_m : float
+        Total line-transect length in meters [m].
+    coordinates : np.ndarray
+        Array of projected 2D coordinates with shape ``(N, 2)`` in projected metric units [m].
+    max_depth_m : float
+        Maximum modeled SIA ice thickness expected along this transect [m].
+    """
     track_id: str
     track_type: str  # 'longitudinal' or 'transverse'
     length_m: float
@@ -29,7 +44,21 @@ class PlannedProfileTrack:
 
 
 def _transform_coords_to_wgs84(coords: np.ndarray, crs: Any) -> np.ndarray:
-    """Converts projected [X, Y] coordinates to WGS84 [lon, lat]."""
+    """
+    Converts projected metric coordinates [X, Y] to geographic WGS84 coordinates [lon, lat].
+
+    Parameters
+    ----------
+    coords : np.ndarray
+        2D coordinate array of shape ``(N, 2)`` in projected meters.
+    crs : Any
+        Coordinate Reference System identifier (e.g. EPSG code or PROJ string).
+
+    Returns
+    -------
+    wgs_coords : np.ndarray
+        2D array of coordinates in decimal degrees ``[longitude, latitude]``.
+    """
     if crs is None:
         logger.warning("No CRS metadata provided for survey tracks. Exporting projected metric coordinates.")
         return coords
@@ -46,6 +75,35 @@ def _transform_coords_to_wgs84(coords: np.ndarray, crs: Any) -> np.ndarray:
 class SurveyPlanner:
     """
     Forward campaign survey planning engine for unprobed glaciers.
+
+    Designs optimized reconnaissance GPR or seismic survey layouts prior to fieldwork
+    for glaciers lacking ice thickness soundings. The planner:
+    1. Computes synthetic ice thickness targets using the Shallow Ice Approximation (SIA):
+       :math:`D_{\\text{SIA}}(x, y) = \\frac{\\tau_0}{\\rho_{\\text{ice}} g \\sin\\alpha}`
+    2. Identifies the central flowline along the maximum thickness ridge.
+    3. Generates transverse cross-valley transects distributed along the glacier body,
+       strictly constrained by a maximum travel/flight distance budget :math:`L_{\\max}`.
+    4. Exports flight tracks to standard navigation formats (GPX for GPS units and
+       drone autopilots; GeoJSON for GIS software).
+
+    Parameters
+    ----------
+    dem : np.ndarray, str, or Path
+        Surface digital elevation model [m] as a 2D array or raster file path.
+    outline : np.ndarray, str, or Path, optional
+        Glacier boundary outline as a boolean mask, Shapefile, or GeoJSON.
+    dx : float, optional
+        Spatial grid spacing along X [m]. If None, inferred from raster metadata.
+    dy : float, optional
+        Spatial grid spacing along Y [m]. If None, inferred from raster metadata.
+    bounds : tuple of float, optional
+        Bounding box coordinates ``(minx, miny, maxx, maxy)`` [m].
+    crs : Any, optional
+        Coordinate Reference System (e.g. 'EPSG:32633').
+    ice_density : float, default 900.0
+        Glacier ice density :math:`\\rho` [kg/m³].
+    g : float, default 9.81
+        Gravitational acceleration :math:`g` [m/s²].
     """
 
     def __init__(
@@ -86,7 +144,31 @@ class SurveyPlanner:
         slope_floor_deg: float = 5.0,
     ) -> np.ndarray:
         """
-        Computes synthetic SIA ice thickness grid D_SIA(x,y) [m].
+        Computes synthetic Shallow Ice Approximation (SIA) ice thickness grid D_SIA(x,y).
+
+        Applies Gaussian spectral smoothing at wavenumber :math:`k_c` to the surface DEM
+        to isolate the regional driving slope, then applies the classical SIA equation:
+        .. math::
+            D_{\\text{SIA}} = \\frac{\\tau_0}{\\rho_{\\text{ice}} g \\sin\\alpha}
+
+        Flat areas are stabilized using a slope floor :math:`\\alpha_{\\min}` to prevent
+        singularities (:math:`1/\\sin\\alpha \\to \\infty`). Cells outside the glacier
+        outline or outside the valid DEM area are set to zero thickness.
+
+        Parameters
+        ----------
+        kc : float, default 0.0314
+            Corner frequency cutoff wavenumber [rad/m] for surface DEM smoothing
+            (:math:`\\approx 0.0314\\text{ rad/m}` corresponds to :math:`\\lambda_c \\approx 200\\text{ m}`).
+        tau_0 : float, default 100e3
+            Characteristic basal shear stress target in Pascals [Pa] (100 kPa = 100,000 Pa).
+        slope_floor_deg : float, default 5.0
+            Minimum surface slope angle [°] used in the SIA denominator to avoid numerical explosion.
+
+        Returns
+        -------
+        d_sia : np.ndarray
+            2D synthetic ice thickness raster grid [m] with shape identical to ``dem``.
         """
         # Smooth surface DEM
         smoothed_dem, _, _ = fft_gaussian_smooth(self.dem, self.dx, self.dy, kc)
@@ -110,7 +192,24 @@ class SurveyPlanner:
         max_length_km: float = 5.0,
     ) -> list[PlannedProfileTrack]:
         """
-        Generates central longitudinal flowline and transverse cross-profiles subject to total length budget max_length_km.
+        Generates longitudinal flowline and transverse cross-profile tracks within a distance budget.
+
+        Parameters
+        ----------
+        d_sia : np.ndarray
+            2D synthetic SIA ice thickness grid [m].
+        max_length_km : float, default 5.0
+            Total survey track length budget in kilometers [km].
+
+        Returns
+        -------
+        tracks : list of PlannedProfileTrack
+            List of generated track structures with coordinates and predicted depths.
+
+        Raises
+        ------
+        ValueError
+            If ``max_length_km <= 0``.
         """
         if max_length_km <= 0:
             raise ValueError(f"Survey track length budget (max_length_km={max_length_km}) must be greater than zero.")
@@ -187,7 +286,21 @@ class SurveyPlanner:
         return tracks
 
     def export_geojson(self, tracks: list[PlannedProfileTrack], filepath: str | Path) -> str:
-        """Exports planned tracks to GeoJSON format in WGS84 (EPSG:4326)."""
+        """
+        Exports planned survey tracks to GeoJSON format in WGS84 geographic coordinates (EPSG:4326).
+
+        Parameters
+        ----------
+        tracks : list of PlannedProfileTrack
+            Survey tracks to export.
+        filepath : str or Path
+            Destination GeoJSON file path.
+
+        Returns
+        -------
+        saved_path : str
+            Absolute file path of the saved GeoJSON file.
+        """
         features = []
         for trk in tracks:
             wgs_coords = _transform_coords_to_wgs84(trk.coordinates, self.crs)
@@ -212,7 +325,24 @@ class SurveyPlanner:
         return str(out_p)
 
     def export_gpx(self, tracks: list[PlannedProfileTrack], filepath: str | Path) -> str:
-        """Exports planned tracks to GPX format in WGS84 (EPSG:4326)."""
+        """
+        Exports planned survey tracks to GPS Exchange Format (GPX) in WGS84 (EPSG:4326).
+
+        Generates GPX XML compatible with handheld GPS receivers, mapping apps, and
+        drone flight mission planners.
+
+        Parameters
+        ----------
+        tracks : list of PlannedProfileTrack
+            Survey tracks to export.
+        filepath : str or Path
+            Destination GPX file path.
+
+        Returns
+        -------
+        saved_path : str
+            Absolute file path of the saved GPX file.
+        """
         out_p = Path(filepath)
         out_p.parent.mkdir(parents=True, exist_ok=True)
 
@@ -243,13 +373,39 @@ class SurveyPlanner:
         output_format: str = "tif",
     ) -> dict[str, Any]:
         """
-        Executes full forward survey planning pipeline.
+        Executes the full forward survey planning workflow for unprobed glaciers.
 
-        Output locations: the rasters, GPX and GeoJSON go to ``<output_dir>/<output_prefix>_*``; if
-        ``output_prefix`` is an absolute path they are written beside it (``output_dir`` then only applies
-        to relative prefixes) and, without ``output_dir``, the prefix's folder is the base folder. Figures are
-        saved next to those data files: a relative or unset ``plots_dir`` resolves to ``<base folder>/figures``;
-        an absolute ``plots_dir`` is used as is.
+        Computes synthetic SIA target thickness, designs longitudinal and transverse
+        transect lines subject to total length constraint `max_length_km`, and exports
+        GeoTIFF/ASCII rasters, GeoJSON lines, GPX tracks, and diagnostic plan map figures.
+
+        Parameters
+        ----------
+        kc : float, default 0.0314
+            Corner frequency cutoff wavenumber [rad/m] for DEM surface smoothing.
+        tau_0 : float, default 100e3
+            Characteristic basal shear stress target in Pascals [Pa] (100 kPa = 100,000 Pa).
+        max_length_km : float, default 5.0
+            Maximum total line length budget in kilometers [km].
+        output_prefix : str, default "final"
+            File prefix for generated raster and vector outputs.
+        output_dir : str or Path, optional
+            Base directory for output data files.
+        plots_dir : str or Path, optional
+            Directory for saving the diagnostic plan map figure.
+        output_format : str, default "tif"
+            Raster export format ('tif' or 'asc').
+
+        Returns
+        -------
+        results : dict of str to Any
+            Dictionary containing:
+            - ``'sia_modelled_depth'``: 2D synthetic SIA ice thickness grid [m].
+            - ``'tracks'``: List of PlannedProfileTrack instances.
+            - ``'saved_raster'``: Path of exported depth GeoTIFF/ASCII raster.
+            - ``'saved_geojson'``: Path of exported GeoJSON track lines.
+            - ``'saved_gpx'``: Path of exported GPX track lines.
+            - ``'saved_plot'``: Path of saved diagnostic survey plan map figure.
         """
         prefix_path = Path(output_prefix).expanduser()
         if output_dir:

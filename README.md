@@ -53,7 +53,7 @@
   </p>
 
   where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. The surface DEM is smoothed by low-pass filtering in the frequency domain from which the surface slope field is then derived. The <i>Fast Fourier Transform</i> (FFT) Gaussian low-pass filter is defined by the spatial cutoff wavenumber <i>k</i><sub>c</sub> in radians per meter [rad/m], or optionally, by the more intuitive cutoff wavelength $\lambda_c$ in meters [m] - see [here](#wavenumber-to-wavelength-conversion) for details. The spatial variance of <i>τ</i><sub>b</sub> is then quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across wavenumber, or wavelength, cutoffs and refine the variogram parameters. This surface slope optimization is a cornerstone of `PySole`'s workflow. The resulting optimal surface slope field directly informs subsequent processing stages, including pre- and post-migration interpolation strategies, 3D ray-based migration, and surface curvature estimation. To accelerate the optimization process, both the FFT low-pass filtering and the corresponding product variogram evaluations are executed via multi-threaded CPU parallelization.
-* **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration—introduced by Binder et al. ([2009](https://www.cambridge.org/core/journals/annals-of-glaciology/article/determination-of-total-ice-volume-and-icethickness-distribution-of-two-glaciers-in-the-hohe-tauern-region-eastern-alps-from-gpr-data/9CEE8439239FE7E9199513292C5D3D2F)) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage. The optimally smoothed surface slope field is applied during the 3D migration to ensure numerically stable ray displacement vectors.
+* **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration - introduced by Binder et al. ([2009](https://www.cambridge.org/core/journals/annals-of-glaciology/article/determination-of-total-ice-volume-and-icethickness-distribution-of-two-glaciers-in-the-hohe-tauern-region-eastern-alps-from-gpr-data/9CEE8439239FE7E9199513292C5D3D2F)) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage. The optimally smoothed surface slope field is applied during the 3D migration to ensure numerically stable ray displacement vectors.
 * **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging - see [here](#dual-kriging-vector-engine) for details. Two interpolation strategies are recommended as a **robust starting baseline**: <i>Ordinary Kriging</i> is initially recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift). <i>Universal Kriging</i> using the Shallow Ice Approximation (`"sia"`) physical drift model is intially recommended for direct interpolation of signal traveltimes or (migrated) depths - see [here](#workflow-and-methodology) for details. Corresponding Kriging estimation uncertainty fields are calculated alongside all predicted grids - see [here](#kriging-uncertainty-derivation) for details.
 * **Boundary Conditions:** Perimeter and rock outcrop margin boundary conditions (zero traveltime <i>T</i> = 0 s and zero thickness <i>D</i> = 0 m) are enforced by default (and can optionally be toggled off). Interior rock outcrops, or vector polygon holes, are natively parsed - see [here](#parsing-rock-outcrops) for details.
 * **Interactive Drift Analyzer:** A fully automated diagnostic engine to identify the optimal Universal Kriging drift model for each individual survey dataset. Evaluates and ranks the available `PySole` drift models by a suite of statistical metrics - see [here](docs/drift_analyzer_&_survey_planner.md) for details.
@@ -362,7 +362,7 @@ For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 
 #### Physical Reference Conversion Table ($5\text{ m} \times 5\text{ m}$ DEM)
 
-| Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Glaciological Feature Scale |
+| Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Surface Feature Scale |
 | :--- | :--- | :--- |
 | **$k_{\text{Nyquist}} \approx 0.6283\text{ rad/m}$** | $\mathbf{10.0\text{ m}}$ | Nyquist limit ($2 \cdot \min(dx, dy)$, finest resolvable feature) |
 | **$0.3142\text{ rad/m}$** | $\mathbf{20.0\text{ m}}$ | Fine spatial smoothing (filters features $< 20\text{ m}$) |
@@ -370,8 +370,6 @@ For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 | **$0.0628\text{ rad/m}$** | $\mathbf{100.0\text{ m}}$ | Medium spatial smoothing |
 | **$0.0314\text{ rad/m}$** | $\mathbf{200.0\text{ m}}$ | Broad spatial smoothing |
 | **$0.0100\text{ rad/m}$** | $\mathbf{628.3\text{ m}}$ | Very broad regional smoothing |
-
-Both $k_c$ [rad/m] and $\lambda_c$ [m] are reported in `PySole` log output and can be selected via the `"fft_filter_metric"` setting (`"wavenumber"` or `"wavelength"`).
 
 #### Derivation of FFT Filter Parameter Defaults (`kc_max`, `kc_min`, `lambda_min`, `lambda_max`, `n_steps`)
 
@@ -402,6 +400,8 @@ When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `n
      $$n_{\text{steps}} = \min(50,\ \max(10,\ n_{\text{modes}}))$$
      </p>
    - The candidate corner frequency vector <b>k</b><sub>c</sub> is generated as a logarithmically/geometrically spaced array (`np.geomspace`) from <i>k</i><sub>c,max</sub> down to <i>k</i><sub>c,min</sub> with <i>n</i><sub>steps</sub> evaluation passes.
+
+After completion of each DEM surface slope optimization process, both $k_{\text{c, opt}}$ [rad/m] and $\lambda_{\text{c, opt}}$ [m] are logged to the console and in `pysole.log`.
 
 <a id="variogram-binning"></a>
 #### 4. Variogram Binning with Minimum Pair Threshold

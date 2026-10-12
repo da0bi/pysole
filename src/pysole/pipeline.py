@@ -17,7 +17,16 @@ from .raster import BedrockMap
 
 class PipelineExporter:
     """
-    Handles file export operations to disk for PySole output grids and survey points.
+    Handles disk export operations for PySole output grids and survey points.
+
+    Coordinates saving raster datasets (GeoTIFF, ASCII Grid, CSV, NumPy) and point
+    tables (scattered migrated radar soundings) to disk according to the configuration
+    settings.
+
+    Parameters
+    ----------
+    solver : Any
+        Instance of `pysole.solver.Solver` containing computational results and export methods.
     """
 
     def __init__(self, solver: Any):
@@ -25,15 +34,70 @@ class PipelineExporter:
         self.outputs_cfg = solver.outputs_config_obj
 
     def get_resolved_output_prefix(self) -> str:
+        """
+        Resolve the base filesystem path prefix for all exported output files.
+
+        Returns
+        -------
+        str
+            Absolute base path prefix combining output directory and file prefix.
+        """
         return self.solver._get_resolved_output_prefix()
 
     def export_raster(self, grid: np.ndarray | None, suffix: str, name: str) -> str | list[str] | None:
+        """
+        Export a 2D numerical raster grid to disk in configured formats.
+
+        Parameters
+        ----------
+        grid : np.ndarray or None
+            2D grid array of shape (M_rows, N_cols) to export. If None, no file is written.
+        suffix : str
+            File naming suffix (e.g., '_kriging_bedrock', '_ice_thickness').
+        name : str
+            Descriptive dataset name for logging and metadata.
+
+        Returns
+        -------
+        saved_paths : str, list of str, or None
+            Path(s) of exported files, or None if grid is None.
+        """
         return self.solver._export_optional_raster(grid, suffix=suffix, name=name)
 
     def export_points_csv(self, points: np.ndarray | None, suffix: str) -> str | None:
+        """
+        Export scattered point coordinates and values to a CSV file.
+
+        Parameters
+        ----------
+        points : np.ndarray or None
+            2D array of point data (e.g., shape (N, 4) for [x, y, z_surf, depth]). If None,
+            no export is performed.
+        suffix : str
+            File naming suffix (e.g., '_migrated_points.csv').
+
+        Returns
+        -------
+        saved_path : str or None
+            Path to the saved CSV file, or None if points is None.
+        """
         return self.solver._export_optional_points_csv(points, suffix=suffix)
 
     def export_all(self, stage: str | None = None) -> list[str]:
+        """
+        Export all active output rasters and point datasets for a given pipeline stage.
+
+        Parameters
+        ----------
+        stage : str, optional
+            Pipeline stage identifier: 'migration', 'variogram', 'kriging', 'finalization',
+            or None to export all currently available results.
+
+        Returns
+        -------
+        saved_files : list of str
+            List of absolute filesystem paths to all created files.
+        """
         return self.solver.export_outputs(stage=stage)
 
 

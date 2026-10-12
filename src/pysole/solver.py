@@ -1,7 +1,10 @@
 """
-Main Solver API for PySole package.
-Implements the workflow for physically-informed bedrock interpolation & 3D migration,
-caching surface gradients and smoothed slope grids for maximum computational efficiency.
+Main Solver API for PySole.
+
+Provides the high-level orchestration interface for physically-informed bedrock
+topography reconstruction, 3D Eikonal ray normal migration, Basal Shear Stress (BSS)
+spectral slope optimization, Dual Kriging interpolation with rigorous uncertainty
+estimation, and geomorphological post-processing.
 """
 
 from pathlib import Path
@@ -30,6 +33,17 @@ import sys
 class Solver:
     """
     Physically-Informed Bedrock Interpolation & 3D Migration Solver.
+
+    Coordinates the complete multi-stage scientific workflow:
+      1. Surface DEM ingestion, coordinate validation, and gradient precomputations.
+      2. Pre-migration traveltime interpolation and 3D Eikonal normal ray migration.
+      3. Spectral low-pass filtering of surface slope and Basal Shear Stress (BSS)
+         variance minimization to find the optimal cutoff wavenumber k_c [rad/m].
+      4. Post-migration Dual Kriging (Ordinary, Universal, or Regression Kriging)
+         to interpolate ice thickness D(x, y) [m] and estimate prediction uncertainty.
+      5. Topography finalization through optional depth field smoothing, Random Forest
+         gap filling in unconstrained areas, and geomorphological boundary margin blending.
+      6. Forward modeling of unprobed glacier survey paths via Shallow Ice Approximation (SIA).
     """
 
     def __init__(
@@ -73,79 +87,78 @@ class Solver:
         Parameters
         ----------
         dem : str, Path, or np.ndarray
-            Path to surface DEM GeoTIFF/ASCII file, or 2D numpy array.
+            Path to surface DEM GeoTIFF/ASCII file, or 2D NumPy array of surface elevations [m].
         outline : str, Path, or np.ndarray, optional
-            Path to creeping body boundary polygon (Shapefile/GeoJSON) or boolean mask.
+            Path to glacier boundary polygon (Shapefile/GeoJSON) or 2D boolean mask.
         dx : float, optional
-            Pixel resolution along X. If None, derived directly from actual DEM metadata.
+            Spatial grid spacing along the X-axis [m]. If None, derived from DEM metadata.
         dy : float, optional
-            Pixel resolution along Y. If None, derived directly from actual DEM metadata.
+            Spatial grid spacing along the Y-axis [m]. If None, derived from DEM metadata.
         bounds : tuple of float, optional
-            Spatial bounding box (minx, miny, maxx, maxy).
+            Projected metric spatial bounding box (minx, miny, maxx, maxy) [m].
         origin : tuple of float, optional
-            Lower-left coordinate origin (xll, yll) for headerless DEM formats (CSV, NPY, ndarray).
-        crs : str or int, optional
-            Coordinate Reference System (e.g. 'EPSG:32633'). Enforces projected metric system checks.
-        pre_kriging_method : str
-            1st-pass pre-migration Kriging approach ('universal', 'ordinary', 'regression'). Default 'universal'.
+            Lower-left coordinate origin (xll, yll) [m] for headerless DEM formats (CSV, NPY, ndarray).
+        crs : str, int, or pyproj.CRS, optional
+            Coordinate Reference System (e.g. 'EPSG:32633'). Enforces projected metric units.
+        pre_kriging_method : str, default 'universal'
+            First-pass pre-migration Kriging interpolation approach: 'universal', 'ordinary',
+            or 'regression'.
         pre_drift_terms : list of str, optional
-            1st-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
-        pre_variogram_model : str
-            1st-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'. Note: 'linear' is supported under engine='pykrige'; engine='native' falls back to 'spherical' with a warning.
-        pre_zero_boundary : bool
-            If True, enforces a zero traveltime boundary condition (T=0) on the glacier margin outline.
-        pre_interpolation_target : str
-            Quantity interpolated in the 1st pass: 'P' (default; BSS product P = T * sin(alpha_opt)) or
-            'T' (direct traveltimes), see the README parameter reference.
-        pre_drift_analyzer : bool
-            If True, runs the interactive Universal Kriging Drift Analyzer for the 1st pre-migration pass. Default False.
-        post_kriging_method : str
-            2nd-pass post-migration Kriging approach ('universal', 'ordinary', 'regression'). Default 'universal'.
+            First-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
+        pre_variogram_model : str, default 'spherical'
+            First-pass spatial variogram model: 'spherical', 'exponential', or 'gaussian'.
+            Note: 'linear' is supported under engine='pykrige'; engine='native' falls back to 'spherical'.
+        pre_zero_boundary : bool, default True
+            If True, enforces a zero traveltime boundary condition (T = 0 ns) along the glacier margin.
+        pre_interpolation_target : str, default 'P'
+            Target quantity interpolated in the first pass: 'P' (BSS product P = T * sin(alpha_opt))
+            or 'T' (direct traveltime in ns).
+        pre_drift_analyzer : bool, default False
+            If True, runs the interactive Universal Kriging Drift Analyzer for the pre-migration pass.
+        post_kriging_method : str, default 'universal'
+            Second-pass post-migration Kriging approach: 'universal', 'ordinary', or 'regression'.
         post_drift_terms : list of str, optional
-            2nd-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
-        post_variogram_model : str
-            2nd-pass variogram model ('spherical', 'exponential', 'gaussian', 'linear'). Default 'spherical'. Note: 'linear' is supported under engine='pykrige'; engine='native' falls back to 'spherical' with a warning.
-        post_zero_boundary : bool
-            If True, enforces a zero thickness boundary condition (H=0) on the glacier margin outline.
-        post_interpolation_target : str
-            Quantity interpolated in the 2nd pass: 'P' (default; product P = D * sin(alpha_opt)) or
-            'D' (direct migrated depths), see the README parameter reference.
-        post_drift_analyzer : bool
-            If True, runs the interactive Universal Kriging Drift Analyzer for the 2nd post-migration pass. Default False.
-        perform_migration : bool
-            If True (default), performs 3D Eikonal ray migration on travel times. If False, skips migration.
-        survey_data_type : str
-            Type of input survey data defined in inputs section: 'one_way_traveltime' (default),
-            'two_way_traveltime' (converts TWT/2), or 'depth' (direct depth/thickness measurements, skips migration).
+            Second-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
+        post_variogram_model : str, default 'spherical'
+            Second-pass spatial variogram model: 'spherical', 'exponential', or 'gaussian'.
+        post_zero_boundary : bool, default True
+            If True, enforces a zero ice thickness boundary condition (H = 0 m) along the glacier margin.
+        post_interpolation_target : str, default 'P'
+            Target quantity interpolated in the second pass: 'P' (BSS product P = D * sin(alpha_opt))
+            or 'D' (direct migrated ice thickness in m).
+        post_drift_analyzer : bool, default False
+            If True, runs the interactive Universal Kriging Drift Analyzer for the post-migration pass.
+        perform_migration : bool, default True
+            If True, performs 3D Eikonal normal ray migration on radar traveltimes. If False, skips migration.
+        survey_data_type : str, default 'one_way_traveltime'
+            Type of input survey data: 'one_way_traveltime' [ns], 'two_way_traveltime' [ns]
+            (automatically converted via TWT/2), or 'depth' [m] (direct ice thickness measurements).
         plots_dir : str or Path, optional
-            Directory where generated plots are automatically saved.
-        n_cores : int
-            Number of CPU cores for multi-threading/processing (-1 for all available cores).
-        kriging_engine : str
-            Kriging solver engine: 'native' (default, high-performance solver) or 'pykrige'.
+            Directory where diagnostic figures and maps are saved.
+        n_cores : int, default -1
+            Number of CPU cores for parallelized operations (-1 uses all available CPU cores).
+        kriging_engine : str, default 'native'
+            Kriging solver engine: 'native' (high-performance Dual Kriging) or 'pykrige'.
         nrbins : int, optional
-            Number of variogram bins. If None (default), chosen automatically as
-            ``min(30, max(3, n_pairs // 30))``.
-        ice_density : float
-            Ice density [kg/m^3] used for the basal shear stress (BSS) output and SIA depth. Default 900.0.
-        g : float
-            Gravitational acceleration [m/s^2]. Default 9.81.
+            Number of distance lag bins for experimental variogram calculation. If None, chosen automatically.
+        ice_density : float, default 900.0
+            Bulk ice density [kg/m^3] used for basal shear stress calculation and SIA depth modeling.
+        g : float, default 9.81
+            Gravitational acceleration [m/s^2].
         output_dir : str or Path, optional
-            General workspace directory for all output files. If None, defaults to parent directory of survey_data_path.
+            General workspace directory for all output raster and vector files.
         survey_data_path : str or Path, optional
-            Default survey file path; used to resolve the default output folder (and figures folder) when
-            ``output_dir`` / ``plots_dir`` are not given.
+            Path to survey points file; used to resolve default output paths if output_dir is unspecified.
         survey_profile_column : str, optional
-            Column name identifying individual survey profiles in survey CSV data for LOPO spatial CV.
+            Column name identifying individual survey profiles in CSV data for LOPO spatial cross-validation.
         config_path : str or Path, optional
             Path to configuration file used for resolving relative paths.
-        show_progress : bool
-            If True (default), displays terminal progress bars during heavy processing steps.
+        show_progress : bool, default True
+            If True, displays terminal progress bars during computational stages.
         max_memory_fraction : float, optional
-            RAM budget of the native Kriging engine as a fraction of the currently available memory
-            (``0 < f <= 0.9``). If the estimated peak exceeds it, worker threads are reduced first; the Kriging
-            variance (uncertainty) is skipped only if a single thread still does not fit. If None (default),
-            ``kriging_parameters.max_memory_fraction`` of the configuration is used (default 0.5).
+            RAM budget of the native Kriging engine as a fraction of available memory (0 < f <= 0.9).
+        config : dict of str to Any, optional
+            Parsed configuration dictionary if already loaded.
         """
         self.output_dir = output_dir
         self.survey_data_path = survey_data_path
@@ -261,7 +274,7 @@ class Solver:
 
     @property
     def traveltime_grid(self) -> np.ndarray | None:
-        """Reconstructed pre-migration signal traveltime grid T(x,y)."""
+        """Reconstructed pre-migration one-way radar traveltime grid T(x, y) [ns]."""
         return self._traveltime_grid
 
     @traveltime_grid.setter
@@ -270,60 +283,75 @@ class Solver:
 
     @property
     def traveltime_std_grid(self) -> np.ndarray | None:
-        """Pre-migration signal traveltime Kriging standard error uncertainty grid sigma_T(x,y)."""
+        """Pre-migration traveltime Kriging standard error uncertainty grid sigma_T(x, y) [ns]."""
         return self._traveltime_std
 
     @property
     def opt_wavelength(self) -> float | None:
-        """Optimal physical spatial cutoff wavelength lambda_c [m]."""
+        """Optimal physical spatial cutoff wavelength lambda_c = 2*pi / k_c [m]."""
         if self.opt_kc is None:
             return None
         return compute_cutoff_wavelength(self.opt_kc)
 
     @property
     def thickness_grid(self) -> np.ndarray | None:
-        """Final predicted ice thickness grid D(x,y) [m]."""
+        """Final predicted ice thickness grid D(x, y) [m]."""
         return self.final_thickness if self.final_thickness is not None else self.kriged_thickness
 
     @property
     def thickness_std_grid(self) -> np.ndarray | None:
-        """Final ice thickness Kriging standard error uncertainty grid [m]."""
+        """Final ice thickness Kriging standard error uncertainty grid sigma_D(x, y) [m]."""
         return self.kriged_std
 
     @property
     def basal_shear_stress_grid(self) -> np.ndarray | None:
-        """Final basal shear stress grid tau_b(x,y) [kPa]."""
+        """Final basal shear stress grid tau_b(x, y) = rho_ice * g * D * sin(alpha_opt) / 1000 [kPa]."""
         return self.final_bss
 
     @property
     def basal_shear_stress_std_grid(self) -> np.ndarray | None:
-        """Final basal shear stress Kriging standard error uncertainty grid sigma_tau_b(x,y) [kPa]."""
+        """Final basal shear stress Kriging standard error uncertainty grid sigma_tau_b(x, y) [kPa]."""
         return self.bss_std
 
     @property
     def outputs_config(self) -> dict[str, Any]:
-        """Returns the outputs configuration dictionary."""
+        """Dictionary of output export configuration parameters."""
         return self.config.get("outputs", {})
 
     @property
     def outputs_config_obj(self) -> OutputsConfig:
-        """Returns structured OutputsConfig instance."""
+        """Structured OutputsConfig dataclass instance for type-safe export options."""
         return OutputsConfig.from_dict(self.outputs_config)
 
     @property
     def optimization_config(self) -> dict[str, Any]:
-        """Returns the optimization parameters configuration dictionary."""
+        """Dictionary of spectral slope optimization parameters."""
         return self.config.get("optimization_parameters", {})
 
     @property
     def slope_floor_deg(self) -> float:
-        """Minimum surface slope angle threshold in degrees [°]."""
+        """Minimum surface slope angle threshold in degrees [°] for stabilizing numerical divisions."""
         return float(self.optimization_config.get("slope_floor_deg", 5.0))
 
     def _resolve_variogram_for_engine(self, model: str, method: str, warn: bool = True) -> str:
-        """Applies the native-engine variogram fallback ("linear" -> "spherical") when it applies.
+        """Resolves variogram model compatibility for the selected Kriging engine.
 
-        Regression Kriging and ``engine="pykrige"`` run on PyKrige, which supports "linear" natively.
+        Replaces 1D 'linear' variograms with 'spherical' when using the native 2D Dual
+        Kriging engine, logging a single notification. PyKrige supports 'linear' natively.
+
+        Parameters
+        ----------
+        model : str
+            Requested variogram model ('spherical', 'exponential', 'gaussian', 'linear').
+        method : str
+            Kriging method ('ordinary', 'universal', 'regression').
+        warn : bool, default True
+            If True, logs a warning when falling back from linear to spherical model.
+
+        Returns
+        -------
+        resolved_model : str
+            Engine-compatible variogram model name.
         """
         engine = self.engine_type.replace("_kriging", "")
         is_regression = str(method).lower().strip() in ("regression", "regression_kriging")
@@ -332,27 +360,46 @@ class Solver:
         return model
 
     def _slope_source(self) -> np.ndarray:
-        """Slope angle grid [rad]: optimized slope if available, else DEM gradient slope."""
+        """Returns the active surface slope angle grid [rad].
+
+        Uses the spectrally optimized surface slope if optimization has been performed;
+        otherwise falls back to raw numerical surface DEM gradients.
+
+        Returns
+        -------
+        slope_grid : np.ndarray
+            2D array of surface slope angles in radians [rad].
+        """
         if self.opt_slope is not None:
             return self.opt_slope
         return self._get_dem_gradients()["slope_rad"]
 
     @property
     def slope_sin(self) -> np.ndarray:
-        """Raw sin(alpha_opt) grid without any lower bound.
+        """Raw sin(alpha_opt) grid without lower threshold bounding.
 
-        Used for the basal shear stress, where flooring the slope would bias the result
-        high in cells flatter than ``slope_floor_deg``.
+        Used strictly for basal shear stress calculation (tau_b = rho * g * D * sin(alpha)),
+        where artificially flooring slopes in flat valley floors would introduce a positive bias.
+
+        Returns
+        -------
+        np.ndarray
+            2D array of unfloored sine values sin(alpha_opt).
         """
         return np.sin(self._slope_source())
 
     @property
     def safe_slope_sin(self) -> np.ndarray:
-        """Returns sin(alpha_opt) grid bounded below by slope_floor_deg.
+        """Stabilized sin(alpha_opt) grid bounded below by sin(slope_floor_deg).
 
-        The floor is required for the P <-> D/T conversions (division by sin(alpha)); it must
-        NOT be used for the basal shear stress (see ``slope_sin``). The result is cached and
-        invalidated when the slope grid object or the floor changes.
+        Required for conversions between basal shear stress product P(x, y) and physical
+        traveltime T(x, y) or ice thickness D(x, y) (which require division by sin(alpha)).
+        Cached and invalidated only when the underlying slope array changes.
+
+        Returns
+        -------
+        np.ndarray
+            2D array of floored sine values max(sin(alpha), sin(slope_floor_deg)).
         """
         src = self._slope_source()
         key = (id(src), self.slope_floor_deg)
@@ -365,7 +412,22 @@ class Solver:
         return result
 
     def _cfg_get(self, section: str, key: str, default: Any = None) -> Any:
-        """Helper method for safe configuration parameter lookup."""
+        """Safely retrieves a configuration parameter from a nested dictionary section.
+
+        Parameters
+        ----------
+        section : str
+            Top-level configuration section key (e.g. 'inputs', 'spatial_parameters').
+        key : str
+            Parameter name inside the section.
+        default : Any, optional
+            Fallback value if the section or key does not exist.
+
+        Returns
+        -------
+        value : Any
+            Configured parameter value or fallback default.
+        """
         sec = self.config.get(section, {})
         if isinstance(sec, dict):
             val = sec.get(key)
@@ -374,7 +436,13 @@ class Solver:
 
     @property
     def bedrock_map(self) -> BedrockMap | None:
-        """Returns the final bedrock elevation grid as a BedrockMap object."""
+        """Returns the final predicted bedrock elevation grid wrapped as a BedrockMap object.
+
+        Returns
+        -------
+        BedrockMap or None
+            Bedrock elevation map [m] with spatial georeferencing metadata, or None if not yet computed.
+        """
         if self.final_grid is None:
             return None
         return BedrockMap(
@@ -387,7 +455,24 @@ class Solver:
 
     @property
     def results(self) -> dict[str, Any]:
-        """Returns a dictionary containing all computed pipeline outputs."""
+        """Dictionary containing all final and intermediate spatial grids and parameters.
+
+        Returns
+        -------
+        results_dict : dict of str to Any
+            Dictionary containing:
+              - 'bedrock_map' : BedrockMap of final bedrock elevation [m].
+              - 'thickness_grid' : 2D array of final ice thickness [m].
+              - 'thickness_std_grid' : 2D array of ice thickness standard error [m].
+              - 'basal_shear_stress_grid' : 2D array of basal shear stress [kPa].
+              - 'basal_shear_stress_std_grid' : 2D array of BSS standard error [kPa].
+              - 'migrated_points' : (N, 4+) array of 3D migrated coordinates [m].
+              - 'opt_kc' : Optimal smoothing corner wavenumber [rad/m].
+              - 'opt_wavelength' : Optimal smoothing cutoff wavelength [m].
+              - 'kriged_bedrock' : 2D array of pre-blended Kriged bedrock elevation [m].
+              - 'rf_filled_bedrock' : 2D array of Random Forest gap-filled bedrock [m].
+              - 'blended_bedrock' : 2D array of margin-blended bedrock [m].
+        """
         return {
             "bedrock_map": self.bedrock_map,
             "thickness_grid": self.thickness_grid,
@@ -403,7 +488,13 @@ class Solver:
         }
 
     def summary(self) -> str:
-        """Prints and returns a formatted execution summary report of the Solver state and computed results."""
+        """Formats and logs a comprehensive execution summary report of the Solver state.
+
+        Returns
+        -------
+        summary_text : str
+            Formatted multi-line execution summary report string.
+        """
         lines = [
             "================================================================================",
             "                        PYSOLE SOLVER EXECUTION SUMMARY                         ",
@@ -431,6 +522,13 @@ class Solver:
         return summary_text
 
     def _get_resolved_output_prefix(self) -> str:
+        """Resolves the absolute file path prefix for exporting raster and tabular outputs.
+
+        Returns
+        -------
+        resolved_prefix : str
+            Full filesystem path prefix without extension.
+        """
         raw_prefix = self.outputs_config_obj.output_prefix or "final"
         prefix_path = Path(raw_prefix)
 
@@ -441,6 +539,22 @@ class Solver:
         return self.resolve_path(str(prefix_path))
 
     def _export_optional_raster(self, grid: np.ndarray | None, suffix: str, name: str) -> str | list[str] | None:
+        """Exports a 2D spatial grid to raster files if the grid is populated.
+
+        Parameters
+        ----------
+        grid : np.ndarray or None
+            2D array to export.
+        suffix : str
+            Filename suffix appended to base output prefix (e.g. 'thickness', 'bedrock').
+        name : str
+            Human-readable dataset name for logging.
+
+        Returns
+        -------
+        saved_paths : str, list of str, or None
+            Path(s) to saved raster file(s), or None if grid is empty.
+        """
         if grid is None:
             return None
         base_prefix = self._get_resolved_output_prefix()
@@ -456,6 +570,20 @@ class Solver:
         return saved
 
     def _export_optional_points_csv(self, points: np.ndarray | None, suffix: str) -> str | None:
+        """Exports point coordinate data to CSV format.
+
+        Parameters
+        ----------
+        points : np.ndarray or None
+            Coordinate matrix (N, M) to export.
+        suffix : str
+            Filename suffix appended to base output prefix.
+
+        Returns
+        -------
+        saved_path : str or None
+            Path to exported CSV file, or None if points array is empty.
+        """
         if points is None:
             return None
         base_prefix = self._get_resolved_output_prefix()
@@ -466,7 +594,20 @@ class Solver:
 
     @staticmethod
     def _uncertainty_exportable(grid: np.ndarray | None, name: str) -> bool:
-        """False (with a warning) if an uncertainty grid holds no finite value, i.e. the variance was not computed."""
+        """Determines whether an uncertainty grid contains valid finite numerical values.
+
+        Parameters
+        ----------
+        grid : np.ndarray or None
+            Uncertainty grid to test.
+        name : str
+            Dataset name for user notification logging.
+
+        Returns
+        -------
+        is_exportable : bool
+            True if the grid exists and contains at least one finite number; False otherwise.
+        """
         if grid is not None and np.any(np.isfinite(grid)):
             return True
         logger.warning(
@@ -534,7 +675,11 @@ class Solver:
         return saved
 
     def clear_intermediate_grids(self) -> None:
-        """Clears intermediate 2D array grids from memory to optimize footprint for large datasets."""
+        """Clears intermediate 2D memory arrays to reduce RAM footprint.
+
+        Frees intermediate traveltime, Kriged thickness, variance, and basal shear stress grids
+        when processing exceptionally large spatial grids.
+        """
         self._traveltime_grid = None
         self._traveltime_std = None
         self.kriged_thickness = None
@@ -545,7 +690,13 @@ class Solver:
 
     @property
     def effective_output_dir(self) -> str:
-        """Returns the effective output directory for file resolution."""
+        """Returns the resolved filesystem directory where output files are saved.
+
+        Returns
+        -------
+        output_directory : str
+            Resolved absolute directory path string.
+        """
         cfg_p = getattr(self, "config_path", None)
         eff_dir = resolve_output_dir(
             output_dir=self.output_dir,
@@ -555,22 +706,48 @@ class Solver:
         return str(eff_dir)
 
     def resolve_input_path(self, path: str | Path | os.PathLike | None) -> str | None:
-        """Resolves an input file path relative to config_path parent or working directory."""
+        """Resolves an input file path relative to the configuration file or working directory.
+
+        Parameters
+        ----------
+        path : str, Path, os.PathLike, or None
+            Raw input path specification.
+
+        Returns
+        -------
+        resolved_path : str or None
+            Absolute path string, or None if path is None.
+        """
         cfg_p = getattr(self, "config_path", None)
         return resolve_input_config_path(path, config_path=cfg_p)
 
     def resolve_path(self, path: str | Path | os.PathLike | None) -> str | None:
-        """Resolves a target file or directory path relative to effective_output_dir if relative."""
+        """Resolves an output file or directory path relative to effective_output_dir.
+
+        Parameters
+        ----------
+        path : str, Path, os.PathLike, or None
+            Raw target output path specification.
+
+        Returns
+        -------
+        resolved_path : str or None
+            Absolute path string, or None if path is None.
+        """
         cfg_p = getattr(self, "config_path", None)
         return resolve_config_path(path, output_dir=self.output_dir, survey_data_path=self.survey_data_path, config_path=cfg_p)
 
     @property
     def plots_dir(self) -> str:
-        """
-        Directory where diagnostic figures are saved (figures are always saved).
+        """Directory where diagnostic figures and maps are saved.
 
-        Absolute ``plots_dir`` is used as is; otherwise the directory is resolved next to the data files:
-        the parent folder of an absolute ``outputs.output_prefix``, else the effective ``output_dir``.
+        Absolute paths are preserved as-is; relative paths are resolved next to the primary
+        data outputs in a 'figures' subfolder.
+
+        Returns
+        -------
+        directory_path : str
+            Resolved absolute path to figures directory.
         """
         out_cfg = (getattr(self, "config", None) or {}).get("outputs", {})
         return resolve_plots_dir(
@@ -587,22 +764,49 @@ class Solver:
 
     @property
     def plot_extent(self) -> list[float]:
-        """Returns Matplotlib plot extent [minx, maxx, miny, maxy]."""
+        """Returns Matplotlib bounding box extent [minx, maxx, miny, maxy] in projected meters [m].
+
+        Returns
+        -------
+        extent : list of float
+            Four-element list [minx, maxx, miny, maxy] in projected meters [m].
+        """
         return self.geometry.extent
 
     def _get_dem_gradients(self) -> dict[str, np.ndarray]:
+        """Calculates and caches spatial derivatives and slope angles of the raw surface DEM.
+
+        Returns
+        -------
+        gradient_dict : dict of str to np.ndarray
+            Dictionary containing:
+              - 'dz_dx' : Partial derivative along X [m/m].
+              - 'dz_dy' : Partial derivative along Y [m/m].
+              - 'slope_rad' : Surface slope angle [rad].
+              - 'aspect_rad' : Aspect direction [rad].
+        """
         if self._gradient_cache is None:
             self._gradient_cache = compute_gradients(self.dem_grid, dx=self.dx, dy=self.dy)
         return self._gradient_cache
 
     def _get_fft_dem_grids(self, kc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Returns the cached padded DEM spectrum and wavenumber grid.
+        """Returns the cached reflection-padded DEM 2D FFT spectrum and wavenumber grid.
 
-        Reflection padding scales with the Gaussian kernel width, ``ceil(4 / (k_c * dx))`` px, so it is sized for
-        the smallest k_c requested so far (never below the default k_c = 0.01 rad/m sizing). The FFT is only
-        recomputed when a smaller k_c than any previous request needs wider padding; previously cached smoothed
-        grids (larger k_c) remain valid.
+        Reflection padding scales with the Gaussian kernel width ceil(4 / (k_c * dx)) px,
+        sized for the smallest k_c requested so far (capped at k_c = 0.01 rad/m). The 2D FFT
+        is recomputed only if a wider padding is demanded by a smaller k_c.
+
+        Parameters
+        ----------
+        kc : float, optional
+            Requested Gaussian filter cutoff wavenumber [rad/m].
+
+        Returns
+        -------
+        A_shift_dem : np.ndarray
+            Zero-centered 2D complex Fourier transform spectrum of the reflection-padded DEM.
+        k_grid_dem : np.ndarray
+            2D radial spatial wavenumber magnitude grid k = sqrt(kx^2 + ky^2) [rad/m].
         """
         kc_pad = 0.01 if (kc is None or not kc > 0) else min(float(kc), 0.01)
         if self._fft_dem_cache is None or kc_pad < self._fft_dem_pad_kc:
@@ -612,6 +816,20 @@ class Solver:
         return self._fft_dem_cache
 
     def get_smoothed_dem(self, kc: float) -> np.ndarray:
+        """Returns the 2D surface DEM smoothed with a 2D Gaussian low-pass filter at cutoff k_c.
+
+        Caches filtered elevation grids in memory to avoid redundant inverse FFT operations.
+
+        Parameters
+        ----------
+        kc : float
+            Spatial cutoff wavenumber k_c [rad/m] (lambda_c = 2*pi / k_c).
+
+        Returns
+        -------
+        smoothed_dem : np.ndarray
+            2D array of smoothed surface elevations [m].
+        """
         kc_key = round(float(kc), 6)
         if kc_key not in self._smoothed_dem_cache:
             A_shift_dem, k_grid_dem = self._get_fft_dem_grids(kc)
@@ -620,19 +838,49 @@ class Solver:
         return self._smoothed_dem_cache[kc_key]
 
     def get_smoothed_slope(self, kc: float) -> np.ndarray:
+        """Calculates the surface slope angle grid from a DEM smoothed at cutoff wavenumber k_c.
+
+        Parameters
+        ----------
+        kc : float
+            Spatial cutoff wavenumber k_c [rad/m].
+
+        Returns
+        -------
+        slope_rad : np.ndarray
+            2D array of filtered surface slope angles in radians [rad].
+        """
         smoothed_dem = self.get_smoothed_dem(kc)
         return compute_gradients(smoothed_dem, dx=self.dx, dy=self.dy)["slope_rad"]
 
     def get_smoothed_curvature(self, kc: float) -> np.ndarray:
+        """Calculates surface Laplacian curvature from a DEM smoothed at cutoff wavenumber k_c.
+
+        Parameters
+        ----------
+        kc : float
+            Spatial cutoff wavenumber k_c [rad/m].
+
+        Returns
+        -------
+        curvature : np.ndarray
+            2D array of surface Laplacian curvature values [m^-1].
+        """
         smoothed_dem = self.get_smoothed_dem(kc)
         return compute_surface_curvature(smoothed_dem, dx=self.dx, dy=self.dy)
 
     def _normalize_survey_data_type(self) -> str:
-        """
-        Normalizes and validates survey_data_type into one of 3 canonical types:
-          - 'one_way_traveltime'
-          - 'two_way_traveltime'
-          - 'depth'
+        """Normalizes and validates survey_data_type into one of 3 canonical formats.
+
+        Returns
+        -------
+        normalized_type : str
+            One of 'one_way_traveltime', 'two_way_traveltime', or 'depth'.
+
+        Raises
+        ------
+        ValueError
+            If survey_data_type is not recognized.
         """
         dtype_str = str(self.survey_data_type).lower().strip()
         if dtype_str in ("one_way_traveltime", "two_way_traveltime", "depth"):
@@ -648,7 +896,29 @@ class Solver:
         config_path: str | Path | os.PathLike | dict[str, Any] = "pysole.json",
         log_level: str | None = None,
     ) -> "Solver":
-        """Initializes Solver instance using inputs defined in pysole.json configuration file."""
+        """Instantiates and configures a Solver pipeline from a JSON configuration file.
+
+        Parses all input paths, spatial parameters, physical constants, migration options,
+        variogram specifications, and output preferences defined in pysole.json.
+
+        Parameters
+        ----------
+        config_path : str, Path, os.PathLike, or dict of str to Any, default 'pysole.json'
+            Filesystem path to the JSON configuration file, or pre-loaded dictionary.
+        log_level : str, optional
+            Logging level override ('DEBUG', 'INFO', 'WARNING', 'ERROR').
+
+        Returns
+        -------
+        solver : Solver
+            Fully initialized Solver instance ready for execution via `run_pipeline()`
+            or individual stage method calls.
+
+        Raises
+        ------
+        ValueError
+            If required configuration keys (such as 'dem_path') are missing.
+        """
         from .config import load_config
         cfg = load_config(config_path, log_level=log_level)
         inputs = cfg.get("inputs", {})
@@ -732,11 +1002,32 @@ class Solver:
         return solver
 
     def get_sample_points(self, stage: str, target_type: str = "P") -> np.ndarray:
-        """
-        Retrieves or constructs cached 3-column sample points matrix [X, Y, Target]
-        for the specified stage ('pre_migration' or 'post_migration') and target_type ('P', 'T', 'D').
-        Guarantees that slope interpolation and multiplication for Product 'P' (T*sin(alpha) or D*sin(alpha))
-        is evaluated ONCE and cached.
+        """Retrieves or builds cached observation points for Kriging interpolation.
+
+        Guarantees that surface slope interpolation and multiplication for the basal
+        shear stress product P = T * sin(alpha_opt) or P = D * sin(alpha_opt) is evaluated
+        once and cached in memory.
+
+        Parameters
+        ----------
+        stage : str
+            Workflow stage ('pre_migration' or 'post_migration').
+        target_type : str, default 'P'
+            Interpolation target variable:
+              - 'P' : Basal shear stress product (T * sin(alpha) or D * sin(alpha)).
+              - 'T' : Direct signal traveltime [ns].
+              - 'D' : Direct ice thickness [m].
+
+        Returns
+        -------
+        sample_points : np.ndarray
+            (N, 3) or (N, 4) NumPy array of observation points [X, Y, Target]
+            (with optional profile ID in column 3).
+
+        Raises
+        ------
+        ValueError
+            If no survey or migrated points are loaded.
         """
         stage_key = "pre_migration" if "pre" in stage.lower() else "post_migration"
         target_upper = str(target_type).upper().strip()
@@ -788,7 +1079,13 @@ class Solver:
 
     @property
     def max_memory_fraction(self) -> float:
-        """RAM budget fraction of the native Kriging engine (constructor argument, else configuration, else 0.5)."""
+        """RAM budget fraction for the native Dual Kriging engine (0 < f <= 0.9).
+
+        Returns
+        -------
+        fraction : float
+            Fraction of available host physical RAM allowed for solver allocation.
+        """
         if self._max_memory_fraction is not None:
             return self._max_memory_fraction
         cfg_val = self._cfg_get("kriging_parameters", "max_memory_fraction", 0.5)
@@ -805,9 +1102,35 @@ class Solver:
         pass_name: str = "Pass 1: Pre-Migration",
         return_variance: bool = True,
     ) -> KrigingResult:
-        """
-        Unified Pass Dispatcher executing Kriging interpolation for direct targets ('T' / 'D')
-        or BSS product targets ('P').
+        """Executes a unified Kriging interpolation pass for direct or BSS product targets.
+
+        Dispatches Dual Kriging interpolation for direct physical targets ('T' in ns, 'D' in m)
+        or basal shear stress product targets ('P' = T * sin(alpha) or D * sin(alpha)).
+        Handles drift analysis diagnostics, external curvature grids, and memory guarding.
+
+        Parameters
+        ----------
+        target_type : str
+            Interpolation target variable ('P', 'T', or 'D').
+        points : np.ndarray
+            Observation points coordinate matrix.
+        krig_method : str
+            Kriging method ('ordinary', 'universal', 'regression').
+        drift_terms : list of str, optional
+            Universal Kriging drift terms (e.g. ['sia'], ['quadratic_xy']).
+        var_model : str
+            Theoretical variogram model name ('spherical', 'exponential', 'gaussian').
+        zero_boundary : bool
+            If True, enforces zero values along the glacier perimeter outline.
+        pass_name : str, default 'Pass 1: Pre-Migration'
+            Descriptive pass label for logging.
+        return_variance : bool, default True
+            If True, computes formal Kriging estimation variance.
+
+        Returns
+        -------
+        krig_result : KrigingResult
+            Result container holding the interpolated grid and uncertainty variance grid.
         """
         target_upper = str(target_type).upper().strip()
         is_pre = "Pass 1" in pass_name
@@ -911,7 +1234,13 @@ class Solver:
         return krig_res
 
     def _warn_traveltime_exports_unavailable(self, reason: str) -> None:
-        """Warns once if traveltime exports are requested although no traveltime grid is computed."""
+        """Warns once if traveltime exports are requested although no traveltime grid is computed.
+
+        Parameters
+        ----------
+        reason : str
+            Explanation of why traveltime calculation was skipped.
+        """
         cfg = self.outputs_config_obj
         flags = [
             name for name in ("save_traveltime_grid", "save_traveltime_uncertainty") if getattr(cfg, name)
@@ -929,7 +1258,32 @@ class Solver:
         interactive: bool = False,
         plotit: bool = False,
     ) -> np.ndarray:
-        """Migrates zero-offset GPR or seismic travel times into 3D space using the Eikonal equation."""
+        """Migrates zero-offset radar or seismic traveltimes into 3D space via the Eikonal equation.
+
+        Corrects geometric sounding positions for non-vertical wave propagation caused by dipping
+        basal topography. Radar echoes recorded at the glacier surface are displaced back along
+        the 3D wavefront normal vector defined by surface traveltime gradients:
+          dx = -v^2 * T * (dT/dx), dy = -v^2 * T * (dT/dy),
+          z_mig = z_surf - v * T * sqrt(1 - v^2 * |grad T|^2)
+
+        Parameters
+        ----------
+        travel_times : str, Path, os.PathLike, or np.ndarray, optional
+            Path to survey points file or array of survey coordinates and traveltimes.
+            If None, uses survey_data_path attribute.
+        velocity : float, optional
+            Effective electromagnetic wave propagation velocity [m/ns] (default 0.16 m/ns in cold ice).
+        interactive : bool, default False
+            If True, enables interactive command-line prompts to inspect and adjust velocity.
+        plotit : bool, default False
+            If True, generates visual diagnostic figures of displacement vectors.
+
+        Returns
+        -------
+        migrated_points : np.ndarray
+            (N, 4+) NumPy array of migrated sounding coordinates [X_mig, Y_mig, Z_mig, Depth_mig]
+            in projected metric coordinates [m].
+        """
         if travel_times is None:
             travel_times = self.survey_data_path
         if travel_times is None:
@@ -1079,9 +1433,43 @@ class Solver:
         interactive: bool = False,
         plotit: bool = False,
     ) -> float:
-        """
-        Iterative optimization process to determine optimum surface slope smoothing degree.
-        When interactive is True, enables CLI prompts to adjust filter spectrum parameters.
+        """Determines the physically optimal surface slope smoothing degree via BSS variance minimization.
+
+        Implements iterative spectral optimization based on glaciological principles: local basal
+        shear stress (BSS) tau_b = rho_ice * g * D * sin(alpha) is driven by regional ice surface
+        slope rather than micro-topographic roughness. High-frequency DEM slope noise causes
+        unrealistic local BSS spikes, whereas over-smoothing eliminates legitimate valley gradients.
+        At each trial cutoff wavenumber k_c (corresponding to spatial wavelength lambda_c = 2*pi / k_c),
+        the surface DEM is smoothed with a 2D Gaussian FFT low-pass filter, and the spatial variance
+        of derived basal shear stress is computed. The optimal wavenumber k_c minimizes this variance.
+
+        Parameters
+        ----------
+        kc_max : float, optional
+            Upper wavenumber bound [rad/m] for trial search. If None, derived from DEM resolution (Nyquist).
+        kc_min : float, optional
+            Lower wavenumber bound [rad/m] for trial search. If None, derived from DEM domain extent.
+        n_steps : int, optional
+            Number of discrete trial evaluation steps across the spectral bandwidth.
+        lambda_min : float, optional
+            Minimum physical spatial cutoff wavelength [m] (alternative parameterization to kc_max).
+        lambda_max : float, optional
+            Maximum physical spatial cutoff wavelength [m] (alternative parameterization to kc_min).
+        fft_filter_metric : str, optional
+            Evaluation metric domain: 'wavenumber' [rad/m] or 'wavelength' [m]. Default 'wavenumber'.
+        nrbins : int, optional
+            Number of distance lag bins for experimental variogram calculation.
+        prefix : str, optional
+            Output filename prefix for diagnostic optimization figures (e.g. '01_' or '03_').
+        interactive : bool, default False
+            If True, prompts in the terminal to inspect and adjust the trial parameter spectrum.
+        plotit : bool, default False
+            If True, generates visual diagnostic figures of BSS variance curves.
+
+        Returns
+        -------
+        opt_kc : float
+            Optimal spatial cutoff wavenumber k_c [rad/m] (lambda_c = 2*pi / opt_kc [m]).
         """
         pts = self.migrated_points if self.migrated_points is not None else self.survey_points
         if pts is None:
@@ -1145,8 +1533,36 @@ class Solver:
         variogram_model: str | None = None,
         interactive: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Calculates bedrock elevation grid using Dual Kriging interpolation pass.
+        """Interpolates post-migration bedrock elevation and estimation uncertainty via Dual Kriging.
+
+        Executes the second-pass geostatistical interpolation using migrated observation soundings.
+        Interpolates either ice thickness D(x, y) [m] or basal shear stress product P(x, y) = D * sin(alpha_opt),
+        enforces non-negative thickness bounds, clamps extreme extrapolation artifacts, subtracts
+        thickness from surface DEM elevation to produce bedrock elevation Z_bed(x, y) = Z_surf(x, y) - D(x, y),
+        and extracts Kriging estimation variance sigma^2_D(x, y) [m^2].
+
+        Parameters
+        ----------
+        method : str, optional
+            Kriging interpolation method ('universal', 'ordinary', 'regression').
+            If None, uses post_kriging_method.
+        variogram_model : str, optional
+            Theoretical variogram model ('spherical', 'exponential', 'gaussian').
+            If None, uses post_variogram_model.
+        interactive : bool, default False
+            If True, generates interactive diagnostic plots.
+
+        Returns
+        -------
+        kriged_bedrock : np.ndarray
+            2D array of interpolated bedrock elevation values [m].
+        kriged_variance : np.ndarray
+            2D array of Kriging estimation variance [m^2] (or NaN if variance calculation was skipped).
+
+        Raises
+        ------
+        ValueError
+            If no survey or migrated points are available.
         """
         pts = self.migrated_points if self.migrated_points is not None else self.survey_points
         if pts is None:
@@ -1217,7 +1633,17 @@ class Solver:
         return self.kriged_bedrock, self.kriged_variance
 
     def fill_holes_rf(self) -> np.ndarray:
-        """Trains Random Forest ML model to fill remaining bedrock holes."""
+        """Fills unconstrained bedrock voids and gaps using Random Forest machine learning regression.
+
+        Trains a multi-feature Random Forest regressor on Kriged bedrock elevations using terrain
+        covariates (surface elevation, slope, aspect, distance to boundary outline, surface curvature)
+        and predicts bedrock elevation in areas where Kriging uncertainty is high or data gaps exist.
+
+        Returns
+        -------
+        rf_filled_bedrock : np.ndarray
+            2D array of gap-filled bedrock elevations [m].
+        """
         if self.kriged_bedrock is None:
             self.calculate_bedrock()
 
@@ -1225,7 +1651,23 @@ class Solver:
         return self.rf_filled_bedrock
 
     def apply_geomorph_smoothing(self, min_gap_dist: float | None = None) -> np.ndarray:
-        """Applies geomorphological margin blending to surrounding surface DEM."""
+        """Applies geomorphological boundary margin blending to surrounding surface terrain.
+
+        Smoothly tapers ice thickness to zero along the glacier boundary perimeter using
+        a distance-weighted sigmoid transition, ensuring that predicted bedrock elevation
+        flawlessly matches surrounding unglaciated surface topography.
+
+        Parameters
+        ----------
+        min_gap_dist : float, optional
+            Transition blending buffer width [m] inward from the ice margin boundary.
+            If None, uses 50.0 m.
+
+        Returns
+        -------
+        blended_bedrock : np.ndarray
+            2D array of margin-blended bedrock elevations [m].
+        """
         base_grid = self.rf_filled_bedrock if self.rf_filled_bedrock is not None else self.kriged_bedrock
         if base_grid is None:
             base_grid = self.fill_holes_rf()
@@ -1241,7 +1683,27 @@ class Solver:
         kernel_size: int = 3,
         kc_cutoff: float | None = None,
     ) -> np.ndarray:
-        """Applies spatial smoothing to calculated bedrock DEM grid ('gaussian', 'median', 'fft_lowpass')."""
+        """Applies spatial filter smoothing to calculated bedrock or ice thickness fields.
+
+        Parameters
+        ----------
+        grid : np.ndarray
+            2D input array of elevation or thickness values [m].
+        method : str, default 'gaussian'
+            Spatial filtering algorithm: 'gaussian', 'median', or 'fft_lowpass'.
+        sigma : float, default 1.5
+            Gaussian smoothing kernel standard deviation in pixels [px].
+        kernel_size : int, default 3
+            Median filter window size (must be an odd integer, e.g. 3, 5).
+        kc_cutoff : float, optional
+            Corner frequency cutoff wavenumber k_c [rad/m] for 2D FFT lowpass filtering.
+            If None, defaults to optimal k_c from BSS optimization.
+
+        Returns
+        -------
+        smoothed_grid : np.ndarray
+            2D array of spatially smoothed elevations [m].
+        """
         method = method.lower().strip()
         out_grid = grid.copy()
 
@@ -1281,38 +1743,44 @@ class Solver:
         smoothing_kernel_size: int = 3,
         smoothing_kc_cutoff: float | None = None,
     ) -> BedrockMap:
-        """
-        Finalizes bedrock topography and derived products.
+        """Finalizes continuous bedrock topography, ice thickness, basal shear stress, and uncertainty.
 
-        Executes the full final sequence towards the continuous bedrock topography result: optional
-        spatial smoothing of the Kriged depth field, optional Random Forest gap filling, optional margin
-        blending, then derivation of the final thickness, basal shear stress and their uncertainties
-        (NaN if the Kriging variance was not computed), diagnostic figures and configured exports.
-        Returns the completed BedrockMap.
+        Executes the post-processing pipeline following Dual Kriging:
+          1. Optional spatial smoothing of the Kriged ice thickness field D(x, y) [m].
+          2. Bedrock calculation Z_bed(x, y) = Z_surf(x, y) - D(x, y) [m].
+          3. Optional Random Forest machine learning gap filling in unconstrained areas.
+          4. Optional geomorphological boundary margin blending to surrounding surface DEM.
+          5. Derivation of final ice thickness, basal shear stress tau_b = rho * g * D * sin(alpha) [kPa],
+             and their standard error uncertainty fields.
+          6. Automatic generation of diagnostic figures and configured raster/vector file exports.
 
         Parameters
         ----------
         interactive : bool, default False
-            If True, prompts for unset gap-filling / blending options and shows figures interactively.
+            If True, prompts in the terminal for unset options and displays interactive figures.
         random_forest_gap_filling : bool, optional
-            Apply Random Forest gap filling. If None, asks when interactive, otherwise False.
+            If True, applies Random Forest ML regression to fill unconstrained voids. If None, asks
+            when interactive, otherwise False.
         apply_margin_blend : bool, optional
-            Apply geomorphological margin blending. If None, asks when interactive, otherwise False.
+            If True, smoothly transitions ice thickness to 0 m at glacier perimeter boundary. If None,
+            asks when interactive, otherwise False.
         min_gap_dist : float, optional
-            Minimum gap distance / margin width [m] for margin blending (default 50.0).
+            Transition margin buffer width [m] inward from outline boundary (default 50.0 m).
         smooth_bedrock : bool, default False
-            Smooth the Kriged depth field before computing the bedrock grid.
-        smoothing_method : str, default "gaussian"
-            Smoothing method: 'gaussian', 'median' or 'fft_lowpass'.
-        smoothing_sigma : float
-            Smoothing strength (radius in pixels) for Gaussian filtering (default 1.5).
-            Higher values produce smoother bedrock terrain.
-        smoothing_kernel_size : int
-            Window kernel size (k x k) for median filtering (must be an odd integer, default 3).
-            Higher values produce smoother bedrock terrain.
+            If True, filters the Kriged depth field prior to bedrock elevation calculation.
+        smoothing_method : str, default 'gaussian'
+            Spatial filtering algorithm: 'gaussian', 'median', or 'fft_lowpass'.
+        smoothing_sigma : float, default 1.5
+            Smoothing strength (Gaussian kernel radius in grid pixels [px]).
+        smoothing_kernel_size : int, default 3
+            Window kernel size (k x k pixels) for median filtering (must be an odd integer).
         smoothing_kc_cutoff : float, optional
-            Corner frequency cutoff wavenumber (k_c,smooth) for FFT low-pass filtering.
-            If None, defaults to optimal k_c. Lower values produce smoother bedrock terrain.
+            Cutoff wavenumber k_c [rad/m] for 2D FFT lowpass filtering. If None, uses optimal k_c.
+
+        Returns
+        -------
+        bedrock_map : BedrockMap
+            Final continuous bedrock elevation map [m] wrapped with spatial georeferencing metadata.
         """
         should_plot = interactive or (self.plots_dir is not None)
 
@@ -1519,8 +1987,23 @@ class Solver:
         stage: str = "post_migration",
         interactive: bool = False,
     ) -> list[Any]:
-        """
-        Runs Universal Kriging Drift Analyzer diagnostics to recommend optimal drift models.
+        """Runs Universal Kriging Drift Analyzer diagnostics to recommend optimal drift functions.
+
+        Evaluates spatial drift models (e.g. SIA, elevation z_dem, polynomials, curvature)
+        using Variance Inflation Factor (VIF), Akaike Information Criterion (AICc), and Leave-One-Profile-Out
+        (LOPO) or spatial Buffer Leave-One-Out Cross-Validation.
+
+        Parameters
+        ----------
+        stage : str, default 'post_migration'
+            Workflow stage to evaluate ('pre_migration' or 'post_migration').
+        interactive : bool, default False
+            If True, generates visual diagnostic figures and prompt dialogues.
+
+        Returns
+        -------
+        diagnostics : list of DriftDiagnosticResult
+            Evaluated drift candidates ranked from best to worst by AICc.
         """
         target_name = "traveltime" if stage == "pre_migration" else "depth"
         stage_prefix = stage.split("_")[0]
@@ -1564,17 +2047,40 @@ class Solver:
         plots_dir: str | Path | None = None,
         output_format: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Executes forward survey planning for unprobed glaciers using synthetic SIA modeling.
+        """Executes forward survey planning for unprobed glaciers using synthetic SIA modeling.
 
-        Output locations (data files and figures always end up together):
+        Calculates theoretical ice thickness via the Shallow Ice Approximation:
+          D_SIA(x, y) = tau_0 / (rho_ice * g * sin(alpha_opt))
+        and automatically places optimal radar survey profiles (transverse cross-glacier lines
+        and longitudinal centerlines) oriented to maximize basal topography resolution while
+        respecting maximum path length constraints.
 
-        * ``output_prefix`` relative (default from ``outputs.output_prefix``): files go to the effective
-          output directory (``output_dir`` argument, ``Solver.output_dir`` or ``outputs.output_dir``).
-        * ``output_prefix`` absolute: files are written beside it; without an explicit output directory its
-          parent folder becomes the base folder (nothing is created in the current working directory).
-        * Figures: an absolute ``plots_dir`` is used as is; a relative / unset one resolves to
-          ``<base folder>/figures``.
+        Parameters
+        ----------
+        kc : float, default 0.0314
+            Spatial cutoff wavenumber k_c [rad/m] for filtering surface slopes (default corresponds to lambda_c = 200 m).
+        tau_0 : float, default 100e3
+            Assumed target basal shear stress threshold [Pa] (100 kPa = 100,000 Pa).
+        max_length_km : float, default 5.0
+            Maximum cumulative distance per survey loop [km].
+        output_prefix : str, optional
+            Filename prefix for exported survey track files (GPX, GeoJSON, CSV).
+        output_dir : str or Path, optional
+            Output filesystem directory for survey tracks.
+        plots_dir : str or Path, optional
+            Output filesystem directory for diagnostic planning maps.
+        output_format : str, optional
+            Format for synthetic raster export ('tif', 'asc').
+
+        Returns
+        -------
+        survey_results : dict of str to Any
+            Dictionary containing:
+              - 'sia_modelled_depth' : 2D array of synthetic SIA ice thickness [m].
+              - 'transverse_lines' : List of Shapely LineString geometries for cross profiles.
+              - 'centerline' : Shapely LineString geometry for glacier flow centerline.
+              - 'waypoints' : List of planned survey waypoint coordinates.
+              - 'saved_files' : List of exported track file paths (GPX, GeoJSON, CSV).
         """
         cfg = getattr(self, "config", None) or {}
         outputs = cfg.get("outputs", {})
@@ -1617,18 +2123,26 @@ class Solver:
         self,
         survey_data_path: str | Path | os.PathLike | None = None,
     ) -> BedrockMap:
-        """
-        Executes the complete 5-step PySole workflow using loaded configuration settings.
+        """Executes the complete 5-step PySole glaciological workflow.
+
+        Automates the full scientific processing sequence:
+          1. Loading and validation of surface DEM, boundary outline, and survey soundings.
+          2. First-pass traveltime interpolation and 3D Eikonal normal ray migration.
+          3. Basal Shear Stress (BSS) variance optimization to find optimal spectral slope smoothing k_c.
+          4. Second-pass Dual Kriging predicting continuous ice thickness and estimation uncertainty.
+          5. Topography finalization (depth smoothing, RF void filling, margin blending, raster export).
+
+        If no survey data path is provided, automatically runs the Unprobed Glacier Survey Planner.
 
         Parameters
         ----------
         survey_data_path : str, Path, or os.PathLike, optional
-            Path to survey points dataset. Overrides solver's survey_data_path attribute.
+            Path to survey observation file. Overrides configured survey_data_path attribute.
 
         Returns
         -------
         bedrock_map : BedrockMap
-            Final predicted bedrock elevation grid.
+            Final predicted bedrock elevation grid [m] wrapped with spatial georeferencing metadata.
         """
         if survey_data_path is not None:
             self.survey_data_path = str(survey_data_path)
@@ -1700,3 +2214,4 @@ class Solver:
         # finalization-stage outputs (bedrock raster, thickness, BSS, uncertainties) by finalize_bedrock().
 
         return bedrock_map
+

@@ -35,7 +35,24 @@ MAX_FRACTION_CAP = 0.9
 
 
 def kriging_chunk_size(n_pts: int) -> int:
-    """Number of grid cells evaluated per work chunk (shared by the engine and the estimator)."""
+    """
+    Computes the optimal grid cell chunk size for parallel Dual Kriging evaluation.
+
+    To balance computational throughput and peak memory usage, the output raster
+    grid is partitioned into contiguous spatial chunks. Each worker thread processes
+    one chunk of cells at a time, calculating cross-distances against all `n_pts`
+    sample observations.
+
+    Parameters
+    ----------
+    n_pts : int
+        Number of valid survey observations (e.g., radar sounding points).
+
+    Returns
+    -------
+    chunk_size : int
+        Number of grid cells evaluated per parallel work chunk (clamped between 500 and 10,000 cells).
+    """
     return max(500, min(10000, 5_000_000 // max(int(n_pts), 1)))
 
 
@@ -112,11 +129,33 @@ def estimate_native_kriging_bytes(
     n_grid_cells: int = 0,
 ) -> int:
     """
-    Estimated peak memory [bytes] of the native Kriging engine.
+    Estimates the peak RAM footprint [bytes] of the native vector Kriging engine.
 
-    The peak is the larger of the matrix-assembly phase (several ``N_aug^2`` matrices, single thread) and the
-    grid-evaluation phase (the LU factorisation if the variance is requested, otherwise nothing, plus
-    ``n_threads`` per-thread working sets), each on top of the grid-sized arrays.
+    The peak memory consumption is determined by the maximum of:
+    1. The covariance matrix assembly phase: allocating the dense augmented
+       Kriging system matrix of size ``(n_pts + n_drift) x (n_pts + n_drift)``
+       along with scratch matrices.
+    2. The parallel grid evaluation phase: storing the LU factorisation
+       (required for Kriging variance) plus per-thread working memory
+       proportional to ``n_pts * chunk_size``.
+
+    Parameters
+    ----------
+    n_pts : int
+        Number of valid survey observations.
+    n_drift : int
+        Number of drift columns in the augmented Kriging system (including the constant 1.0).
+    n_threads : int
+        Number of parallel worker threads planned.
+    with_variance : bool
+        If True, includes the memory overhead of the LU factorisation and variance weight solves.
+    n_grid_cells : int, default 0
+        Total number of grid cells in the output raster (``height * width``).
+
+    Returns
+    -------
+    peak_bytes : int
+        Estimated peak memory requirement in bytes.
     """
     n_aug = int(n_pts) + int(n_drift)
     chunk = kriging_chunk_size(n_pts)
@@ -134,7 +173,22 @@ def estimate_native_kriging_bytes(
 
 @dataclass
 class MemoryPlan:
-    """Execution plan returned by :func:`plan_native_kriging`."""
+    """
+    Execution plan returned by :func:`plan_native_kriging`.
+
+    Attributes
+    ----------
+    return_variance : bool
+        Whether Kriging estimation variance should be calculated or skipped.
+    n_threads : int
+        Effective number of parallel worker threads allocated.
+    est_bytes : int
+        Estimated peak memory footprint [bytes].
+    budget_bytes : int or None
+        Allocated memory budget ceiling [bytes], or None if system memory is undetermined.
+    message : str
+        Diagnostic log message explaining any thread throttling or variance deactivation.
+    """
 
     return_variance: bool
     n_threads: int
@@ -152,20 +206,37 @@ def plan_native_kriging(
     n_grid_cells: int = 0,
 ) -> MemoryPlan:
     """
-    Plans thread count and variance evaluation so that the native engine stays within a RAM budget.
+    Derives an adaptive thread and memory allocation plan for native Dual Kriging.
+
+    Prevents out-of-memory (OOM) operating system kills during large-scale raster
+    interpolation. If the estimated peak memory exceeds the available RAM budget:
+    1. Worker thread count is reduced iteratively (lowering per-thread scratch memory).
+    2. If even a single thread with estimation variance exceeds the budget, the Kriging
+       variance calculation is skipped (filling the variance grid with NaN) while
+       preserving the high-performance Dual Kriging elevation prediction.
+    3. If even single-threaded elevation prediction exceeds the budget, a warning is logged
+       and execution proceeds single-threaded as best effort.
 
     Parameters
     ----------
-    n_pts, n_drift : int
-        Number of valid sample points and drift columns (including the constant).
+    n_pts : int
+        Number of valid survey observations.
+    n_drift : int
+        Number of drift columns in the augmented Kriging system.
     n_threads : int
-        Requested number of worker threads.
+        Requested worker thread count.
     want_variance : bool
-        Whether the Kriging variance is requested.
+        Whether Kriging estimation variance is desired by the user.
     fraction : float
-        Budget as a fraction of the currently available memory, ``0 < fraction <= 0.9``.
-    n_grid_cells : int
-        Number of output grid cells (``M * N``).
+        Allowed memory fraction of currently free RAM (``0.0 < fraction <= 0.9``).
+    n_grid_cells : int, default 0
+        Total number of output raster cells (``height * width``).
+
+    Returns
+    -------
+    plan : MemoryPlan
+        Validated execution plan containing the final thread count, variance evaluation flag,
+        and peak memory estimate.
     """
     n_threads = max(1, int(n_threads))
     avail = available_memory_bytes()
@@ -219,5 +290,19 @@ def plan_native_kriging(
 
 
 def resolve_threads(n_cores: int | None) -> int:
-    """Translates the ``n_cores`` setting (-1/None = all CPUs) into a worker thread count."""
+    """
+    Translates user-configured CPU core settings into an effective worker thread count.
+
+    Parameters
+    ----------
+    n_cores : int or None
+        Requested CPU core count. If -1 or None, defaults to all logical CPU cores
+        detected on the system via ``os.cpu_count()``. Positive integers specify an
+        exact core limit.
+
+    Returns
+    -------
+    worker_threads : int
+        Effective positive worker thread count (minimum 1).
+    """
     return (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))

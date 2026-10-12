@@ -16,17 +16,51 @@ from .logging import logger, get_progress_bar
 @dataclass
 class MigrationResult:
     """
-    Typed data container storing 3D ray migration outputs.
+    Data container storing 3D Eikonal ray migration results and displacement fields.
+
+    Attributes
+    ----------
+    migrated_points : np.ndarray
+        2D array of relocated survey points with shape ``(N, >=4)``. Columns correspond to:
+        - Column 0: Relocated X coordinate (easting) [m].
+        - Column 1: Relocated Y coordinate (northing) [m].
+        - Column 2: Surface DEM elevation Z_surface at the relocated position [m].
+        - Column 3: Migrated true perpendicular ice thickness / depth [m].
+        - Additional columns (e.g., survey profile ID) are preserved if present.
+    dx_grid : np.ndarray
+        2D raster grid of horizontal ray displacements along the X dimension [m].
+    dy_grid : np.ndarray
+        2D raster grid of horizontal ray displacements along the Y dimension [m].
+    dz_grid : np.ndarray
+        2D raster grid of vertical ray displacements along the Z dimension [m].
     """
-    migrated_points: np.ndarray  # Nx4 array of [x_mig, y_mig, z_surf_mig, depth_mig]
-    dx_grid: np.ndarray          # 2D horizontal ray displacement grid along X [m]
-    dy_grid: np.ndarray          # 2D horizontal ray displacement grid along Y [m]
-    dz_grid: np.ndarray          # 2D vertical ray displacement grid along Z [m]
+    migrated_points: np.ndarray
+    dx_grid: np.ndarray
+    dy_grid: np.ndarray
+    dz_grid: np.ndarray
 
 
 class EikonalMigrator:
     """
-    Specialized engine executing 3D Eikonal Ray Migration over complex surface topography.
+    Engine executing 3D Eikonal Ray Migration over complex surface topography.
+
+    In steep alpine terrain, radar signals reflected from subsurface bedrock reflectors
+    do not propagate along vertical raypaths. Instead, rays originate perpendicular to
+    the reflector and arrive obliquely at the glacier surface. This engine solves the
+    3D Eikonal slowness equations in a non-orthogonal coordinate system bounded by the
+    sloping surface DEM, computing the horizontal and vertical vector displacements
+    required to relocate scattered survey picks to their true 3D reflection points.
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        2D raster grid of surface elevations [m] with shape ``(height, width)``.
+    geometry : GridGeometry
+        Standardized spatial coordinate container defining cell size and spatial extents.
+    outline_mask : np.ndarray, optional
+        Boolean mask of active glacier area.
+    dem_grads : dict of str to np.ndarray, optional
+        Pre-computed spatial gradient dictionary from :func:`~pysole.smoothing.compute_gradients`.
     """
 
     def __init__(
@@ -54,7 +88,30 @@ class EikonalMigrator:
         interactive: bool = False,
         show_progress: bool = True,
     ) -> MigrationResult:
-        """Executes 3D Eikonal ray migration using engine instance settings."""
+        """
+        Executes 3D Eikonal ray migration for a continuous traveltime field and scattered picks.
+
+        Parameters
+        ----------
+        travel_time_grid : np.ndarray
+            Continuous 2D grid of one-way traveltimes [ns] matching the DEM dimensions.
+        survey_points : np.ndarray
+            2D array of scattered survey sounding points ``[X, Y, Z_surf, travel_time, ...]``.
+        velocity : float, default 0.16
+            Electromagnetic radar signal propagation velocity in ice [m/ns]
+            (typically ~0.160 m/ns in temperate ice/firn, up to ~0.168 m/ns in cold ice).
+        plots_dir : str or Path, optional
+            Output folder for diagnostic migration displacement vector figures.
+        interactive : bool, default False
+            If True, displays interactive Matplotlib figures during migration.
+        show_progress : bool, default True
+            If True, displays a progress bar during point relocation.
+
+        Returns
+        -------
+        result : MigrationResult
+            Migration result container storing relocated picks and displacement grids.
+        """
         return migrate_eikonal_points(
             dem=self.dem,
             travel_time_grid=travel_time_grid,
@@ -69,7 +126,21 @@ class EikonalMigrator:
         )
 
     def migrate_points(self, points: np.ndarray, velocity: float = 0.16) -> np.ndarray:
-        """Alias method for 3D Eikonal ray migration on a survey point set."""
+        """
+        Convenience method to migrate a survey point set using a homogeneous traveltime field.
+
+        Parameters
+        ----------
+        points : np.ndarray
+            Input sounding points array ``[X, Y, Z, travel_time, ...]``.
+        velocity : float, default 0.16
+            Radar wave velocity in glacier ice [m/ns].
+
+        Returns
+        -------
+        migrated_points : np.ndarray
+            Relocated points array ``[X_mig, Y_mig, Z_surf_mig, Depth_mig, ...]``.
+        """
         if len(points) > 0 and points.shape[1] >= 4 and not np.all(np.isnan(points[:, 3])):
             mean_tt = float(np.nanmean(points[:, 3]))
             tt_grid = np.full_like(self.dem, mean_tt)
@@ -92,36 +163,55 @@ def migrate_eikonal_points(
     show_progress: bool = True,
 ) -> MigrationResult:
     """
-    Migrates zero-offset GPR/seismic survey points into 3D space using the 3D Eikonal Ray Migration algorithm.
-    Ported directly from MATLAB MIG.m (Binder, 2009, 2011).
+    Relocates scattered radar soundings into 3D space using 3D Eikonal ray normal migration.
+
+    In complex alpine topography, zero-offset radar reflections originate perpendicular
+    to bedrock surfaces. If unmigrated, these reflections are erroneously positioned
+    vertically beneath the receiver antenna, exaggerating ice thickness in U-shaped
+    valleys and placing valley walls incorrectly.
+
+    This function solves the 3D Eikonal slowness equations over an arbitrary sloping
+    surface boundary:
+    1. Computes apparent horizontal slownesses:
+       :math:`s_1 = -\\partial T / \\partial x`, :math:`s_2 = -\\partial T / \\partial y`.
+    2. Incorporates surface topographic slopes:
+       :math:`z_x = \\partial Z / \\partial x`, :math:`z_y = \\partial Z / \\partial y`.
+    3. Solves the quadratic Eikonal condition for true vertical slowness :math:`p_z`
+       and horizontal slownesses :math:`(p_x, p_y)`.
+    4. Evaluates 3D ray displacement vectors:
+       :math:`(\\Delta x, \\Delta y, \\Delta z) = T \\cdot v^2 \\cdot (p_x, p_y, p_z)`.
+    5. Interpolates displacement vectors at scattered sounding coordinates to yield
+       relocated positions :math:`(X_{\\text{mig}}, Y_{\\text{mig}})` and true
+       perpendicular ice thickness.
 
     Parameters
     ----------
-    dem : 2D np.ndarray
-        Surface DEM grid Z(x, y) [m].
-    travel_time_grid : 2D np.ndarray
-        Continuous smoothed travel time grid T(x, y) [ns] or depth-equivalent product field.
+    dem : np.ndarray
+        2D surface DEM grid :math:`Z(x, y)` [m].
+    travel_time_grid : np.ndarray
+        Continuous smoothed one-way traveltime grid :math:`T(x, y)` [ns].
     survey_points : np.ndarray
-        Scattered input points [X, Y, Z_surface, depth_or_travel_time].
+        Input survey sounding points ``[X, Y, Z_surf, travel_time, ...]``.
     geometry : GridGeometry
         Standardized spatial geometry container for raster grids.
-    velocity : float
-        Signal propagation velocity [m/ns] (default = 0.16 m/ns for GPR in ice).
-    outline_mask : 2D np.ndarray, optional
-        Boolean creeping body boundary mask.
-    plots_dir : str, optional
-        Directory where generated displacement vector plots are saved.
-    interactive : bool, optional
-        Whether to display interactive Matplotlib figures.
-    dem_grads : dict, optional
-        Pre-computed surface DEM gradients dict to avoid redundant gradient calculations.
+    velocity : float, default 0.16
+        Electromagnetic signal propagation velocity [m/ns]
+        (~0.160 m/ns in temperate ice/firn, ~0.168 m/ns in cold pure ice).
+    outline_mask : np.ndarray, optional
+        Boolean glacier outline mask.
+    plots_dir : str or Path, optional
+        Directory where generated displacement vector figures are saved.
+    interactive : bool, default False
+        Whether to display figures interactively.
+    dem_grads : dict of str to np.ndarray, optional
+        Pre-computed surface DEM gradients dictionary.
     show_progress : bool, default True
-        Show a progress bar for the point-wise ray tracing.
+        Whether to show terminal progress bar during ray relocation.
 
     Returns
     -------
     result : MigrationResult
-        Data container holding migrated points and displacement vector grids.
+        Container holding migrated points array and 2D displacement vector grids.
     """
     dx = geometry.dx
     dy = geometry.dy
@@ -225,7 +315,7 @@ def migrate_eikonal_points(
     else:
         migrated_points = np.column_stack((x_mig, y_mig, z_surf_mig, d_mig))
 
-    # 6. Plot 3D Migration Displacement Vectors matching MIG.m
+    # 6. Generate 3D Migration Displacement Vector diagnostic figures
     should_plot = interactive or (plots_dir is not None)
     if should_plot:
         from .plotting import plot_migration_displacement_vectors

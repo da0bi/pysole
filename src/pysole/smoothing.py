@@ -12,8 +12,29 @@ def compute_surface_curvature(
     dem: np.ndarray, dx: float = 1.0, dy: float = 1.0
 ) -> np.ndarray:
     """
-    Computes 2D surface Laplacian curvature kappa = d2Z/dx2 + d2Z/dy2
-    using 2nd-order central finite differences.
+    Computes 2D surface Laplacian curvature using 2nd-order central finite differences.
+
+    The surface Laplacian is defined as:
+    .. math::
+        \\kappa = \\nabla^2 z = \\frac{\\partial^2 z}{\\partial x^2} + \\frac{\\partial^2 z}{\\partial y^2}
+
+    In glaciology and geomorphology, positive curvature values represent concave
+    depressions, cirques, and valley troughs, while negative values represent
+    convex peaks, nunataks, and ridges.
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        2D raster grid of surface elevations [m] with shape ``(height, width)``.
+    dx : float, default 1.0
+        Grid cell spacing along the X-axis (easting) [m].
+    dy : float, default 1.0
+        Grid cell spacing along the Y-axis (northing) [m].
+
+    Returns
+    -------
+    curvature : np.ndarray
+        2D grid of surface Laplacian curvature values [m⁻¹] with identical shape to ``dem``.
     """
     slope_y, slope_x = np.gradient(dem, dy, dx)
     d2z_dy2, _ = np.gradient(slope_y, dy, dx)
@@ -22,7 +43,27 @@ def compute_surface_curvature(
 
 
 def compute_slope_rad(dem: np.ndarray, dx: float = 1.0, dy: float = 1.0) -> np.ndarray:
-    """Fast computation of surface slope in radians without auxiliary aspect/curvature grids."""
+    """
+    Computes the maximum local terrain slope angle in radians.
+
+    Calculated from the Euclidean norm of spatial elevation gradients:
+    .. math::
+        \\alpha = \\arctan\\left(\\sqrt{(\\partial z / \\partial x)^2 + (\\partial z / \\partial y)^2}\\right)
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        2D raster grid of surface elevations [m].
+    dx : float, default 1.0
+        Spatial grid resolution along X [m].
+    dy : float, default 1.0
+        Spatial grid resolution along Y [m].
+
+    Returns
+    -------
+    slope_rad : np.ndarray
+        2D grid of terrain slope angles in radians [rad], ranging from 0.0 (flat) to < pi/2 (vertical).
+    """
     slope_y, slope_x = np.gradient(dem, dy, dx)
     return np.arctan(np.hypot(slope_x, slope_y))
 
@@ -31,8 +72,35 @@ def compute_gradients(
     dem: np.ndarray, dx: float = 1.0, dy: float = 1.0
 ) -> dict[str, np.ndarray]:
     """
-    Computes spatial slope gradients, surface curvature, and surface normal trigonometric grids.
-    Ported from GradRad.m.
+    Computes terrain slopes, surface normals, and Laplacian curvature for glaciological modeling.
+
+    Evaluates directional partial derivatives using central finite differences and derives
+    trigonometric projection factors required for 3D Eikonal ray normal migration and
+    Shallow Ice Approximation (SIA) basal driving stress calculations.
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        2D surface digital elevation model [m] with shape ``(M, N)``.
+    dx : float, default 1.0
+        Spatial cell resolution along the X dimension [m].
+    dy : float, default 1.0
+        Spatial cell resolution along the Y dimension [m].
+
+    Returns
+    -------
+    gradients : dict of str to np.ndarray
+        Dictionary containing spatial derivative fields:
+        - ``'slope_rad'``: Maximum terrain slope in radians [rad].
+        - ``'slope_grad'``: Maximum terrain slope in degrees [°].
+        - ``'slope_x'``: Directional partial derivative dz/dx [m/m] (dimensionless).
+        - ``'slope_y'``: Directional partial derivative dz/dy [m/m] (dimensionless).
+        - ``'cos_alpha_x_grid'``: Direction cosine nx of surface normal vector.
+        - ``'sin_alpha_x_grid'``: Slope projection factor along X.
+        - ``'cos_alpha_y_grid'``: Direction cosine ny of surface normal vector.
+        - ``'sin_alpha_y_grid'``: Slope projection factor along Y.
+        - ``'sinus_alpha_grid'``: True sine of total surface slope sin(alpha) (dimensionless).
+        - ``'curvature'``: 2D surface Laplacian curvature [m⁻¹].
     """
     slope_y, slope_x = np.gradient(dem, dy, dx)
 
@@ -71,7 +139,26 @@ def compute_gradients(
 
 @dataclass
 class FFTSpectrum:
-    """Encapsulates pre-computed 2D FFT spectra with boundary padding and mask metadata."""
+    """
+    Container storing pre-computed 2D Fast Fourier Transform (FFT) complex spectra.
+
+    Attributes
+    ----------
+    data_fft : np.ndarray
+        Shifted 2D complex Fourier transform of the padded elevation grid.
+    mask_fft : np.ndarray or None
+        Shifted 2D complex Fourier transform of the binary valid-data mask (for NaN normalization).
+    pad_m : int
+        Number of padded grid rows added to top and bottom to eliminate periodic boundary artifacts.
+    pad_n : int
+        Number of padded grid columns added to left and right.
+    orig_shape : tuple of (int, int)
+        Original unpadded raster grid dimensions ``(height, width)``.
+    has_nans : bool
+        True if the original input grid contains NaN (missing data or ice-free) cells.
+    nan_mask : np.ndarray or None
+        Boolean mask of NaN locations in the original unpadded grid.
+    """
     data_fft: np.ndarray
     mask_fft: np.ndarray | None
     pad_m: int
@@ -85,7 +172,33 @@ def precompute_fft_grid(
     grid: np.ndarray, dx: float = 1.0, dy: float = 1.0, kc: float | None = None
 ) -> tuple[FFTSpectrum, np.ndarray, float]:
     """
-    Pre-computes 2D Forward FFT spectra with reflect boundary padding and spatial wavenumber grid.
+    Pre-computes 2D Forward FFT spectra with reflection boundary padding.
+
+    In glacier surface smoothing, local high-frequency topographic roughness (crevasses,
+    seracs, and wind-blown sastrugi) is filtered out in the frequency domain. Reflective
+    boundary padding is applied around the DEM perimeter prior to the forward FFT to prevent
+    spurious edge oscillations (Gibbs phenomenon).
+
+    Parameters
+    ----------
+    grid : np.ndarray
+        2D input elevation raster grid [m].
+    dx : float, default 1.0
+        Spatial grid spacing along X [m].
+    dy : float, default 1.0
+        Spatial grid spacing along Y [m].
+    kc : float, optional
+        Target corner frequency cutoff wavenumber [rad/m] used to size boundary padding.
+        If None, a conservative default padding width is used.
+
+    Returns
+    -------
+    spectrum : FFTSpectrum
+        Container storing pre-computed Fourier spectra and padding metadata.
+    k_grid : np.ndarray
+        2D grid of continuous radial spatial wavenumbers :math:`k = \\sqrt{k_x^2 + k_y^2}` [rad/m].
+    k_max : float
+        Maximum spatial wavenumber present in the discrete Fourier spectrum [rad/m].
     """
     M, N = grid.shape
     nan_mask = np.isnan(grid)
@@ -134,7 +247,30 @@ def fft_gaussian_smooth_precomputed(
     spectrum: FFTSpectrum | np.ndarray, k_grid: np.ndarray, kc: float = 0.05
 ) -> np.ndarray:
     """
-    Fast Gaussian low-pass filtering using pre-computed FFT spectra.
+    Applies Gaussian low-pass filtering using pre-computed Fourier spectra.
+
+    Multiplies the 2D Fourier spectrum by the Gaussian transfer function:
+    .. math::
+        G(k) = \\exp\\left(-\\frac{k^2}{2 k_c^2}\\right)
+
+    where :math:`k_c` is the corner frequency cutoff wavenumber [rad/m], corresponding
+    to cutoff wavelength :math:`\\lambda_c = 2\\pi / k_c` [m]. The inverse FFT is then
+    evaluated and boundary padding is unpadded.
+
+    Parameters
+    ----------
+    spectrum : FFTSpectrum or np.ndarray
+        Pre-computed FFT spectrum container (from :func:`precompute_fft_grid`).
+    k_grid : np.ndarray
+        2D spatial wavenumber grid [rad/m].
+    kc : float, default 0.05
+        Corner frequency cutoff wavenumber :math:`k_c` [rad/m]. Smaller :math:`k_c`
+        values produce heavier smoothing (longer cutoff wavelengths).
+
+    Returns
+    -------
+    smoothed_grid : np.ndarray
+        Filtered spatial elevation grid [m] matching the original unpadded dimensions.
     """
     if isinstance(spectrum, FFTSpectrum):
         data_fft = spectrum.data_fft
@@ -188,6 +324,30 @@ def fft_gaussian_smooth(
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """
     Performs 2D spatial smoothing in the frequency domain using a Gaussian low-pass filter.
+
+    This is the complete end-to-end wrapper that pre-computes the boundary-padded FFT,
+    applies the Gaussian spectral transfer function, and computes the inverse FFT.
+
+    Parameters
+    ----------
+    grid : np.ndarray
+        2D input elevation raster grid [m].
+    dx : float, default 1.0
+        Spatial grid spacing along X [m].
+    dy : float, default 1.0
+        Spatial grid spacing along Y [m].
+    kc : float, default 0.05
+        Corner frequency cutoff wavenumber :math:`k_c` [rad/m]. Corresponding cutoff
+        wavelength is :math:`\\lambda_c = 2\\pi / k_c` [m].
+
+    Returns
+    -------
+    smoothed_grid : np.ndarray
+        Filtered spatial elevation grid [m].
+    k_grid : np.ndarray
+        2D spatial wavenumber grid [rad/m].
+    k_max : float
+        Maximum spatial wavenumber present in the discrete Fourier spectrum [rad/m].
     """
     A_shift, k_grid, k_max = precompute_fft_grid(grid, dx=dx, dy=dy, kc=kc)
     grid_filtered = fft_gaussian_smooth_precomputed(A_shift, k_grid, kc=kc)

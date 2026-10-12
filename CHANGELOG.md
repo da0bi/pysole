@@ -50,7 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Retained CLI `--drift-analyzer` flag as an on-the-fly master override enabling the Drift Analyzer across all Universal Kriging passes during runtime.
 - **[DEM Half-Domain Limits Logging] (`src/pysole/variogram.py`)**:
   - `optimize_bss_variance()` now logs `DEM Domain Extent Lx=...m, Ly=...m -> Half-Domain Limits: k_c,min = ... rad/m, λ_max = ... m` immediately after the Nyquist limits line, pairing both the high-frequency and low-frequency spectral search bounds for the BSS variogram optimization filter.
-- **[Docs] (`README.md`, `docs/`)**: removed `compute_uncertainty`, documented `max_memory_fraction`, per-pass `drift_analyzer`, σ_T units, and the memory guard; the README `Solver` example uses `calculate_bedrock()` / `finalize_bedrock()`; practice guide section 6 rewritten.
+- **[Codebase Audit: Docstrings, Block Comments & Scientific Documentation] (`src/pysole/`)**:
+  - Comprehensive senior-developer audit across all 15 modules in `src/pysole/` (`memory.py`, `config.py`, `smoothing.py`, `migration.py`, `survey_planner.py`, `drift_analyzer.py`, `variogram.py`, `raster.py`, `pipeline.py`, `plotting.py`, `interpolation.py`, `solver.py`, `logging.py`, `__init__.py`, `__main__.py`).
+  - Standardized all classes, methods, properties, and standalone functions to strict NumPy docstring format with complete `Parameters` and `Returns` blocks (specifying shapes, types, and meanings for all returned tuples and containers).
+  - Enriched explanations with glaciological principles and governing physical formulas (3D Eikonal normal ray migration, Shallow Ice Approximation, Basal Shear Stress variance minimization, 2D Dual Kriging systems), with explicit physical units ($m$, $ns$, $rad$, $^\circ$, $rad/m$, $kPa$, $kg/m^3$, $m/s^2$, $m/ns$, $m^{-1}$) tailored for scientific users.
+  - Eliminated legacy review notes, orphaned audit tags (e.g. `# [VECTORIZATION OPTION 4]`), and out-of-context MATLAB references.
+- **[Docs & Mathematical Standards] (`README.md`, `docs/`)**: removed `compute_uncertainty`, documented `max_memory_fraction`, per-pass `drift_analyzer`, σ_T units, and the memory guard; the README `Solver` example uses `calculate_bedrock()` / `finalize_bedrock()`; practice guide section 6 rewritten; standardized mathematical notation for spectral parameter defaults and discrete Fourier mode evaluation count ($n_{\text{modes}}$).
+
 
 ## [0.4.3] - 2026-10-08
 

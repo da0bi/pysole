@@ -1,7 +1,11 @@
 """
-Raster I/O, GeoTIFF Handling, DEM Resampling, Coordinate Systems, and Boundary Polygon Masking.
-Ported from MATLAB scripts INREAD.m and RAND.m by Daniel Binder (2011).
-Handles Shapefiles/GeoJSON with internal holes (nunataks) and DEM grid resampling.
+Spatial Raster I/O, Coordinate System Alignment, DEM Resampling, and Polygon Masking.
+
+Provides tools for ingesting surface Digital Elevation Models (DEMs), scattered
+geophysical survey points (radar/seismic), and complex boundary outlines (glacier margins,
+rock outcrops, and nunataks). Ensures strict projected metric coordinate system (e.g., UTM)
+consistency required for Euclidean spatial variography and glaciological ice flow physics.
+Supports multi-format raster exports (GeoTIFF, ESRI ASCII Grid, CSV, NumPy).
 """
 
 import os
@@ -18,9 +22,28 @@ from .logging import logger
 @dataclass
 class GridGeometry:
     """
-    Standardized spatial metadata container for DEM grids.
-    Stores shape, resolution (dx, dy), 1D coordinates (x_coords, y_coords),
-    bounding box (minx, miny, maxx, maxy), and Matplotlib extent [minx, maxx, miny, maxy].
+    Standardized spatial metadata container for DEM raster grids.
+
+    Stores the 2D matrix shape, spatial grid resolution (dx, dy) in meters,
+    1D coordinate vectors (x_coords, y_coords) in projected meters, bounding box
+    (minx, miny, maxx, maxy), and Matplotlib extent [minx, maxx, miny, maxy].
+    Provides factory methods and utilities for coordinate transformations and
+    regular grid interpolation.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Grid dimensions as (M_rows, N_cols).
+    dx : float
+        Cell resolution along the easting/X axis in meters (dx > 0).
+    dy : float
+        Cell resolution along the northing/Y axis in meters (dy > 0).
+    x_coords : np.ndarray
+        1D array of length N_cols representing cell center X coordinates in meters.
+    y_coords : np.ndarray
+        1D array of length M_rows representing cell center Y coordinates in meters.
+    bounds : tuple of float
+        Spatial bounding coordinates (minx, miny, maxx, maxy) in meters.
     """
     shape: tuple[int, int]
     dx: float
@@ -31,14 +54,30 @@ class GridGeometry:
 
     @property
     def extent(self) -> list[float]:
-        """Returns Matplotlib plot extent [minx, maxx, miny, maxy]."""
+        """
+        Matplotlib plotting extent [minx, maxx, miny, maxy] in meters.
+
+        Returns
+        -------
+        list of float
+            Four-element bounding extent suitable for the `extent` keyword in `plt.imshow`.
+        """
         return [self.bounds[0], self.bounds[2], self.bounds[1], self.bounds[3]]
 
     @cached_property
     def meshgrid(self) -> tuple[np.ndarray, np.ndarray]:
         """
-        Lazy-evaluated cached 2D spatial meshgrid (xx, yy).
-        Generates 2D spatial coordinate matrices ONCE in memory and caches the result.
+        Lazy-evaluated cached 2D spatial coordinate meshgrid (xx, yy).
+
+        Evaluates 2D spatial coordinate matrices once in memory and caches the result
+        to avoid redundant coordinate allocations across repeated calculations.
+
+        Returns
+        -------
+        xx : np.ndarray
+            2D array of shape (M_rows, N_cols) with X coordinates in meters.
+        yy : np.ndarray
+            2D array of shape (M_rows, N_cols) with Y coordinates in meters.
         """
         return np.meshgrid(self.x_coords, self.y_coords)
 
@@ -52,6 +91,29 @@ class GridGeometry:
         x_coords: np.ndarray | None = None,
         y_coords: np.ndarray | None = None,
     ) -> "GridGeometry":
+        """
+        Construct a GridGeometry instance with validated and aligned spatial coordinates.
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Grid shape as (M_rows, N_cols).
+        dx : float, default=1.0
+            Cell resolution along X in meters.
+        dy : float, default=1.0
+            Cell resolution along Y in meters.
+        bounds : tuple of float, optional
+            Bounding box (minx, miny, maxx, maxy) in meters.
+        x_coords : np.ndarray, optional
+            1D array of cell center X coordinates in meters.
+        y_coords : np.ndarray, optional
+            1D array of cell center Y coordinates in meters.
+
+        Returns
+        -------
+        GridGeometry
+            Fully initialized spatial metadata instance.
+        """
         x_c, y_c, b = ensure_spatial_coords(shape, dx=dx, dy=dy, bounds=bounds, x_coords=x_coords, y_coords=y_coords)
         return cls(shape=shape, dx=float(dx), dy=float(dy), x_coords=x_c, y_coords=y_c, bounds=b)
 
@@ -59,8 +121,24 @@ class GridGeometry:
         self, grid: np.ndarray, fill_value: Any = np.nan, method: str = "linear"
     ) -> RegularGridInterpolator:
         """
-        Factory creating a RegularGridInterpolator bound to this spatial geometry.
-        Automatically aligns (y_coords, x_coords) and disables bounds_error.
+        Create a RegularGridInterpolator bound to this spatial geometry.
+
+        Automatically aligns coordinate ordering (y_coords, x_coords) to match
+        the row-column layout of the input grid and disables out-of-bounds errors.
+
+        Parameters
+        ----------
+        grid : np.ndarray
+            2D array of shape (M_rows, N_cols) containing values to interpolate.
+        fill_value : float or Any, default=np.nan
+            Value assigned to query points falling outside the grid domain bounds.
+        method : {"linear", "nearest", "slinear", "cubic", "quintic"}, default="linear"
+            Interpolation method supported by `scipy.interpolate.RegularGridInterpolator`.
+
+        Returns
+        -------
+        scipy.interpolate.RegularGridInterpolator
+            Callable interpolator accepting coordinates as [[y, x], ...] points.
         """
         return RegularGridInterpolator(
             (self.y_coords, self.x_coords),
@@ -72,21 +150,21 @@ class GridGeometry:
 
     def coords_to_grid_indices(self, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
-        Converts spatial coordinates (x, y) to integer 2D grid matrix indices (rows, cols).
+        Convert spatial metric coordinates (x, y) to integer 2D grid matrix indices (rows, cols).
 
         Parameters
         ----------
         x : np.ndarray
-            X spatial coordinates in meters.
+            X spatial coordinates in projected meters (Easting).
         y : np.ndarray
-            Y spatial coordinates in meters.
+            Y spatial coordinates in projected meters (Northing).
 
         Returns
         -------
         rows : np.ndarray
-            Row grid indices clipped to [0, nrows - 1].
+            Row grid indices (0-based) clipped to [0, M_rows - 1].
         cols : np.ndarray
-            Column grid indices clipped to [0, ncols - 1].
+            Column grid indices (0-based) clipped to [0, N_cols - 1].
         """
         M, N = self.shape
         minx, _, _, maxy = self.bounds
@@ -97,8 +175,24 @@ class GridGeometry:
 
 class BedrockMap:
     """
-    Represents the final predicted bedrock elevation raster result.
-    Supports saving to GeoTIFF (.tif) or CSV (.csv).
+    Container representing a predicted bedrock elevation raster or glaciological field.
+
+    Encapsulates the 2D numerical grid, spatial bounding box, Coordinate Reference
+    System (CRS), affine georeferencing transform, and multi-format export capabilities.
+
+    Parameters
+    ----------
+    grid : np.ndarray
+        2D array of shape (M_rows, N_cols) containing predicted bedrock elevations
+        or derived quantities (e.g., ice thickness, basal shear stress) in meters or kPa.
+    bounds : tuple of float
+        Spatial bounding coordinates (minx, miny, maxx, maxy) in projected meters.
+    crs : Any, optional
+        Coordinate Reference System identifier (e.g., EPSG integer, WKT, or rasterio CRS object).
+    transform : Any, optional
+        Affine georeferencing transformation mapping pixel coordinates to spatial metric units.
+    name : str, default="bedrock"
+        Descriptive identifier for the dataset (e.g., 'bedrock', 'ice_thickness').
     """
 
     def __init__(
@@ -267,14 +361,38 @@ def ensure_spatial_coords(
     y_coords: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, tuple[float, float, float, float]]:
     """
-    Ensures 1D spatial coordinate vectors (x_coords, y_coords) and bounding box (minx, miny, maxx, maxy)
-    are consistently defined and aligned for a given grid shape (M_rows, N_cols).
+    Ensure 1D spatial coordinate vectors and bounding box are aligned.
+
+    Guarantees consistent 1D coordinate vectors (cell center eastings and northings)
+    and spatial bounding extent (minx, miny, maxx, maxy) for a 2D DEM grid of shape
+    (M_rows, N_cols).
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Grid dimensions as (M_rows, N_cols).
+    dx : float, default=1.0
+        Cell spacing along the X axis (easting) in meters.
+    dy : float, default=1.0
+        Cell spacing along the Y axis (northing) in meters.
+    bounds : tuple of float, optional
+        Four-element tuple (minx, miny, maxx, maxy) in meters. If None, derived
+        from grid shape and cell spacing starting from local origin (0.0, 0.0).
+    x_coords : np.ndarray, optional
+        1D array of cell center X coordinates in meters. If None, generated as
+        `minx + (arange(N) + 0.5) * dx`.
+    y_coords : np.ndarray, optional
+        1D array of cell center Y coordinates in meters. If None, generated as
+        `miny + (arange(M) + 0.5) * dy`.
 
     Returns
     -------
-    x_coords : 1D np.ndarray (size N)
-    y_coords : 1D np.ndarray (size M)
-    bounds : tuple[float, float, float, float] (minx, miny, maxx, maxy)
+    x_coords : np.ndarray
+        1D array of length N_cols with cell center X coordinates in meters.
+    y_coords : np.ndarray
+        1D array of length M_rows with cell center Y coordinates in meters.
+    bounds : tuple of float
+        Spatial bounding coordinates (minx, miny, maxx, maxy) in meters.
     """
     M, N = shape
     if bounds is not None:
@@ -299,10 +417,36 @@ def check_projected_metric_crs(
     bounds: tuple[float, float, float, float] | None = None,
 ) -> None:
     """
-    Verifies that input spatial coordinates use a projected metric coordinate system (e.g. UTM meters).
-    Performs dual-level verification:
-    1. CRS metadata check via PyProj (is_projected vs is_geographic).
-    2. Empirical numerical bounds check (detecting lat/lon degrees in range [-180, 180] x [-90, 90]).
+    Verify that spatial coordinates use a projected metric system (e.g., UTM in meters).
+
+    PySole relies on Euclidean distance calculations (in meters) for experimental
+    variogram estimation, spatial covariance modeling, and glaciological ice flow /
+    surface slope physics. Operating directly in unprojected geographic coordinates
+    (latitude/longitude degrees) leads to distorted distances, anisotropic distortion
+    varying with latitude, and erroneous shear stress values.
+
+    Performs a two-tier verification:
+    1. CRS metadata verification via PyProj (checks that `is_projected` is True).
+    2. Empirical numerical bounds check (detects coordinates falling inside
+       [-180, 180] x [-90, 90] degrees away from local origin (0, 0)).
+
+    Parameters
+    ----------
+    crs : Any, optional
+        Coordinate Reference System identifier (EPSG integer, WKT string, or pyproj CRS).
+    coords : np.ndarray, optional
+        Scattered survey point coordinates of shape (N, 2) in meters.
+    bounds : tuple of float, optional
+        Bounding box (minx, miny, maxx, maxy) in meters.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    ValueError
+        If an unprojected geographic coordinate system or degree coordinates are detected.
     """
     if crs is not None:
         try:
@@ -350,8 +494,26 @@ def check_projected_metric_crs(
 
 def check_crs_alignment(dem_crs: Any, vector_crs: Any) -> None:
     """
-    Checks if DEM CRS and vector/profile CRS match strictly and use projected metric coordinates.
-    If they differ or use unprojected geographic degrees, logs error and raises ValueError.
+    Verify that DEM and vector outline / survey profile coordinate systems match.
+
+    Both inputs must share the exact same projected metric coordinate system
+    to ensure spatial overlay precision. If systems diverge, an error is raised.
+
+    Parameters
+    ----------
+    dem_crs : Any
+        Coordinate Reference System of the surface DEM.
+    vector_crs : Any
+        Coordinate Reference System of the vector boundary outline or profile dataset.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    ValueError
+        If the two CRS definitions do not match or if either is unprojected geographic degrees.
     """
     if dem_crs is not None:
         check_projected_metric_crs(crs=dem_crs)
@@ -390,7 +552,34 @@ def resample_dem(
     bounds: tuple[float, float, float, float],
 ) -> tuple[np.ndarray, tuple[float, float, float, float]]:
     """
-    Resamples a 2D DEM grid to target dx and dy pixel resolutions using bilinear interpolation.
+    Resample a 2D DEM grid to target cell resolutions using bilinear interpolation.
+
+    Computes target grid dimensions from the spatial bounding box and resamples the
+    elevation surface using `scipy.interpolate.RegularGridInterpolator`. Cells outside
+    the original sample extent that produce NaNs are seamlessly padded with nearest-neighbor
+    extrapolation, while interior NoData / NaN regions (e.g., nunataks) are preserved.
+
+    Parameters
+    ----------
+    grid : np.ndarray
+        Original 2D elevation grid of shape (M_native, N_native) in meters.
+    native_dx : float
+        Original grid cell spacing along the easting/X axis in meters.
+    native_dy : float
+        Original grid cell spacing along the northing/Y axis in meters.
+    target_dx : float
+        Target grid cell spacing along the easting/X axis in meters.
+    target_dy : float
+        Target grid cell spacing along the northing/Y axis in meters.
+    bounds : tuple of float
+        Spatial bounding coordinates (minx, miny, maxx, maxy) in meters.
+
+    Returns
+    -------
+    resampled : np.ndarray
+        Resampled 2D elevation grid of shape (M_target, N_target) in meters.
+    new_bounds : tuple of float
+        Updated spatial bounding coordinates (minx, miny, maxx, maxy) in meters.
     """
     M_native, N_native = grid.shape
     minx, miny, maxx, maxy = bounds
@@ -454,9 +643,53 @@ def load_dem(
     crs: Any = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """
-    Load a DEM from a file path (GeoTIFF, ASCII Grid, CSV, NPY) or numpy array,
-    extracting spatial metadata directly from the DEM file or user parameters,
-    and performing DEM resampling if target dx and dy parameters are defined.
+    Load and parse a Digital Elevation Model (DEM) with spatial metadata.
+
+    Supports reading DEMs from GeoTIFF (`.tif`, `.tiff`), ESRI ASCII Grid (`.asc`, `.txt`),
+    CSV (`.csv` as either 2D matrix or 3-column XYZ table), NumPy binary (`.npy`),
+    or directly from a 2D `np.ndarray`. Extracts spatial metadata (bounding box,
+    native grid resolution, CRS, and affine georeferencing transform) and resamples
+    the grid to target resolution if `dx` or `dy` are explicitly requested.
+
+    Parameters
+    ----------
+    dem_input : str, Path, os.PathLike, or np.ndarray
+        Input DEM source: path to raster/text file or a 2D float array of elevations in meters.
+    dx : float, optional
+        Target grid resolution along the easting/X axis in meters. If specified and different
+        from native resolution, the DEM is automatically resampled via bilinear interpolation.
+    dy : float, optional
+        Target grid resolution along the northing/Y axis in meters. If specified and different
+        from native resolution, the DEM is automatically resampled via bilinear interpolation.
+    bounds : tuple of float, optional
+        Explicit spatial bounding box (minx, miny, maxx, maxy) in meters. If None, extracted
+        directly from raster header or derived from grid dimensions and resolution.
+    origin : tuple of float, optional
+        Lower-left coordinate origin (xll, yll) in meters for headerless inputs. Default is (0.0, 0.0).
+    crs : Any, optional
+        Coordinate Reference System identifier. Overrides or supplements file metadata. Must
+        represent a projected metric system (e.g., UTM).
+
+    Returns
+    -------
+    grid_out : np.ndarray
+        2D array of elevations in meters with shape (M_rows, N_cols). Row 0 corresponds
+        to minimum Y (northing) to align with bottom-up Cartesian spatial coordinates.
+    meta : dict of str to Any
+        Dictionary containing extracted spatial metadata:
+        - ``'transform'``: Affine georeferencing transform or None.
+        - ``'crs'``: Coordinate Reference System object or EPSG code.
+        - ``'bounds'``: Four-element tuple (minx, miny, maxx, maxy) in meters.
+        - ``'dx'``: Effective cell resolution along X in meters.
+        - ``'dy'``: Effective cell resolution along Y in meters.
+        - ``'native_dx'``: Original cell resolution along X in meters.
+        - ``'native_dy'``: Original cell resolution along Y in meters.
+
+    Notes
+    -----
+    Standard GIS raster formats (GeoTIFF, ASCII Grid) index Row 0 at the top (maximum Y).
+    PySole vertically flips loaded grids upon ingestion so that Row 0 matches the bottom
+    coordinate (minimum Y), ensuring consistency with bottom-up coordinate arrays.
     """
     grid = None
     transform = None
@@ -478,8 +711,7 @@ def load_dem(
             import rasterio
 
             with rasterio.open(dem_input) as src:
-                # NOTE: read([1])[0] instead of read(1): rasterio's 2-D read path sets ndarray.shape in place,
-                # which emits a DeprecationWarning under NumPy >= 2.5. Values are identical.
+                # Read first band preserving array shape across all NumPy versions
                 grid = np.array(src.read([1])[0], dtype=np.float64)
                 if src.nodata is not None:
                     grid[grid == src.nodata] = np.nan
@@ -647,9 +879,22 @@ def load_dem(
 
 def validate_and_extract_polygons(gdf: Any) -> list[Any]:
     """
-    Validates vector geometries for internal hole compliance.
-    If interior holes fail topological criteria (e.g. self-intersecting or invalid),
-    prints an error message and falls back to using the outer boundary shell only.
+    Validate vector geometries for interior hole compliance and topological validity.
+
+    Inspects polygons or multi-polygons in a GeoDataFrame, ensuring that exterior
+    rings and interior holes (representing rock outcrops or nunataks) are topologically
+    valid and non-empty. If interior holes fail topological checks, logs a warning
+    and gracefully falls back to extracting the outer boundary shell.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Loaded vector dataset containing polygon or multi-polygon features.
+
+    Returns
+    -------
+    list of shapely.geometry.Polygon or shapely.geometry.MultiPolygon
+        List of validated Shapely geometry objects ready for rasterization.
     """
     valid_geoms = []
 
@@ -694,11 +939,35 @@ def load_outline(
     meta: dict[str, Any],
 ) -> np.ndarray:
     """
-    Load body outline (Shapefile/GeoJSON/polygon coordinates or raster mask),
-    returning a boolean mask (True = inside glacier/body, False = outside or inside rock outcrop holes).
+    Load glacier or study area boundary outline and convert to a 2D boolean mask.
 
-    Validates polygon interior holes; if holes fail criteria, prints an error message and falls back
-    to the outer boundary shell for processing. Performs strict CRS alignment check against DEM.
+    Ingests vector outlines (Shapefile `.shp`, GeoJSON `.geojson`, GeoPackage `.gpkg`),
+    coordinate ring text files (ASCII/CSV with NaN row separators for holes), or
+    pre-existing boolean arrays. Validates topological validity, verifies strict
+    CRS alignment with the surface DEM, and rasterizes polygons onto the DEM grid.
+    If no outline is provided, delineates active body boundaries from DEM NaN values.
+
+    Parameters
+    ----------
+    outline_input : str, Path, os.PathLike, np.ndarray, or None
+        Path to vector outline file, coordinate table, or boolean array. If None,
+        the non-NaN cells of `dem_grid` are treated as the active domain.
+    dem_grid : np.ndarray
+        2D surface DEM array of shape (M_rows, N_cols) in meters.
+    meta : dict of str to Any
+        Spatial metadata dictionary from `load_dem` containing bounds, CRS, and cell dimensions.
+
+    Returns
+    -------
+    mask : np.ndarray
+        2D boolean array of shape (M_rows, N_cols) where True represents the active glaciated
+        domain and False indicates ice-free terrain or interior rock nunataks.
+
+    Raises
+    ------
+    ValueError
+        If the outline file does not exist, coordinate reference systems do not match,
+        or vector geometry parsing fails.
     """
     if outline_input is None:
         nan_mask = np.isnan(dem_grid)
@@ -831,8 +1100,47 @@ def load_survey_points(
     profile_column: str | None = None,
 ) -> np.ndarray:
     """
-    Unified ingestion and validation for scattered survey point datasets.
-    Loads CSV, whitespace-delimited files, or NumPy arrays, converts coordinates, and validates bounds.
+    Ingest, validate, and standardize scattered radar or seismic survey point data.
+
+    Accepts file paths (CSV, whitespace-delimited text) or NumPy arrays containing
+    either 3 columns ``[X, Y, value]`` or 4 columns ``[X, Y, Z_surface, value]``,
+    with an optional profile ID column. Verifies projected metric coordinates, checks
+    bounds alignment against the DEM domain, samples DEM surface elevation if column 3
+    is absent, and consolidates duplicate coordinates by spatial averaging to ensure
+    numerical stability during variography and Kriging.
+
+    Parameters
+    ----------
+    survey_input : str, Path, os.PathLike, or np.ndarray
+        Survey points data source.
+    bounds : tuple of float, optional
+        Spatial bounding coordinates (minx, miny, maxx, maxy) in meters from the DEM.
+    dem_grid : np.ndarray, optional
+        2D surface DEM grid of shape (M_rows, N_cols) in meters, used to sample surface
+        elevations if missing in the survey points dataset.
+    x_coords : np.ndarray, optional
+        1D array of DEM cell center X coordinates in meters.
+    y_coords : np.ndarray, optional
+        1D array of DEM cell center Y coordinates in meters.
+    profile_column : str, optional
+        Name of the survey profile ID column in CSV input. When present, discrete profile
+        identifiers are extracted as an extra column for profile-based cross-validation.
+
+    Returns
+    -------
+    points : np.ndarray
+        Standardized 2D array of shape (N, 4) or (N, 5) with columns:
+        - Col 0: X coordinate in projected meters (Easting).
+        - Col 1: Y coordinate in projected meters (Northing).
+        - Col 2: Surface elevation Z in meters.
+        - Col 3: Measured value (e.g., ice thickness in meters or travel time in ns).
+        - Col 4 (optional): Discrete survey profile identifier if profile_column was provided.
+
+    Raises
+    ------
+    ValueError
+        If unprojected geographic coordinates (degrees) are detected or if points fall
+        completely outside the surface DEM spatial bounds.
     """
     prof_arr: np.ndarray | None = None
     pts: np.ndarray | None = None
