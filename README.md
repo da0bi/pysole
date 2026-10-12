@@ -369,9 +369,9 @@ For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 | **$0.0314\text{ rad/m}$** | $\mathbf{200.0\text{ m}}$ | Broad spatial smoothing |
 | **$0.0100\text{ rad/m}$** | $\mathbf{628.3\text{ m}}$ | Very broad regional smoothing |
 
-*Table 1: Physical Reference Conversion Table (5 m × 5 m DEM).*
+*Table 1: Physical Reference Conversion Table.*
 
-#### Derivation of FFT Filter Parameter Defaults (`kc_max`, `kc_min`, `lambda_min`, `lambda_max`, `n_steps`)
+#### Derivation of FFT Filter Parameter Defaults
 
 When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` dynamically derives physically sound parameter defaults based on the DEM spatial resolution (&Delta;<i>x</i>, &Delta;<i>y</i>) and total domain extent (<i>L</i><sub>max</sub> = max(<i>N</i><sub>x</sub> &middot; |<i>dx</i>|, <i>M</i><sub>y</sub> &middot; |<i>dy</i>|)). The DEM spatial boundaries as well as the active cutoff wavenumbers ($k_{\text{c,min}}$, $k_{\text{Nyquist}}$) and wavelengths ($\lambda_{\text{Nyquist}}$, $\lambda_{\text{c,max}}$) defining the default spectral search range are logged to the console and in `pysole.log`.
 
