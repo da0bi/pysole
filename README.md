@@ -250,7 +250,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `outline_path` | `str` | `null` | File path to creeping body / glacier boundary polygon (`.shp`, `.geojson`, `.gpkg`, `.csv`). If `null`, domain is derived from non-NaN DEM pixels. |
 | | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[(profile_id), X, Y, value]`. If `null`, `PySole` automatically starts the interactive `Survey Planner` and saves the results to the file paths defined in the `outputs` section.  See [`here`](docs/drift_analyzer_&_survey_planner.md) for full details. |
 | | `survey_data_type` | `str` | `"one_way_traveltime"` | Observation data type: `"one_way_traveltime"`, `"two_way_traveltime"`, or `"depth"` (skips 3D migration). |
-| | `survey_profile_column` | `str` | `null` | Optional CSV column name specifying survey line / profile IDs for the `Drift Analyzer'´s <i>Leave-One-Profile-Out</i> cross-validation. |
+| | `survey_profile_column` | `str` | `null` | Optional column name in the imported survey dataset CSV (`inputs.survey_data_path`) specifying survey line / profile IDs for the Drift Analyzer's <i>Leave-One-Profile-Out</i> (LOPO) cross-validation. |
 | | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (`900.0` kg/m³ for temperate glacier ice by default). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `g` | `float` | `9.81` | Gravitational acceleration constant in m/s² (`9.81` m/s²). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
@@ -722,7 +722,7 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole pysole.json --drift-analyzer --profile-col profile_name
   ```
-  *Names the column of the survey data CSV that identifies the survey profile / line. It enables leave-one-profile-out (LOPO) cross-validation in the Drift Analyzer and overrides `inputs.survey_profile_column`.*
+  *Specifies the column header name in the imported survey data CSV file (`inputs.survey_data_path`) that identifies individual survey profiles or lines. It enables Leave-One-Profile-Out (LOPO) cross-validation in the Drift Analyzer and overrides `inputs.survey_profile_column`.*
 
   *See [here](docs/drift_analyzer_&_survey_planner.md) for full details and CLI options.*
 
