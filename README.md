@@ -730,7 +730,9 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole plan-survey --dem dem.tif --outline outline.geojson --kc 0.0314 --tau 100 --max-km 5 --out-dir results --format tif
   ```
-  *Computes a SIA thickness model and proposes survey tracks within a length budget. See [here](docs/drift_analyzer_&_survey_planner.md) for full details and CLI options.*
+  *Computes a SIA thickness model and proposes survey tracks within a length budget.*
+
+  *See [here](docs/drift_analyzer_&_survey_planner.md) for full details and CLI options.*
 
 * **Show the Installed Version:**
   ```bash
