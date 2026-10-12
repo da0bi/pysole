@@ -355,12 +355,10 @@ Physical angular wavenumber $k_c$ [rad/m] relates directly to physical spatial w
 $$k_c = \frac{2\pi}{\lambda_c} \quad \Longleftrightarrow \quad \lambda_c = \frac{2\pi}{k_c}$$
 </p>
 
-#### Concrete Calculation Example ($dx = 5.0\text{ m}, dy = 5.0\text{ m}$)
+#### Concrete Calculation Example
 For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 - **Minimum Physical Nyquist Wavelength**: $\lambda_{\text{Nyquist}} = 2 \cdot \min(dx, dy) = 2 \cdot 5.0\text{ m} = \mathbf{10.0\text{ m}}$ (the shortest feature resolvable on a 5m grid).
 - **Maximum Physical Nyquist Wavenumber**: $k_{\text{Nyquist}} = \frac{2\pi}{\lambda_{\text{Nyquist}}} = \frac{\pi}{5.0} \approx \mathbf{0.6283\text{ rad/m}}$.
-
-*Table 1: Physical Reference Conversion Table ($5\text{ m} \times 5\text{ m}$ DEM).*
 
 | Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Surface Feature Scale |
 | :--- | :--- | :--- |
@@ -370,6 +368,8 @@ For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 | **$0.0628\text{ rad/m}$** | $\mathbf{100.0\text{ m}}$ | Medium spatial smoothing |
 | **$0.0314\text{ rad/m}$** | $\mathbf{200.0\text{ m}}$ | Broad spatial smoothing |
 | **$0.0100\text{ rad/m}$** | $\mathbf{628.3\text{ m}}$ | Very broad regional smoothing |
+
+*Table 1: Physical Reference Conversion Table (5 m × 5 m DEM).*
 
 #### Derivation of FFT Filter Parameter Defaults (`kc_max`, `kc_min`, `lambda_min`, `lambda_max`, `n_steps`)
 
