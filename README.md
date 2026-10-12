@@ -360,7 +360,7 @@ For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
 - **Minimum Physical Nyquist Wavelength**: $\lambda_{\text{Nyquist}} = 2 \cdot \min(dx, dy) = 2 \cdot 5.0\text{ m} = \mathbf{10.0\text{ m}}$ (the shortest feature resolvable on a 5m grid).
 - **Maximum Physical Nyquist Wavenumber**: $k_{\text{Nyquist}} = \frac{2\pi}{\lambda_{\text{Nyquist}}} = \frac{\pi}{5.0} \approx \mathbf{0.6283\text{ rad/m}}$.
 
-#### Physical Reference Conversion Table ($5\text{ m} \times 5\text{ m}$ DEM)
+*Table 1: Physical Reference Conversion Table ($5\text{ m} \times 5\text{ m}$ DEM).*
 
 | Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Surface Feature Scale |
 | :--- | :--- | :--- |
