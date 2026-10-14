@@ -11,7 +11,6 @@ build/
 logo/
 matlab/
 scripts/
-docs/reviews
 pypi_request.txt
 *.log
 scratch/
