@@ -20,7 +20,6 @@ examples/**/*.tif
 examples/**/*.tiff
 # Default PySole output workspace created when running from the repo root / examples
 /pysole/
-pysole/
 examples/**/pysole/
 paper.md
 paper.bib

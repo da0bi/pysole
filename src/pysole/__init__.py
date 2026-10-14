@@ -21,7 +21,7 @@ from .pipeline import run_from_config, PipelineExporter
 from .logging import logger, setup_logging
 from . import plotting
 
-__version__ = "0.4.4"
+__version__ = "0.5.0"
 
 __all__ = [
     "Solver",

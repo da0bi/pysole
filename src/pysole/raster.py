@@ -148,30 +148,6 @@ class GridGeometry:
             method=method,
         )
 
-    def coords_to_grid_indices(self, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Convert spatial metric coordinates (x, y) to integer 2D grid matrix indices (rows, cols).
-
-        Parameters
-        ----------
-        x : np.ndarray
-            X spatial coordinates in projected meters (Easting).
-        y : np.ndarray
-            Y spatial coordinates in projected meters (Northing).
-
-        Returns
-        -------
-        rows : np.ndarray
-            Row grid indices (0-based) clipped to [0, M_rows - 1].
-        cols : np.ndarray
-            Column grid indices (0-based) clipped to [0, N_cols - 1].
-        """
-        M, N = self.shape
-        minx, _, _, maxy = self.bounds
-        cols = np.clip(np.floor((x - minx) / self.dx).astype(int), 0, N - 1)
-        rows = np.clip(np.floor((maxy - y) / self.dy).astype(int), 0, M - 1)
-        return rows, cols
-
 
 class BedrockMap:
     """

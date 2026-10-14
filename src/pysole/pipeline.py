@@ -120,7 +120,8 @@ def run_from_config(
     is_batch : bool, default False
         If True, disables all interactive terminal prompts and variogram optimization dialogs.
     drift_analyzer : bool, optional
-        If True, enables the interactive Drift Analyzer helper tool.
+        If True, enables the Drift Analyzer of both Kriging stages (equivalent to ``drift_analyzer: true`` in
+        the configuration); it only takes effect with method 'universal'. None keeps the configured values.
     survey_profile_column : str, optional
         Survey profile column name for spatial cross-validation.
 
@@ -142,7 +143,7 @@ def run_from_config(
     if not config_file.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_file.resolve()}")
 
-    cfg = load_config(config_file, log_level=log_level)
+    cfg = load_config(config_file, log_level=log_level, drift_analyzer=drift_analyzer)
     inputs_cfg = cfg.get("inputs", {})
     outputs_cfg = cfg.get("outputs", {})
 
@@ -162,9 +163,10 @@ def run_from_config(
         if survey_data_path is None:
             logger.info("   [INFO] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
 
-            solver = Solver.from_config(config_file, log_level=log_level)
+            solver = Solver.from_config(config_file, log_level=log_level, drift_analyzer=drift_analyzer)
             if is_batch:
                 solver.show_progress = False
+                solver.is_batch_mode = True
 
             plan_res = solver.plan_survey()
 
@@ -182,12 +184,11 @@ def run_from_config(
         logger.info(f"        STARTING NEW PYSOLE BEDROCK TOPOGRAPHY CALCULATION ({config_file.resolve()})")
         logger.info("=" * 80)
 
-        solver = Solver.from_config(config_file, log_level=log_level)
+        solver = Solver.from_config(config_file, log_level=log_level, drift_analyzer=drift_analyzer)
         if is_batch:
             solver.show_progress = False
+            solver.is_batch_mode = True
 
-        if drift_analyzer is not None:
-            solver.drift_analyzer = drift_analyzer
         if survey_profile_column is not None:
             solver.survey_profile_column = survey_profile_column
 

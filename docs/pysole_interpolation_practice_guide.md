@@ -210,12 +210,10 @@ Based on theoretical derivations and empirical benchmarks on WUK and GOK, we est
   ```json
   "kriging_parameters": {
     "pre_migration": {
-      "method": "ordinary",
-      "drift_terms": []
+      "method": "ordinary"
     },
     "post_migration": {
-      "method": "ordinary",
-      "drift_terms": []
+      "method": "ordinary"
     }
   }
   ```
@@ -247,9 +245,9 @@ Based on theoretical derivations and empirical benchmarks on WUK and GOK, we est
 
 | Glacier Setting | Recommended Strategy | Pre-Kriging Type & Drift | Post-Kriging Type & Drift | Primary Benefit |
 | :--- | :--- | :--- | :--- | :--- |
-| **Standard Alpine Valley** | Strategy 3 (BSS + OK) | `ordinary`, `[]` | `ordinary`, `[]` | Optimal central basin depth, clean margin tapering |
+| **Standard Alpine Valley** | Strategy 3 (BSS + OK) | `ordinary`, none | `ordinary`, none | Optimal central basin depth, clean margin tapering |
 | **Long Valley Tongue (Elevational Drift)** | Strategy 5 (BSS + UK Elevation) | `universal`, `["z_dem"]` | `universal`, `["z_dem"]` | Models altitude-dependent thickness gradients |
-| **Flat Plateau / Ice Cap** | Strategy 3 or Strategy 1 | `ordinary`, `[]` | `ordinary`, `[]` | Prevents inverse-slope margin explosion |
+| **Flat Plateau / Ice Cap** | Strategy 3 or Strategy 1 | `ordinary`, none | `ordinary`, none | Prevents inverse-slope margin explosion |
 | **Direct Depth Interpolation (No BSS)** | Strategy 2 (Direct Depth + SIA) | `universal`, `["sia"]` | `universal`, `["sia"]` | Valid ONLY if BSS product multiplication is disabled |
 
 ---

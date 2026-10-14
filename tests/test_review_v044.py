@@ -8,13 +8,14 @@ unknown configuration keys, and the README API examples (F5).
 import re
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
 from pysole.config import ConfigError, DEFAULT_CONFIG, OutputsConfig, load_config, sanitize_config
-from pysole.interpolation import DualKrigingSolver, KrigingResult, kriging_interpolation
+from pysole.interpolation import KrigingResult, kriging_interpolation
 from pysole.memory import (
     estimate_native_kriging_bytes,
     kriging_chunk_size,
@@ -119,23 +120,18 @@ class TestLinearVariogramHandling(ReviewTestCase):
         self.assertEqual(native._resolve_variogram_for_engine("linear", "regression"), "linear")
         self.assertEqual(native._resolve_variogram_for_engine("linear", "ordinary", warn=False), "spherical")
 
-    def test_dual_kriging_solver_never_sees_linear(self):
-        rng = np.random.default_rng(3)
-        x, y, z = rng.uniform(0, 100, 12), rng.uniform(0, 100, 12), rng.normal(10, 1, 12)
-        with self.assertLogs("pysole", level="WARNING"):
-            dual = DualKrigingSolver(x, y, z, variogram_model="linear", sill=1.0, range_param=60.0)
-        self.assertEqual(dual.variogram_model, "spherical")
-
     def test_drift_analyzer_receives_spherical_model(self):
         """F4: the drift analyzer is native-only, so even engine='pykrige' + 'linear' hands it 'spherical'."""
-        solver = self.make_solver(kriging_engine="pykrige", post_variogram_model="linear")
-        solver.drift_analyzer = True
+        solver = self.make_solver(
+            kriging_engine="pykrige", post_variogram_model="linear",
+            post_kriging_method="universal", post_drift_analyzer=True,
+        )
         fake = KrigingResult(bedrock_grid=np.full((12, 12), 40.0), variance_grid=np.zeros((12, 12)))
         with patch("pysole.solver.DriftAnalyzer") as mock_analyzer, \
                 patch("pysole.solver.kriging_interpolation", return_value=fake):
-            mock_analyzer.return_value.run_diagnostics.return_value = []
+            mock_analyzer.return_value.run_diagnostics.return_value = [SimpleNamespace(terms=["sia"], aicc=0.0)]
             solver._execute_kriging_pass(
-                target_type="D", points=solver.migrated_points, krig_method="universal", drift_terms=["sia"],
+                target_type="D", points=solver.migrated_points, krig_method="universal",
                 var_model="linear", zero_boundary=False, pass_name="Pass 2: Post-Migration",
             )
         self.assertEqual(mock_analyzer.return_value.run_diagnostics.call_args.kwargs["variogram_model"], "spherical")
@@ -157,7 +153,7 @@ class TestVariancePropagation(ReviewTestCase):
         solver.opt_slope = 0.04 + 0.01 * np.arange(12)[None, :] * np.ones((12, 1))  # 0.04 .. 0.15 rad, floor engaged
         direct = self._direct(solver, "P")
         res = solver._execute_kriging_pass(
-            target_type="P", points=solver.survey_points, krig_method="ordinary", drift_terms=[],
+            target_type="P", points=solver.survey_points, krig_method="ordinary",
             var_model="spherical", zero_boundary=False, pass_name="Pass 1: Pre-Migration", return_variance=True,
         )
         safe = np.maximum(np.sin(solver.opt_slope), np.sin(np.radians(solver.slope_floor_deg)))
@@ -171,7 +167,7 @@ class TestVariancePropagation(ReviewTestCase):
         solver = self.make_solver(n_cores=1)
         direct = self._direct(solver, "D")
         res = solver._execute_kriging_pass(
-            target_type="D", points=solver.survey_points, krig_method="ordinary", drift_terms=[],
+            target_type="D", points=solver.survey_points, krig_method="ordinary",
             var_model="spherical", zero_boundary=False, pass_name="Pass 1: Pre-Migration", return_variance=True,
         )
         np.testing.assert_allclose(res.bedrock_grid, direct.bedrock_grid, rtol=1e-10)

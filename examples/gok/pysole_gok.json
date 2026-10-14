@@ -41,7 +41,7 @@
             "interpolation_target": "P",
             "method": "ordinary",
             "drift_analyzer": false,
-            "drift_terms": [],
+            "drift_terms": null,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true
         },
@@ -49,7 +49,7 @@
             "interpolation_target": "P",
             "method": "ordinary",
             "drift_analyzer": false,
-            "drift_terms": [],
+            "drift_terms": null,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true
         }

@@ -10,12 +10,10 @@ import json
 import os
 import numpy as np
 from difflib import get_close_matches
+from .drift import default_model, normalize_engine, resolve_drift_plan
+from .errors import ConfigError
 from .logging import logger, setup_logging
 from .memory import MAX_FRACTION_CAP
-
-
-class ConfigError(ValueError):
-    """Raised for an invalid PySole configuration (unreadable JSON, wrongly typed parameter value)."""
 
 
 _TRUE_STRINGS = frozenset({"true", "yes", "on", "1"})
@@ -277,7 +275,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "interpolation_target": "P",
             "method": "ordinary",
             "drift_analyzer": False,
-            "drift_terms": [],
+            "drift_terms": None,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": True,
         },
@@ -285,7 +283,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "interpolation_target": "P",
             "method": "ordinary",
             "drift_analyzer": False,
-            "drift_terms": [],
+            "drift_terms": None,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": True,
         },
@@ -536,10 +534,15 @@ def _deep_merge_dict(target: dict[str, Any], source: dict[str, Any]) -> dict[str
 def load_config(
     config_path: str | Path | os.PathLike | dict[str, Any] = "pysole.json",
     log_level: str | int | None = None,
+    drift_analyzer: bool | None = None,
 ) -> dict[str, Any]:
     """
     Loads pysole.json configuration file or dictionary, falling back to default configuration values.
     Initializes package logging based on the configured log_level.
+
+    The Kriging drift configuration of both stages is resolved and validated here, before any computation:
+    an omitted ``method`` receives its default (see :func:`pysole.drift.default_model`) and contradictory or
+    invalid ``method`` / ``drift_analyzer`` / ``drift_terms`` combinations raise :class:`ConfigError`.
 
     Parameters
     ----------
@@ -547,10 +550,18 @@ def load_config(
         Path to JSON configuration file or configuration dictionary.
     log_level : str, optional
         Explicit log level override (e.g. 'DEBUG', 'INFO').
+    drift_analyzer : bool, optional
+        If True, enables the drift analyzer of both stages (the command-line ``--drift-analyzer`` flag); it
+        takes effect before the defaults are resolved. None keeps the configured values.
 
     Returns
     -------
     config : dict
+
+    Raises
+    ------
+    ConfigError
+        For unreadable JSON, wrongly typed values and invalid Kriging / drift settings.
     """
     config = copy.deepcopy(DEFAULT_CONFIG)
     user_config = None
@@ -577,24 +588,34 @@ def load_config(
         config["kriging_parameters"]["max_memory_fraction"]
     )
 
-    # Automatically align Kriging defaults based on interpolation_target if method was not explicitly user-defined
+    # Resolve and validate the Kriging drift configuration of both stages (fail fast, before any data is read)
     kp = config.get("kriging_parameters", {})
     user_kp = (user_config or {}).get("kriging_parameters", {})
+    normalize_engine(kp.get("engine", "native"))
 
     for section_name, direct_target_char in [("pre_migration", "T"), ("post_migration", "D")]:
         sec = kp.get(section_name, {})
         user_sec = user_kp.get(section_name, {})
-        target = str(sec.get("interpolation_target", "P")).upper()
+        if drift_analyzer:
+            sec["drift_analyzer"] = True
 
-        if "method" not in user_sec:
-            if target == direct_target_char:
-                sec["method"] = "universal"
-                if "drift_terms" not in user_sec:
-                    sec["drift_terms"] = ["sia"]
-            else:
-                sec["method"] = "ordinary"
-                if "drift_terms" not in user_sec:
-                    sec["drift_terms"] = []
+        if "method" in user_sec:
+            method = user_sec["method"]
+            terms = sec.get("drift_terms")
+        else:
+            method, terms = default_model(
+                None,
+                sec.get("drift_terms"),
+                sec.get("interpolation_target", "P"),
+                direct_target_char,
+                bool(sec.get("drift_analyzer", False)),
+            )
+        sec["method"] = method
+        sec["drift_terms"] = terms
+        try:
+            resolve_drift_plan(method, sec.get("drift_analyzer", False), terms, kp.get("engine", "native"))
+        except ConfigError as exc:
+            raise ConfigError(f"kriging_parameters.{section_name}: {exc}") from exc
 
     inputs = config.get("inputs", {})
     output_dir = configured_output_dir(config)
@@ -706,7 +727,9 @@ def main_cli() -> None:
         "--drift-analyzer",
         dest="drift_analyzer",
         action="store_true",
-        help="Enables the interactive Drift Analyzer helper tool.",
+        help="Enables the drift analyzer of both Kriging stages, i.e. a drift_analyzer set to true in the "
+        "configuration file. It needs method 'universal' (an omitted method is 'universal' only for a direct "
+        "target T / D); with method 'ordinary' it is ignored with a warning.",
     )
     parser.add_argument(
         "--profile-col",

@@ -12,13 +12,13 @@ import os
 from pysole.raster import GridGeometry, resample_dem, load_dem, BedrockMap
 from pysole.interpolation import (
     DriftBasis,
-    DualKrigingSolver,
     kriging_interpolation,
     built_in_kriging_interpolation,
     random_forest_hole_filling,
     blend_margin_topography,
 )
-from pysole.memory import kriging_chunk_size
+from pysole.drift import DRIFT_PRIMITIVES
+from pysole.kriging_core import KrigingSystem
 from pysole.smoothing import fft_gaussian_smooth
 from pysole.migration import migrate_eikonal_points
 from pysole.variogram import fit_variogram_model, calculate_variogram, optimize_bss_variance
@@ -38,27 +38,6 @@ class TestAuditRegressions(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_coords_to_grid_indices_bottom_up(self):
-        """1. test_coords_to_grid_indices_bottom_up: Verifies (x,y) -> (row, col) indexing."""
-        shape = (10, 10)
-        dx, dy = 5.0, 5.0
-        bounds = (100.0, 200.0, 150.0, 250.0)  # minx, miny, maxx, maxy
-        geom = GridGeometry.create(shape, dx=dx, dy=dy, bounds=bounds)
-
-        # Center of top-left cell (row=0, col=0) in GDAL convention: y is near maxy
-        x_top_left = bounds[0] + dx / 2.0
-        y_top_left = bounds[3] - dy / 2.0
-        row, col = geom.coords_to_grid_indices(x_top_left, y_top_left)
-        self.assertEqual(row, 0)
-        self.assertEqual(col, 0)
-
-        # Center of bottom-right cell (row=9, col=9): y is near miny
-        x_bot_right = bounds[2] - dx / 2.0
-        y_bot_right = bounds[1] + dy / 2.0
-        row_br, col_br = geom.coords_to_grid_indices(x_bot_right, y_bot_right)
-        self.assertEqual(row_br, 9)
-        self.assertEqual(col_br, 9)
-
     def test_dual_kriging_loo_linear_field(self):
         """2. test_dual_kriging_loo_linear_field: Verifies LOO RMSE < 2.0 on linear trend field."""
         np.random.seed(42)
@@ -75,14 +54,11 @@ class TestAuditRegressions(unittest.TestCase):
         for i in range(len(X)):
             idx = np.arange(len(X)) != i
             val_drift = DriftBasis(["linear_xy"], X[idx], Y[idx])
-            val_solver = DualKrigingSolver(
-                X[idx], Y[idx], Depth[idx],
-                drift_basis=val_drift,
-                range_param=200.0,
-                sill=1.0,
-                nugget=0.01
+            val_solver = KrigingSystem(
+                X[idx], Y[idx], Depth[idx], val_drift.evaluate(X[idx], Y[idx]),
+                variogram_params=(200.0, 1.0, 0.01),
             )
-            pred = val_solver.predict(X[i:i+1], Y[i:i+1])
+            pred, _ = val_solver.predict_points(X[i:i+1], Y[i:i+1], val_drift.evaluate(X[i:i+1], Y[i:i+1]).T)
             errors.append((pred[0] - Depth[i]) ** 2)
 
         rmse = np.sqrt(np.mean(errors))
@@ -242,8 +218,8 @@ class TestAuditRegressions(unittest.TestCase):
         cond = np.linalg.cond(F)
         self.assertLess(cond, 500.0)
 
-    def test_compound_drift_expansion(self):
-        """11. Verifies compound drift names expand to primitive drift terms (identical to explicit primitives)."""
+    def test_explicit_multi_drift_and_legacy_rejection(self):
+        """11. Verifies explicit primitive multi-drift combinations run correctly and legacy shorthand names raise ValueError."""
         geom = GridGeometry.create((10, 10), dx=10.0, dy=10.0, bounds=(0, 0, 100, 100))
         pts = np.array([
             [15.0, 20.0, 1000.0, 25.0],
@@ -266,16 +242,27 @@ class TestAuditRegressions(unittest.TestCase):
             include_zero_boundary_condition=False,
             show_progress=False,
         )
-        res_compound = kriging_interpolation(drift_terms=["sia_z_dem"], **common)
+        # Explicit primitive multi-drift list works
         res_explicit = kriging_interpolation(drift_terms=["sia", "z_dem"], **common)
         res_sia_only = kriging_interpolation(drift_terms=["sia"], **common)
 
-        self.assertEqual(res_compound.bedrock_grid.shape, (10, 10))
-        self.assertTrue(np.all(np.isfinite(res_compound.bedrock_grid)))
-        np.testing.assert_allclose(res_compound.bedrock_grid, res_explicit.bedrock_grid, rtol=1e-10, atol=1e-10)
-        np.testing.assert_allclose(res_compound.variance_grid, res_explicit.variance_grid, rtol=1e-10, atol=1e-10)
-        # The z_dem component must actually change the fit relative to the SIA-only drift
-        self.assertGreater(float(np.max(np.abs(res_compound.bedrock_grid - res_sia_only.bedrock_grid))), 1e-6)
+        self.assertEqual(res_explicit.bedrock_grid.shape, (10, 10))
+        self.assertTrue(np.all(np.isfinite(res_explicit.bedrock_grid)))
+        self.assertGreater(float(np.max(np.abs(res_explicit.bedrock_grid - res_sia_only.bedrock_grid))), 1e-6)
+
+        # Legacy shorthand names must strictly raise ValueError
+        legacy_names = [
+            "sia_z_dem", "full_physical", "sia_space", "sia_curvature_dem",
+            "z_dem_curvature_dem", "sia_z_dem_curvature_dem", "full_spatial_physical",
+        ]
+        for legacy_shorthand in legacy_names:
+            with self.assertRaises(ValueError) as ctx:
+                kriging_interpolation(drift_terms=[legacy_shorthand], **common)
+            self.assertIn("Shorthand compound names are no longer supported", str(ctx.exception))
+
+            with self.assertRaises(ValueError) as ctx_basis:
+                DriftBasis(drift_terms=[legacy_shorthand], x_ref=pts[:, 0], y_ref=pts[:, 1])
+            self.assertIn("Shorthand compound names are no longer supported", str(ctx_basis.exception))
 
     def test_eikonal_migration_oblique_slope(self):
         """12. Verifies exact 3D Eikonal closed-form slowness vector on oblique surface slopes."""
@@ -392,7 +379,7 @@ class TestAuditRegressions(unittest.TestCase):
             fake = KrigingResult(bedrock_grid=np.full((12, 12), 40.0), variance_grid=np.zeros((12, 12)))
             with patch("pysole.solver.kriging_interpolation", return_value=fake) as mock_krig:
                 solver._execute_kriging_pass(
-                    target_type="D", points=solver.migrated_points, krig_method="ordinary", drift_terms=[],
+                    target_type="D", points=solver.migrated_points, krig_method="ordinary",
                     var_model="spherical", zero_boundary=False, pass_name="Pass 2: Post-Migration",
                 )
             mock_krig.assert_called_once()
@@ -547,17 +534,22 @@ class TestAuditRegressions(unittest.TestCase):
         sentinel = np.arange(144, dtype=float).reshape(12, 12) * 1e-3
         fake = KrigingResult(bedrock_grid=np.full((12, 12), 40.0), variance_grid=np.zeros((12, 12)))
 
-        compound = [
-            "curvature_dem", "sia_curvature_dem", "z_dem_curvature_dem",
-            "sia_z_dem_curvature_dem", "full_physical", "full_spatial_physical",
+        curvature_models = [
+            ["curvature_dem"],
+            ["sia", "curvature_dem"],
+            ["z_dem", "curvature_dem"],
+            ["sia", "z_dem", "curvature_dem"],
+            ["sia", "z_dem", "curvature_dem", "linear_xy"],
+            ["z_dem", "curvature_dem", "quadratic_xy"],
         ]
         with patch.object(type(solver), "get_smoothed_curvature", return_value=sentinel) as mock_curv, \
                 patch("pysole.solver.kriging_interpolation", return_value=fake) as mock_krig:
-            for term in compound:
+            for model_terms in curvature_models:
                 mock_krig.reset_mock()
                 mock_curv.reset_mock()
+                solver.post_drift_terms = model_terms
                 solver._execute_kriging_pass(
-                    target_type="D", points=solver.migrated_points, krig_method="universal", drift_terms=[term],
+                    target_type="D", points=solver.migrated_points, krig_method="universal",
                     var_model="spherical", zero_boundary=False, pass_name="Pass 2: Post-Migration",
                 )
                 mock_curv.assert_called_once_with(0.02)
@@ -567,16 +559,17 @@ class TestAuditRegressions(unittest.TestCase):
             # Control: drifts without curvature must not trigger the (expensive) smoothed-curvature evaluation
             mock_krig.reset_mock()
             mock_curv.reset_mock()
+            solver.post_drift_terms = ["sia", "z_dem"]
             solver._execute_kriging_pass(
-                target_type="D", points=solver.migrated_points, krig_method="universal", drift_terms=["sia_z_dem"],
+                target_type="D", points=solver.migrated_points, krig_method="universal",
                 var_model="spherical", zero_boundary=False, pass_name="Pass 2: Post-Migration",
             )
             mock_curv.assert_not_called()
-            self.assertIsNone(mock_krig.call_args.kwargs["external_drift_grid"])
+            self.assertEqual(set(mock_krig.call_args.kwargs["external_drift_grid"]), {"sia", "z_dem"})
 
     def test_return_variance_shortcut(self):
         """20. N5-M7: return_variance=False skips the K^-1 solve and variance GEMM but keeps the prediction identical."""
-        import pysole.interpolation as interp
+        import pysole.kriging_core as core
 
         geom = GridGeometry.create((20, 20), dx=10.0, dy=10.0, bounds=(0, 0, 200, 200))
         rng = np.random.default_rng(1)
@@ -586,15 +579,13 @@ class TestAuditRegressions(unittest.TestCase):
                   drift_terms=["linear_xy"], show_progress=False)
 
         calls = []
-        real_lu_solve = interp.lu_solve
+        real_lu_solve = core.lu_solve
 
         def counting_lu_solve(*a, **k):
             calls.append(1)
             return real_lu_solve(*a, **k)
 
-        n_chunks = -(-400 // kriging_chunk_size(25))  # 20 x 20 grid cells
-
-        with patch.object(interp, "lu_solve", side_effect=counting_lu_solve):
+        with patch.object(core, "lu_solve", side_effect=counting_lu_solve):
             z_full, v_full = built_in_kriging_interpolation(pts, geom.x_coords, geom.y_coords, **kw)
             n_full = len(calls)
             calls.clear()
@@ -603,7 +594,7 @@ class TestAuditRegressions(unittest.TestCase):
             )
             n_fast = len(calls)
 
-        self.assertEqual(n_full, 1 + n_chunks)  # dual weights + one triangular solve per chunk (no explicit K^-1)
+        self.assertEqual(n_full, 2)  # dual weights + explicit inverse (shared by all chunks)
         self.assertEqual(n_fast, 1)  # dual weights only
         np.testing.assert_array_equal(z_full, z_fast)
         self.assertTrue(np.all(np.isfinite(v_full)) and np.all(v_full >= 0.0))
@@ -628,7 +619,7 @@ class TestAuditRegressions(unittest.TestCase):
         fake = KrigingResult(bedrock_grid=np.full((12, 12), 40.0), variance_grid=np.full((12, 12), np.nan))
         with patch("pysole.solver.kriging_interpolation", return_value=fake) as mock_krig:
             solver_arg._execute_kriging_pass(
-                target_type="D", points=solver_arg.migrated_points, krig_method="ordinary", drift_terms=[],
+                target_type="D", points=solver_arg.migrated_points, krig_method="ordinary",
                 var_model="spherical", zero_boundary=False, pass_name="Pass 1: Pre-Migration", return_variance=False,
             )
             self.assertFalse(mock_krig.call_args.kwargs["return_variance"])
@@ -1106,7 +1097,6 @@ class TestAuditRegressions(unittest.TestCase):
     def test_documented_drift_term_names_are_valid(self):
         """39. Drift names written in README / living docs are accepted by the code (no removed legacy aliases)."""
         import re
-        from pysole.interpolation import DriftBasis
 
         root = Path(__file__).resolve().parents[1]
         if not (root / "README.md").exists():
@@ -1121,7 +1111,7 @@ class TestAuditRegressions(unittest.TestCase):
                 "release_guide.md",
             )),
         ]
-        legacy = re.compile(r"[`\"](sia_thickness|z_surface|regional_linear|quadratic|sia_drift)[`\"]")
+        legacy = re.compile(r"[`\"](sia_thickness|z_surface|regional_linear|quadratic|sia_drift|sia_space|sia_z_dem|sia_curvature_dem|z_dem_curvature_dem|sia_z_dem_curvature_dem|full_physical|full_spatial_physical)[`\"]")
         lists = re.compile(r'\[((?:\s*"[A-Za-z_]+"\s*,?)+)\]')
         problems = []
         for md in living:
@@ -1133,7 +1123,9 @@ class TestAuditRegressions(unittest.TestCase):
                     problems.append(f"{md.name}:{no}: legacy drift name")
                 if "drift" in line.lower() or "sia" in line:
                     for m in lists.finditer(line):
-                        bad = [n for n in re.findall(r'"([A-Za-z_]+)"', m.group(1)) if n not in DriftBasis.SUPPORTED_TERMS]
+                        bad = [n for n in re.findall(r'"([A-Za-z_]+)"', m.group(1)) if n not in DRIFT_PRIMITIVES]
+                        if bad:
+                            problems.append(f"{md.name}:{no}: non-primitive drift name(s) {bad}")
         self.assertEqual(problems, [])
 
     def test_save_traveltime_uncertainty_export(self):
@@ -1180,12 +1172,14 @@ class TestAuditRegressions(unittest.TestCase):
         # 1-thread evaluation
         z_1, var_1 = built_in_kriging_interpolation(
             pts, geom.x_coords, geom.y_coords, method="universal",
+            drift_terms=["quadratic_xy"],
             variogram_model="spherical", return_variance=True, n_cores=1, show_progress=False
         )
 
         # 8-thread evaluation
         z_8, var_8 = built_in_kriging_interpolation(
             pts, geom.x_coords, geom.y_coords, method="universal",
+            drift_terms=["quadratic_xy"],
             variogram_model="spherical", return_variance=True, n_cores=8, show_progress=False
         )
 
@@ -1217,7 +1211,7 @@ class TestAuditRegressions(unittest.TestCase):
         )
         self.assertTrue(solver.pre_drift_analyzer)
         self.assertFalse(solver.post_drift_analyzer)
-        self.assertFalse(solver.drift_analyzer)
+        self.assertFalse(hasattr(solver, "drift_analyzer"))  # no master override attribute any more
 
         # 3. Solver.from_config correctly passes per-pass settings
         cfg = {
@@ -1231,7 +1225,7 @@ class TestAuditRegressions(unittest.TestCase):
             solver_cfg = Solver.from_config(cfg)
             self.assertFalse(solver_cfg.pre_drift_analyzer)
             self.assertTrue(solver_cfg.post_drift_analyzer)
-            self.assertFalse(solver_cfg.drift_analyzer)
+            self.assertFalse(hasattr(solver_cfg, "drift_analyzer"))
 
 
 if __name__ == "__main__":

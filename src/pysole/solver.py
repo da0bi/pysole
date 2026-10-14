@@ -16,16 +16,25 @@ from .migration import migrate_eikonal_points, EikonalMigrator
 from .variogram import BSSOptimizer, compute_cutoff_wavelength, resolve_native_variogram_model
 from .interpolation import (
     blend_margin_topography,
+    build_drift_grids,
     kriging_interpolation,
     KrigingEngine,
     BedrockFinalizer,
     KrigingResult,
-    CURVATURE_DRIFT_TERMS,
+)
+from .drift import (
+    RASTER_DRIFT_TERMS,
+    DriftPlan,
+    build_drift_suite,
+    default_model,
+    normalize_engine,
+    normalize_method,
+    resolve_drift_plan,
 )
 from .smoothing import compute_gradients, precompute_fft_grid, fft_gaussian_smooth_precomputed, compute_surface_curvature
 from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir, resolve_plots_dir, configured_output_dir, sanitize_config, warn_unknown_config_keys, validate_memory_fraction
 from .logging import logger
-from .drift_analyzer import DriftAnalyzer
+from .drift_analyzer import FAILED_AICC, CandidateDriftResult, DriftAnalyzer
 from .survey_planner import SurveyPlanner
 import sys
 
@@ -55,14 +64,14 @@ class Solver:
         bounds: tuple[float, float, float, float] | None = None,
         origin: tuple[float, float] | None = None,
         crs: Any = None,
-        pre_kriging_method: str = "universal",
-        pre_drift_terms: list[str] | None = None,
+        pre_kriging_method: str | None = None,
+        pre_drift_terms: list | None = None,
         pre_variogram_model: str = "spherical",
         pre_zero_boundary: bool = True,
         pre_interpolation_target: str = "P",
         pre_drift_analyzer: bool = False,
-        post_kriging_method: str = "universal",
-        post_drift_terms: list[str] | None = None,
+        post_kriging_method: str | None = None,
+        post_drift_terms: list | None = None,
         post_variogram_model: str = "spherical",
         post_zero_boundary: bool = True,
         post_interpolation_target: str = "P",
@@ -100,11 +109,15 @@ class Solver:
             Lower-left coordinate origin (xll, yll) [m] for headerless DEM formats (CSV, NPY, ndarray).
         crs : str, int, or pyproj.CRS, optional
             Coordinate Reference System (e.g. 'EPSG:32633'). Enforces projected metric units.
-        pre_kriging_method : str, default 'universal'
-            First-pass pre-migration Kriging interpolation approach: 'universal', 'ordinary',
-            or 'regression'.
-        pre_drift_terms : list of str, optional
-            First-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
+        pre_kriging_method : str, optional
+            First-pass pre-migration Kriging method: 'ordinary', 'universal' or 'regression'. If omitted: 'universal'
+            for the direct target 'T', otherwise 'ordinary' (see :func:`pysole.drift.default_model`).
+        pre_drift_terms : list, optional
+            First-pass drift terms: None (omitted) or a list of 'sia', 'z_dem', 'curvature_dem', 'linear_xy',
+            'quadratic_xy' (inside an analyzer suite one nested [] adds the Ordinary candidate). 'universal'
+            without analyzer needs the list (one multi-drift model); an omitted method with target 'T' and
+            omitted terms uses ['sia']; 'ordinary' ignores terms and analyzer (with a warning); see
+            :mod:`pysole.drift` for all rules.
         pre_variogram_model : str, default 'spherical'
             First-pass spatial variogram model: 'spherical', 'exponential', or 'gaussian'.
             Note: 'linear' is supported under engine='pykrige'; engine='native' falls back to 'spherical'.
@@ -114,11 +127,12 @@ class Solver:
             Target quantity interpolated in the first pass: 'P' (BSS product P = T * sin(alpha_opt))
             or 'T' (direct traveltime in ns).
         pre_drift_analyzer : bool, default False
-            If True, runs the interactive Universal Kriging Drift Analyzer for the pre-migration pass.
-        post_kriging_method : str, default 'universal'
-            Second-pass post-migration Kriging approach: 'universal', 'ordinary', or 'regression'.
-        post_drift_terms : list of str, optional
-            Second-pass drift terms (e.g. ['sia'], ['quadratic_xy'], ['linear_xy']). Default ['sia'].
+            If True, ranks the drift candidates of the first pass with the Drift Analyzer (needs 'universal').
+        post_kriging_method : str, optional
+            Second-pass post-migration Kriging method: 'ordinary', 'universal' or 'regression'. If omitted:
+            'universal' for the direct target 'D', otherwise 'ordinary'.
+        post_drift_terms : list, optional
+            Second-pass drift terms; same rules as ``pre_drift_terms``.
         post_variogram_model : str, default 'spherical'
             Second-pass spatial variogram model: 'spherical', 'exponential', or 'gaussian'.
         post_zero_boundary : bool, default True
@@ -127,7 +141,7 @@ class Solver:
             Target quantity interpolated in the second pass: 'P' (BSS product P = D * sin(alpha_opt))
             or 'D' (direct migrated ice thickness in m).
         post_drift_analyzer : bool, default False
-            If True, runs the interactive Universal Kriging Drift Analyzer for the post-migration pass.
+            If True, ranks the drift candidates of the second pass with the Drift Analyzer (needs 'universal').
         perform_migration : bool, default True
             If True, performs 3D Eikonal normal ray migration on radar traveltimes. If False, skips migration.
         survey_data_type : str, default 'one_way_traveltime'
@@ -159,10 +173,36 @@ class Solver:
             RAM budget of the native Kriging engine as a fraction of available memory (0 < f <= 0.9).
         config : dict of str to Any, optional
             Parsed configuration dictionary if already loaded.
+
+        Raises
+        ------
+        ConfigError
+            If the Kriging method, engine or drift settings are invalid or contradictory; raised before any
+            file is read.
         """
+        # Validate the Kriging drift configuration first: nothing is read or computed for an invalid setup.
+        self.engine_type = normalize_engine(kriging_engine)
+        self.pre_interpolation_target = str(pre_interpolation_target).upper().strip()
+        self.post_interpolation_target = str(post_interpolation_target).upper().strip()
+        self.pre_drift_analyzer = bool(pre_drift_analyzer)
+        self.post_drift_analyzer = bool(post_drift_analyzer)
+        pre_method, pre_terms = default_model(
+            pre_kriging_method, pre_drift_terms, self.pre_interpolation_target, "T", self.pre_drift_analyzer
+        )
+        post_method, post_terms = default_model(
+            post_kriging_method, post_drift_terms, self.post_interpolation_target, "D", self.post_drift_analyzer
+        )
+        self.pre_kriging_method = normalize_method(pre_method)
+        self.pre_drift_terms = pre_terms
+        self.post_kriging_method = normalize_method(post_method)
+        self.post_drift_terms = post_terms
+        self._log_drift_plan("Pre-Migration", self._drift_plan("pre_migration"))
+        self._log_drift_plan("Post-Migration", self._drift_plan("post_migration"))
+
         self.output_dir = output_dir
         self.survey_data_path = survey_data_path
         self.survey_profile_column = survey_profile_column
+        self.is_batch_mode = False  # set by the pipeline for `--batch`: no interactive prompts
         self.config_path = str(config_path) if config_path else None
         self._raw_plots_dir = plots_dir
         self._max_memory_fraction = None if max_memory_fraction is None else validate_memory_fraction(max_memory_fraction, "max_memory_fraction")
@@ -190,24 +230,15 @@ class Solver:
         self.bounds = self.geometry.bounds
 
         # Migration & Kriging options (Pre-migration & Post-migration)
-        self.pre_kriging_method = pre_kriging_method
-        self.pre_drift_terms = pre_drift_terms if pre_drift_terms is not None else ["sia"]
         self.pre_variogram_model = pre_variogram_model
         self.pre_zero_boundary = bool(pre_zero_boundary)
-        self.pre_interpolation_target = str(pre_interpolation_target).upper().strip()
-        self.pre_drift_analyzer = bool(pre_drift_analyzer)
 
-        self.post_kriging_method = post_kriging_method
-        self.post_drift_terms = post_drift_terms if post_drift_terms is not None else ["sia"]
         self.post_variogram_model = post_variogram_model
         self.post_zero_boundary = bool(post_zero_boundary)
-        self.post_interpolation_target = str(post_interpolation_target).upper().strip()
-        self.post_drift_analyzer = bool(post_drift_analyzer)
 
         self.perform_migration = perform_migration
         self.survey_data_type = survey_data_type
         self.n_cores = n_cores
-        self.engine_type = str(kriging_engine).lower().strip()
 
         # "linear" is a 1-D model: under the native engine it is replaced by "spherical" once, here,
         # so the warning is logged a single time and every downstream consumer (kriging passes and
@@ -241,7 +272,6 @@ class Solver:
         self.survey_points: np.ndarray | None = None
         self.pre_kriging_points: np.ndarray | None = None
         self.migrated_points: np.ndarray | None = None
-        self.drift_analyzer: bool = False
         self._traveltime_grid: np.ndarray | None = None
         self._traveltime_std: np.ndarray | None = None
         self.opt_kc: float | None = None
@@ -332,6 +362,40 @@ class Solver:
     def slope_floor_deg(self) -> float:
         """Minimum surface slope angle threshold in degrees [°] for stabilizing numerical divisions."""
         return float(self.optimization_config.get("slope_floor_deg", 5.0))
+
+    def _drift_plan(self, stage: str, method: str | None = None) -> DriftPlan:
+        """Resolves the drift plan of a stage from the current method / drift_terms / drift_analyzer settings.
+
+        Parameters
+        ----------
+        stage : str
+            ``'pre_migration'`` or ``'post_migration'``.
+        method : str, optional
+            Method that replaces the configured one of the stage (e.g. from ``calculate_bedrock(method=...)``).
+
+        Returns
+        -------
+        plan : DriftPlan
+            Resolved plan; its ``notices`` are not logged here (see :meth:`_log_drift_plan`).
+
+        Raises
+        ------
+        ConfigError
+            If the combination of method, drift_terms and drift_analyzer is invalid.
+        """
+        prefix = "pre" if stage == "pre_migration" else "post"
+        return resolve_drift_plan(
+            method if method is not None else getattr(self, f"{prefix}_kriging_method"),
+            getattr(self, f"{prefix}_drift_analyzer"),
+            getattr(self, f"{prefix}_drift_terms"),
+            self.engine_type,
+        )
+
+    @staticmethod
+    def _log_drift_plan(stage_label: str, plan: DriftPlan) -> None:
+        """Logs the notices (overrides, skipped analyzer) of a drift plan once."""
+        for level, message in plan.notices:
+            getattr(logger, level)(f"   [{stage_label} Kriging] {message}")
 
     def _resolve_variogram_for_engine(self, model: str, method: str, warn: bool = True) -> str:
         """Resolves variogram model compatibility for the selected Kriging engine.
@@ -505,8 +569,8 @@ class Solver:
             f"  Execution Engine     : {self.engine_type.upper()} Dual Kriging",
             f"  3D Ray Migration     : {'ENABLED' if self.perform_migration else 'DISABLED/SKIPPED'} ({self.survey_data_type})",
             f"  Optimal Corner Freq  : {f'kc = {self.opt_kc:.4f} rad/m (lambda_c = {self.opt_wavelength:.1f} m)' if self.opt_kc is not None and self.opt_wavelength is not None else 'Not optimized'}",
-            f"  Pre-Migration Target : {self.pre_kriging_method.capitalize()} Kriging (Target: '{self.pre_interpolation_target}', Drifts: {self.pre_drift_terms})",
-            f"  Post-Migration Target: {self.post_kriging_method.capitalize()} Kriging (Target: '{self.post_interpolation_target}', Drifts: {self.post_drift_terms})",
+            f"  Pre-Migration Target : {self._drift_plan('pre_migration').describe()} (Target: '{self.pre_interpolation_target}')",
+            f"  Post-Migration Target: {self._drift_plan('post_migration').describe()} (Target: '{self.post_interpolation_target}')",
         ]
         if self.final_thickness is not None:
             valid_h = self.final_thickness[self.outline_mask]
@@ -869,6 +933,35 @@ class Solver:
         smoothed_dem = self.get_smoothed_dem(kc)
         return compute_surface_curvature(smoothed_dem, dx=self.dx, dy=self.dy)
 
+    def get_drift_grids(self, drift_terms: list[str] | tuple[str, ...] | set[str] | None) -> dict[str, np.ndarray]:
+        """Builds the raster covariates of the requested drift terms (single source for analyzer and production).
+
+        ``sia`` uses the optimised smoothed slope floored at ``slope_floor_deg``, ``z_dem`` the surface DEM and
+        ``curvature_dem`` the Laplacian curvature of the DEM smoothed at the optimal ``k_c``.
+
+        Parameters
+        ----------
+        drift_terms : list, tuple or set of str, optional
+            Primitive drift terms; only the raster terms produce a grid.
+
+        Returns
+        -------
+        grids : dict of str to np.ndarray
+            Raster covariate grids keyed by term name (empty if no raster term is requested).
+        """
+        provided: dict[str, np.ndarray] = {}
+        if drift_terms and "curvature_dem" in drift_terms:
+            kc_use = self.opt_kc if self.opt_kc is not None else 0.05
+            provided["curvature_dem"] = self.get_smoothed_curvature(kc_use)
+        return build_drift_grids(
+            drift_terms,
+            geometry=self.geometry,
+            dem_grid=self.dem_grid,
+            opt_slope_grid=self.opt_slope,
+            slope_floor_deg=self.slope_floor_deg,
+            provided=provided,
+        )
+
     def _normalize_survey_data_type(self) -> str:
         """Normalizes and validates survey_data_type into one of 3 canonical formats.
 
@@ -895,6 +988,7 @@ class Solver:
         cls,
         config_path: str | Path | os.PathLike | dict[str, Any] = "pysole.json",
         log_level: str | None = None,
+        drift_analyzer: bool | None = None,
     ) -> "Solver":
         """Instantiates and configures a Solver pipeline from a JSON configuration file.
 
@@ -907,6 +1001,9 @@ class Solver:
             Filesystem path to the JSON configuration file, or pre-loaded dictionary.
         log_level : str, optional
             Logging level override ('DEBUG', 'INFO', 'WARNING', 'ERROR').
+        drift_analyzer : bool, optional
+            If True, enables the drift analyzer of both Kriging stages (the ``--drift-analyzer`` command-line
+            flag); it needs method 'universal'. None keeps the configured values.
 
         Returns
         -------
@@ -918,9 +1015,11 @@ class Solver:
         ------
         ValueError
             If required configuration keys (such as 'dem_path') are missing.
+        ConfigError
+            If the configuration is invalid, e.g. contradictory Kriging method / drift_terms settings.
         """
         from .config import load_config
-        cfg = load_config(config_path, log_level=log_level)
+        cfg = load_config(config_path, log_level=log_level, drift_analyzer=drift_analyzer)
         inputs = cfg.get("inputs", {})
         
         dem_path = inputs.get("dem_path")
@@ -940,16 +1039,17 @@ class Solver:
         pre_krig_cfg = kriging_cfg.get("pre_migration", {}) if isinstance(kriging_cfg.get("pre_migration"), dict) else {}
         post_krig_cfg = kriging_cfg.get("post_migration", {}) if isinstance(kriging_cfg.get("post_migration"), dict) else {}
 
+        # Method, drift_terms and drift_analyzer arrive resolved from load_config (defaults applied, validated)
         pre_target = pre_krig_cfg.get("interpolation_target", "P")
-        pre_method = pre_krig_cfg.get("method", "universal" if str(pre_target).upper() == "T" else "ordinary")
-        pre_drifts = pre_krig_cfg.get("drift_terms", ["sia"] if str(pre_target).upper() == "T" else [])
+        pre_method = pre_krig_cfg.get("method")
+        pre_drifts = pre_krig_cfg.get("drift_terms")
         pre_var_model = pre_krig_cfg.get("variogram_model", "spherical")
         pre_zero_boundary = pre_krig_cfg.get("include_zero_boundary_condition", True)
         pre_drift_analyzer = pre_krig_cfg.get("drift_analyzer", False)
 
         post_target = post_krig_cfg.get("interpolation_target", "P")
-        post_method = post_krig_cfg.get("method", "universal" if str(post_target).upper() == "D" else "ordinary")
-        post_drifts = post_krig_cfg.get("drift_terms", ["sia"] if str(post_target).upper() == "D" else [])
+        post_method = post_krig_cfg.get("method")
+        post_drifts = post_krig_cfg.get("drift_terms")
         post_var_model = post_krig_cfg.get("variogram_model", "spherical")
         post_zero_boundary = post_krig_cfg.get("include_zero_boundary_condition", True)
         post_drift_analyzer = post_krig_cfg.get("drift_analyzer", False)
@@ -1091,12 +1191,70 @@ class Solver:
         cfg_val = self._cfg_get("kriging_parameters", "max_memory_fraction", 0.5)
         return validate_memory_fraction(cfg_val)
 
+    def _run_drift_analysis(
+        self,
+        stage_key: str,
+        target_type: str,
+        sample_pts: np.ndarray,
+        zero_boundary: bool,
+        var_model: str,
+        suite: list[list[str]],
+        interactive: bool,
+    ) -> list[CandidateDriftResult]:
+        """Runs the Drift Analyzer of one stage on the production sample points, drift grids and fitted variogram.
+
+        The one place that builds the analyzer; both the kriging passes and :meth:`recommend_drift_model` call it.
+        The analyzer evaluates the candidates with the variogram model of the stage and the fitted
+        ``opt_variogram_params`` of the production run (engine defaults if no variogram was fitted yet).
+
+        Parameters
+        ----------
+        stage_key : str
+            ``'pre_migration'`` or ``'post_migration'``.
+        target_type : str
+            Interpolation target variable of the stage ('P', 'T' or 'D').
+        sample_pts : np.ndarray
+            Sample points of the stage; columns ``[x, y, value]`` plus an optional profile ID column.
+        zero_boundary : bool
+            Whether zero-value boundary constraints are active (informational for the analyzer).
+        var_model : str
+            Variogram model name of the stage (the 1-D ``"linear"`` model is replaced by ``"spherical"``).
+        suite : list of list of str
+            Candidate suite (see :func:`pysole.drift.build_drift_suite`).
+        interactive : bool
+            Whether the analyzer may prompt on the terminal.
+
+        Returns
+        -------
+        results : list of CandidateDriftResult
+            Ranked candidates, best first.
+        """
+        analyzer = DriftAnalyzer(
+            mode=stage_key,
+            target_name="traveltime" if stage_key == "pre_migration" else "depth",
+            interpolation_target=target_type,
+            include_zero_boundary=zero_boundary,
+            survey_profile_column=self.survey_profile_column or self.config.get("inputs", {}).get("survey_profile_column"),
+            max_memory_fraction=self.max_memory_fraction,
+        )
+        return analyzer.run_diagnostics(
+            x_pts=sample_pts[:, 0],
+            y_pts=sample_pts[:, 1],
+            z_values=sample_pts[:, 2],
+            geometry=self.geometry,
+            drift_grids=self.get_drift_grids(RASTER_DRIFT_TERMS),
+            candidates=suite,
+            variogram_model=resolve_native_variogram_model(var_model, warn=False),
+            variogram_params=self.opt_variogram_params,
+            profile_data=sample_pts[:, 3] if sample_pts.shape[1] >= 4 else None,
+            interactive=interactive,
+        )
+
     def _execute_kriging_pass(
         self,
         target_type: str,
         points: np.ndarray,
         krig_method: str,
-        drift_terms: list[str] | None,
         var_model: str,
         zero_boundary: bool,
         pass_name: str = "Pass 1: Pre-Migration",
@@ -1115,9 +1273,10 @@ class Solver:
         points : np.ndarray
             Observation points coordinate matrix.
         krig_method : str
-            Kriging method ('ordinary', 'universal', 'regression').
-        drift_terms : list of str, optional
-            Universal Kriging drift terms (e.g. ['sia'], ['quadratic_xy']).
+            Kriging method ('ordinary', 'universal', 'regression'). Together with the drift_terms and
+            drift_analyzer settings of the stage it is resolved by :func:`pysole.drift.resolve_drift_plan`:
+            'ordinary' ignores drift terms and analyzer, 'universal' applies the configured drift model or
+            the winner of the drift analyzer suite.
         var_model : str
             Theoretical variogram model name ('spherical', 'exponential', 'gaussian').
         zero_boundary : bool
@@ -1138,72 +1297,49 @@ class Solver:
 
         sample_pts = self.get_sample_points(stage_key, target_upper)
 
+        # The plan was validated (and its notices logged) when the Solver was built; it is re-resolved here
+        # silently because ``calculate_bedrock(method=...)`` may replace the method of the stage.
+        plan = self._drift_plan(stage_key, method=krig_method)
+        krig_method = plan.method
+        drift_terms = plan.terms
+
         if target_upper == "P":
             logger.info(f"   [{pass_name}] Performing {krig_method.capitalize()} Kriging Interpolation for BSS Product P(x,y)...")
-            if drift_terms and "sia" in drift_terms:
-                logger.warning(
-                    f"   [{pass_name} Warning] 'sia' drift is active during BSS product P(x,y) interpolation. "
-                    "This can cause 1/sin^2(alpha) double-scaling artifacts at low-slope margins. "
-                    "Recommendation: Use 'ordinary' Kriging or non-slope spatial drifts (e.g. ['z_dem']) for product targets."
-                )
 
-        pass_cfg = self.config.get("kriging_parameters", {}).get(stage_key, {})
-        pass_analyzer = self.pre_drift_analyzer if is_pre else self.post_drift_analyzer
-        run_analyzer = bool(getattr(self, "drift_analyzer", False) or pass_analyzer or pass_cfg.get("drift_analyzer", False))
-
-        if krig_method.lower() == "ordinary":
-            if run_analyzer:
-                logger.info("   [INFO] Ordinary Kriging detected: drift_analyzer automatically set to False.")
-            run_analyzer = False
-
-        if run_analyzer:
-            is_batch = getattr(self, "is_batch_mode", False) or not sys.stdin.isatty()
+        if plan.analyze:
+            is_batch = self.is_batch_mode or not sys.stdin.isatty()
             if is_batch:
                 logger.info("   [INFO] Non-interactive environment detected (TTY disabled or --batch flag set). Automatically overriding interactive options to False.")
 
-            prof_col = self.survey_profile_column or self.config.get("inputs", {}).get("survey_profile_column")
-            analyzer = DriftAnalyzer(
-                mode=stage_key,
-                target_name=self.survey_data_type,
-                interpolation_target=target_upper,
-                include_zero_boundary=zero_boundary,
-                survey_profile_column=prof_col,
-            )
-
-            a_0 = 100.0
-            if hasattr(self, "opt_variogram_params") and self.opt_variogram_params:
-                a_0 = float(self.opt_variogram_params.get("range", 100.0))
-
-            var_params = {"nugget": 0.0, "sill": 1.0, "range": a_0}
-            alpha_deg = np.degrees(self.opt_slope) if self.opt_slope is not None else np.zeros_like(self.dem_grid)
-            prof_data = sample_pts[:, 3] if (sample_pts is not None and sample_pts.shape[1] >= 4) else None
-
-            diag = analyzer.run_diagnostics(
-                x_pts=sample_pts[:, 0],
-                y_pts=sample_pts[:, 1],
-                z_values=sample_pts[:, 2],
-                dem_grid=self.dem_grid,
-                dx=self.dx,
-                dy=self.dy,
-                bounds=self.bounds,
-                alpha_opt_deg=alpha_deg,
-                # The drift analyzer always runs on the native 2-D dual-kriging solver, so it never
-                # receives the 1-D "linear" model (the engine-level warning is logged elsewhere).
-                variogram_model=resolve_native_variogram_model(var_model, warn=False),
-                variogram_params=var_params,
-                profile_data=prof_data,
+            diag = self._run_drift_analysis(
+                stage_key=stage_key,
+                target_type=target_upper,
+                sample_pts=sample_pts,
+                zero_boundary=zero_boundary,
+                var_model=var_model,
+                suite=plan.suite,
                 interactive=not is_batch,
             )
-            if diag:
-                drift_terms = diag[0].terms
-                krig_method = "universal"
+            # The winner decides the final method: Ordinary (no drift term) or Universal with its terms
+            if not diag or diag[0].aicc >= FAILED_AICC:
+                logger.warning(
+                    f"   [{pass_name}] The Drift Analyzer could not cross-validate any candidate; "
+                    "falling back to Ordinary Kriging."
+                )
+                drift_terms = []
+            else:
+                drift_terms = list(diag[0].terms)
+            krig_method = "universal" if drift_terms else "ordinary"
 
-        ext_drifts: dict[str, np.ndarray] = {}
-        if drift_terms and any(t in CURVATURE_DRIFT_TERMS for t in drift_terms):
-            # Compound names (sia_curvature_dem, z_dem_curvature_dem, full_physical, ...) also require the
-            # k_c-smoothed Laplacian curvature rather than the raw (noisy) DEM curvature.
-            kc_use = self.opt_kc if self.opt_kc is not None else 0.05
-            ext_drifts["curvature_dem"] = self.get_smoothed_curvature(kc_use)
+        if target_upper == "P" and krig_method == "universal" and "sia" in drift_terms:
+            logger.warning(
+                f"   [{pass_name} Warning] 'sia' drift is active during BSS product P(x,y) interpolation. "
+                "This can cause 1/sin^2(alpha) double-scaling artifacts at low-slope margins. "
+                "Recommendation: Use 'ordinary' Kriging or non-slope spatial drifts (e.g. ['z_dem']) for product targets."
+            )
+
+        # The production run samples exactly the grids the analyzer evaluated (k_c-smoothed curvature, floored SIA).
+        ext_drifts = self.get_drift_grids(drift_terms)
 
         krig_res = kriging_interpolation(
             sample_points=sample_pts,
@@ -1357,7 +1493,6 @@ class Solver:
             target_type=self.pre_interpolation_target,
             points=pts,
             krig_method=self.pre_kriging_method,
-            drift_terms=self.pre_drift_terms,
             var_model=self.pre_variogram_model,
             zero_boundary=self.pre_zero_boundary,
             pass_name="Pass 1: Pre-Migration",
@@ -1570,7 +1705,11 @@ class Solver:
 
         should_plot = interactive or (self.plots_dir is not None)
 
-        krig_method = method if method is not None else self.post_kriging_method
+        if method is not None:
+            self._log_drift_plan("Post-Migration", self._drift_plan("post_migration", method=method))
+            krig_method = normalize_method(method)
+        else:
+            krig_method = self.post_kriging_method
         if variogram_model is not None:
             var_model = self._resolve_variogram_for_engine(variogram_model, krig_method)
         else:
@@ -1580,7 +1719,6 @@ class Solver:
             target_type=self.post_interpolation_target,
             points=pts,
             krig_method=krig_method,
-            drift_terms=self.post_drift_terms,
             var_model=var_model,
             zero_boundary=self.post_zero_boundary,
             pass_name="Pass 2: Post-Migration",
@@ -1989,8 +2127,10 @@ class Solver:
     ) -> list[Any]:
         """Runs Universal Kriging Drift Analyzer diagnostics to recommend optimal drift functions.
 
-        Evaluates spatial drift models (e.g. SIA, elevation z_dem, polynomials, curvature)
-        using Variance Inflation Factor (VIF), Akaike Information Criterion (AICc), and Leave-One-Profile-Out
+        Evaluates the complete default suite - Ordinary Kriging plus all 23 drift models built from SIA,
+        elevation z_dem, surface curvature and the linear / quadratic polynomial trend (see
+        :func:`pysole.drift.build_drift_suite`) - independent of the configured method and drift_terms, using
+        Variance Inflation Factor (VIF), Akaike Information Criterion (AICc), and Leave-One-Profile-Out
         (LOPO) or spatial Buffer Leave-One-Out Cross-Validation.
 
         Parameters
@@ -2002,38 +2142,20 @@ class Solver:
 
         Returns
         -------
-        diagnostics : list of DriftDiagnosticResult
-            Evaluated drift candidates ranked from best to worst by AICc.
+        diagnostics : list of CandidateDriftResult
+            Evaluated drift candidates ranked from best to worst (not penalized first, then by AICc), with the
+            ΔAICc and ΔRMSE % columns. The stage's variogram model and the fitted variogram parameters of the
+            production run are used.
         """
-        target_name = "traveltime" if stage == "pre_migration" else "depth"
         stage_prefix = stage.split("_")[0]
         interp_target = getattr(self, f"{stage_prefix}_interpolation_target", "P")
-        inc_zero = getattr(self, f"{stage_prefix}_zero_boundary", True)
-
-        analyzer = DriftAnalyzer(
-            mode=stage,
-            target_name=target_name,
-            interpolation_target=interp_target,
-            include_zero_boundary=inc_zero,
-            survey_profile_column=getattr(self, "survey_profile_column", None),
-        )
-
-        sample_pts = self.get_sample_points(stage, interp_target)
-        x_pts, y_pts, z_vals = sample_pts[:, 0], sample_pts[:, 1], sample_pts[:, 2]
-        opt_alpha = np.degrees(self.opt_slope) if self.opt_slope is not None else np.zeros_like(self.dem_grid)
-
-        return analyzer.run_diagnostics(
-            x_pts=x_pts,
-            y_pts=y_pts,
-            z_values=z_vals,
-            dem_grid=self.dem_grid,
-            dx=self.dx,
-            dy=self.dy,
-            bounds=self.bounds,
-            alpha_opt_deg=opt_alpha,
-            variogram_model="spherical",
-            variogram_params=self.opt_variogram_params if getattr(self, "opt_variogram_params", None) is not None else {"range": 100.0, "sill": 1.0, "nugget": 0.0},
-            profile_data=sample_pts[:, 3] if sample_pts.shape[1] >= 4 else None,
+        return self._run_drift_analysis(
+            stage_key=stage,
+            target_type=interp_target,
+            sample_pts=self.get_sample_points(stage, interp_target),
+            zero_boundary=getattr(self, f"{stage_prefix}_zero_boundary", True),
+            var_model=getattr(self, f"{stage_prefix}_variogram_model", "spherical"),
+            suite=build_drift_suite(None),
             interactive=interactive,
         )
 
@@ -2166,8 +2288,8 @@ class Solver:
         logger.info(f"1. Initializing PySole Solver from '{cfg_name}'...")
         logger.info(f"   DEM Resolution: dx = {self.dx} m, dy = {self.dy} m")
         logger.info(f"   Survey Data Type: {self.survey_data_type}")
-        logger.info(f"   Pre-Migration Kriging: {self.pre_kriging_method} (drift = {self.pre_drift_terms}, variogram = {self.pre_variogram_model})")
-        logger.info(f"   Post-Migration Kriging: {self.post_kriging_method} (drift = {self.post_drift_terms}, variogram = {self.post_variogram_model})")
+        logger.info(f"   Pre-Migration Kriging: {self._drift_plan('pre_migration').describe()} (variogram = {self.pre_variogram_model})")
+        logger.info(f"   Post-Migration Kriging: {self._drift_plan('post_migration').describe()} (variogram = {self.post_variogram_model})")
         logger.info(f"   Perform Migration: {self.perform_migration}")
         logger.info(f"   Interactive Migration: {migration.get('interactive_migration', False)}")
         logger.info(f"   Plots Output Directory: {self.plots_dir}")

@@ -200,7 +200,7 @@ All execution options can be fully defined in a single JSON configuration file, 
             "interpolation_target": "P",
             "method": "ordinary",
             "drift_analyzer": false,
-            "drift_terms": [],
+            "drift_terms": null,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true
         },
@@ -208,7 +208,7 @@ All execution options can be fully defined in a single JSON configuration file, 
             "interpolation_target": "P",
             "method": "ordinary",
             "drift_analyzer": false,
-            "drift_terms": [],
+            "drift_terms": null,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true
         }
@@ -230,6 +230,7 @@ All execution options can be fully defined in a single JSON configuration file, 
         "plots_dir": "figures",
         "save_bedrock_elevation_map": true,
         "save_traveltime_grid": false,
+        "save_traveltime_uncertainty": false,
         "save_migrated_points": false,
         "save_thickness_grid": false,
         "save_thickness_uncertainty": false,
@@ -273,20 +274,20 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `nrbins` | `int` | `null` | Number of variogram lag distance bins. If `null` (default), dynamically calculated to receive ~30 point pairs per bin. The number of bins is constrained by a maximum of 30 and an absolute minimum of 3 bins. For full details, see [here](#variogram-binning). |
 | | `slope_floor_deg` | `float` | `5.0` | Minimum surface slope angle threshold in degrees [°] enforced during surface slope optimization to prevent numerical division singularities. |
 | | `interactive_optimization` | `bool` | `false` | If `true`, enables interactive CLI prompt to inspect BSS variance curve and adjust corner frequency spectrum parameters (`kc_min`, `kc_max`, `lambda_min`, `lambda_max`, `n_steps`), lag distance bin count (`nrbins`), and correlation range (`a_range`). |
-| **`kriging_parameters`** | `engine` | `str` | `"native"` | Kriging calculation engine: `"native"` (default, high-performance Dual Kriging solver) or `"pykrige"` (uses external [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package - optional dependency in `pyproject.toml`). |
+| **`kriging_parameters`** | `engine` | `str` | `"native"` | Kriging calculation engine: `"native"` (default, high-performance Dual Kriging solver) or `"pykrige"` (uses external [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package - optional dependency in `pyproject.toml`). Both engines support `"ordinary"` and `"universal"` with every drift term and agree to within 1e-4 of the value range; PyKrige uses the fitted variogram of `PySole`. `"regression"` is only available through PyKrige and is used for its stage even if `engine` is `"native"` (logged). `"pykrige"` with `"universal"` becomes very slow above a few hundred survey points (warning logged, details below the engine matrix). See the [engine support matrix](#how-drift-terms-is-interpreted) below. |
 | | `max_memory_fraction` | `float` | `0.5` | Fraction of the available RAM (`0 < f ≤ 0.9`) that the native Kriging solver may use. If the estimate exceeds it, the worker threads are reduced first; the Kriging variance is skipped only as a last resort. Also available as `Solver(max_memory_fraction=...)`. See [here](#memory-guard-and-uncertainty) for details. |
 | | `pre_migration` | `dict` | *Sub-section* | Configuration for pre-migration traveltime field, <i>T</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `pre_migration.interpolation_target` | `str` | `"P"` | Pre-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>T</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct signal traveltimes (<i>T</i><sub>i</sub>). |
-| | `pre_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (the default for `pre_migration.interpolation_target`: `"T"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
-| | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` tool. See [`here`](docs/drift_analyzer_&_survey_planner.md) for full details. |
-| | `pre_migration.drift_terms` | `list[str]` | `[]` | `["sia"]` (SIA physical drift model - the default for `pre_migration.interpolation_target`: `"T"`). If left empty `[]` (the default for `pre_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described [here](#universal-kriging-drift-models). |
+| | `pre_migration.method` | `str` | *by target* | Kriging approach: `"ordinary"` (constant mean, the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (external drift, the default for `pre_migration.interpolation_target`: `"T"`) or `"regression"` (Random Forest on the drift terms plus Kriging of the residuals; only through PyKrige). `"ordinary"` overrides `pre_migration.drift_analyzer` and `pre_migration.drift_terms`: both are ignored and one warning is logged. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
+| | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, the `Drift Analyzer` cross-validates all candidate drift models of `method: "universal"` (RMSE, AICc, ΔAICc, VIF), lets you choose in the terminal (batch mode: the best-ranked one) and applies the model. `drift_terms` then define the candidate suite (`null`: the default suite of 24 candidates). Skipped with a warning for `"regression"`, ignored for `"ordinary"`; overridden (info) if `drift_terms` define exactly one candidate. See [here](docs/drift_analyzer_&_survey_planner.md) for full details and [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
+| | `pre_migration.drift_terms` | `list[str]` / `null` | `null` | `null` (omitted) or a flat list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"linear_xy"`, `"quadratic_xy"`. Without analyzer: ONE (multi-)drift model, e.g. `["sia", "z_dem"]`; with analyzer: the suite of all combinations of the listed terms (one nested `[]` adds the Ordinary candidate); for `"regression"`: the Random Forest covariates (`null`: x, y). An empty list `[]` at the top level is rejected - use `null`. If omitted with the method omitted, `pre_migration.interpolation_target`: `"T"` uses `["sia"]` (the default suite with the analyzer); `"universal"` without any terms is an error. All single and multi drift models are described [here](#universal-kriging-drift-models). |
 | | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). Note: `"linear"` is only supported under `engine: "pykrige"`. For `engine: "native"`, `"linear"` automatically falls back to `"spherical"`. |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 s) along the perimeter and rock outcrop margin outline(s). |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth, <i>D</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"D"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
-| | `post_migration.method` | `str` | `"ordinary"` | Kriging approach: `"ordinary"` (the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (the default for `post_migration.interpolation_target`: `"D"`), or `"regression"` (only available for `engine`: `"pykrige"`). |
-| | `post_migration.drift_analyzer` | `bool` | `false` | If `true`, runs the interactive Universal Kriging `Drift Analyzer` tool.  See [`here`](docs/drift_analyzer_&_survey_planner.md) for full details. |
-| | `post_migration.drift_terms` | `list[str]` | `[]` |  `["sia"]` (SIA physical drift model - the default for `post_migration.interpolation_target`: `"D"`). If left empty `[]` (the default for `post_migration.interpolation_target`: `"P"`) applies a constant mean, resulting in Ordinary Kriging. All available single and multi drift models are described [here](#universal-kriging-drift-models). |
+| | `post_migration.method` | `str` | *by target* | Kriging approach: `"ordinary"` (constant mean, the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (external drift, the default for `post_migration.interpolation_target`: `"D"`) or `"regression"` (Random Forest on the drift terms plus Kriging of the residuals; only through PyKrige). `"ordinary"` overrides `post_migration.drift_analyzer` and `post_migration.drift_terms`: both are ignored and one warning is logged. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
+| | `post_migration.drift_analyzer` | `bool` | `false` | If `true`, the `Drift Analyzer` cross-validates all candidate drift models of `method: "universal"` (RMSE, AICc, ΔAICc, VIF), lets you choose in the terminal (batch mode: the best-ranked one) and applies the model. `drift_terms` then define the candidate suite (`null`: the default suite of 24 candidates). Skipped with a warning for `"regression"`, ignored for `"ordinary"`; overridden (info) if `drift_terms` define exactly one candidate. See [here](docs/drift_analyzer_&_survey_planner.md) for full details and [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
+| | `post_migration.drift_terms` | `list[str]` / `null` | `null` | `null` (omitted) or a flat list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"linear_xy"`, `"quadratic_xy"`. Without analyzer: ONE (multi-)drift model, e.g. `["sia", "z_dem"]`; with analyzer: the suite of all combinations of the listed terms (one nested `[]` adds the Ordinary candidate); for `"regression"`: the Random Forest covariates (`null`: x, y). An empty list `[]` at the top level is rejected - use `null`. If omitted with the method omitted, `post_migration.interpolation_target`: `"D"` uses `["sia"]` (the default suite with the analyzer); `"universal"` without any terms is an error. All single and multi drift models are described [here](#universal-kriging-drift-models). |
 | | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). Note: `"linear"` is only supported under `engine: "pykrige"`. For `engine: "native"`, `"linear"` automatically falls back to `"spherical"`. |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
 | **`finalization_parameters`** | `random_forest_gap_filling` | `bool` | `false` | If `true`, applies Random Forest machine learning gap filling across unmeasured interior regions. |
@@ -459,6 +460,8 @@ $$\mathbf{W}_{\text{sub}} = \mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}$$
 
 Level-3 BLAS matrix products (such as `np.dot`) use SIMD (*Single Instruction, Multiple Data*) instruction sets to process multiple floating-point values simultaneously per CPU clock cycle. This architecture eliminates lock contention, leverages SIMD hardware acceleration, and guarantees exact numerical invariance (&Delta;&sigma;<sup>2</sup> &lt; 10<sup>−12</sup>) and seamless spatial continuity across arbitrary thread counts and grid boundaries.
 
+To avoid BLAS thread oversubscription, `PySole` caps the BLAS threads (via `threadpoolctl`) to the physical cores around the factorization and the inverse, and sets them to 1 around the already parallel grid chunk threads (grid Kriging is 1.3-2.8x faster at N = 1000-2500 observations). The production run and the `Drift Analyzer` share one Kriging system (`KrigingSystem`: same variogram, regularization and drift columns).
+
 To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a relative offset (10<sup>−6</sup> &middot; sill) to the sample block diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization, `PySole`'s Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds).
 
 <a id="universal-kriging-drift-models"></a>
@@ -512,83 +515,61 @@ In principle, the `Drift Analyzer` can be activated for pre- and/or post-migrati
 
    <i>This captures regional spatial bends, ice cap domes, or radial thickness distributions across the entire map space.</i>
 
-- **Empty Drift Model (`[]`)**:
-   An empty drift model parameter assumes a constant local spatial mean (no external drift), which mathematically equates to an Ordinary Kriging approach.
+- **No Drift (Ordinary Kriging)**:
+   `method: "ordinary"` assumes a constant local spatial mean (no external drift). Inside a `Drift Analyzer` suite this candidate is written as one nested empty list, e.g. `[[], "sia", "z_dem"]`. A top-level `drift_terms: []` is not accepted - omit the terms with `null` instead.
 
 <br>`PySole` natively supports combining external raster drift models (`["z_dem"]`, `["curvature_dem"]`, or `["sia"]`) with polynomial spatial coordinate trends (`["quadratic_xy"]` or `["linear_xy"]`) into an augmented multi-drift Universal Kriging system.<br>
 <br>`PySole` provides the following **Multi Drift Models**:
 
-- **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
-   Combines DEM elevation, surface curvature, and a 2nd-order spatial polynomial:
+**4 Multi-Raster Physical Combinations (No coordinate trend):**
+- `["sia", "z_dem"]`
+- `["sia", "curvature_dem"]`
+- `["z_dem", "curvature_dem"]`
+- `["sia", "z_dem", "curvature_dem"]`
 
-   <p align="center">
-   $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y + a_5 X^2 + a_6 Y^2 + a_7 X Y$$
-   </p>
+**7 Multi-Raster + 1st-Order Linear Spatial Trend (`linear_xy`):**
+- `["sia", "linear_xy"]`
+- `["z_dem", "linear_xy"]`
+- `["curvature_dem", "linear_xy"]`
+- `["z_dem", "curvature_dem", "linear_xy"]`
+- `["sia", "z_dem", "linear_xy"]`
+- `["sia", "curvature_dem", "linear_xy"]`
+- `["sia", "z_dem", "curvature_dem", "linear_xy"]`
 
-   <i>Recommended for more complex viscous flow features where elevation guides regional thickness distribution, surface curvature captures local ridge or basin concavity, and 2D quadratic spatial coordinates capture large-scale regional trend curvature (e.g. the central dome of an ice cap). Can be safely combined with `interpolation_target`: `"P"`.</i>
+**7 Multi-Raster + 2nd-Order Quadratic Spatial Trend (`quadratic_xy`):**
+- `["sia", "quadratic_xy"]`
+- `["z_dem", "quadratic_xy"]`
+- `["curvature_dem", "quadratic_xy"]`
+- `["z_dem", "curvature_dem", "quadratic_xy"]`
+- `["sia", "z_dem", "quadratic_xy"]`
+- `["sia", "curvature_dem", "quadratic_xy"]`
+- `["sia", "z_dem", "curvature_dem", "quadratic_xy"]`
 
-- **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
-   Combines surface curvature with a 2nd-order spatial polynomial:
+<a id="how-drift-terms-is-interpreted"></a>
+**How `drift_terms` is interpreted**
 
-   <p align="center">
-   $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
-   </p>
+`drift_terms` is `null` (omitted) or a flat list of the five primitive terms above; `method` and `drift_analyzer` decide what the list means:
 
-   <i>Recommended for e.g. alpine-type valley glaciers and cirques where terrain concavity/convexity is the primary morphometric indicator of ice thickness. Can be safely combined with `interpolation_target`: `"P"`.</i>
+| `method` | `drift_analyzer` | Meaning of `drift_terms` |
+| :--- | :--- | :--- |
+| `"ordinary"` | any | **Ignored** (`ordinary` overrides the analyzer and the terms; one warning if either is set). |
+| `"universal"` | `false` | **ONE multi-drift model**: all listed terms are applied together (required). |
+| `"universal"` | `true` | **Candidate suite**: every non-empty combination of the listed terms (never `linear_xy` together with `quadratic_xy`); a nested `[]` adds the Ordinary candidate. `null`: the default suite. The best-ranked candidate is applied. |
+| `"regression"` | `false` | **Random Forest covariates** (`null`: x, y); works for every primitive; PyKrige only. |
+| `"regression"` | `true` | The analyzer is skipped with a warning. |
 
-- **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
-   Combines DEM surface elevation with a 2nd-order spatial polynomial:
+The **default suite** (analyzer on, `drift_terms: null`) contains all 5 primitives and Ordinary: **24 candidates** (23 drift models + Ordinary). Examples: all five primitives (no nested `[]`) = 23 candidates; `[[], "sia", "z_dem"]` = 4 (Ordinary, `sia`, `z_dem`, `sia + z_dem`); `["sia", "z_dem", "curvature_dem"]` = 7. A suite of exactly one candidate (e.g. `["sia"]`) overrides the analyzer and that model is applied; for one *multi*-drift model switch the analyzer off. With the analyzer on, a list of several terms is always a suite!
 
-   <p align="center">
-   $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
-   </p>
+For the BSS product target `"P"`, every candidate with `sia` is evaluated and ranked normally but logs a warning (the `1/sin²(α)` double scaling); `ordinary` and the terrain terms do not have it.
 
-   <i>Recommended for radial complexes with outlet valleys, where elevation guides the macro-scale dome-to-outlet trend while quadratic space terms capture 2D radial planform geometry. Can be safely combined with `interpolation_target`: `"P"`.</i>
+| Engine | `ordinary` | `universal` (all 23 drift models) | `regression` | `drift_analyzer` |
+| :--- | :--- | :--- | :--- | :--- |
+| `"native"` | yes | yes | PyKrige is used (logged) | yes |
+| `"pykrige"` | yes | yes (same result as native, ≤ 1e-4), **slow for many survey points** (warning, see below) | yes | candidates are ranked natively, the winner is applied with PyKrige |
 
-- **`["sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
-   Combines the SIA slope factor with a 2nd-order spatial polynomial:
+**Speed of `"pykrige"` with `"universal"`:** PyKrige's `UniversalKriging` computes a leave-one-out fit statistic every time it is created (the class has no option to switch it off, unlike `OrdinaryKriging`). Its run time grows roughly with N³ to N⁴ in the number of survey points, independent of the drift terms and of the grid size: about 2 s for 400 points, 19 s for 800 and several minutes for the 1098 points of the WUK example, while the kriging itself is fast. PySole logs a warning when `engine: "pykrige"` is combined with `method: "universal"`. Use the `"native"` engine (all drift terms, kriging variance) for Universal Kriging with more than a few hundred survey points; `"ordinary"` and `"regression"` with PyKrige are not affected.
 
-   <p align="center">
-   $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 X Y$$
-   </p>
-
-   <i>Recommended for viscous flow phenomena whose depth is dominated by surface slope and regional 2D spatial coordinate trend curvature. Use `interpolation_target`: `"T"`, or `"D"`.</i>
-
-- **`["z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
-   Combines DEM elevation, surface curvature, and a 1st-order linear spatial trend:
-
-   <p align="center">
-   $$U(x,y) = a_1 Z_{\text{dem}} + a_2 \nabla^2 Z_{\text{smooth}} + a_3 X + a_4 Y$$
-   </p>
-
-   <i>Recommended for e.g. elongated valley glaciers with elevation and curvature trends overlaid on a linear regional gradient. Can be safely combined with `interpolation_target`: `"P"`.</i>
-
-- **`["curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
-   Combines surface curvature with a 1st-order linear spatial trend:
-
-   <p align="center">
-   $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y$$
-   </p>
-
-   <i>Recommended for e.g. cirque glaciers and headwall valleys governed by local morphometric curvature and linear spatial trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
-
-- **`["z_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
-   Combines DEM surface elevation with a 1st-order linear spatial trend:
-
-   <p align="center">
-   $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y$$
-   </p>
-
-   <i>Recommended for e.g. tilted valley glaciers with elevation-dependent trends. Can be safely combined with `interpolation_target`: `"P"`.</i>
-
-- **`["sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
-   Combines the SIA slope factor with a 1st-order linear spatial trend:
-
-   <p align="center">
-   $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y$$
-   </p>
-
-   <i>Recommended for e.g. tilted valley glaciers governed by viscous flow physics and linear spatial trends. Use `interpolation_target`: `"T"`, or `"D"`.</i>
+For detailed mathematical formulations, parameter counts ($n_{\text{drift}}$), and glaciological interpretations of each combination, see the comprehensive [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer_&_survey_planner.md#18-systematic-multi-drift-model-suite).
 
 <a id="kriging-uncertainty-derivation"></a>
 #### 7. Kriging Uncertainty Derivation
@@ -717,7 +698,7 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```bash
   pysole pysole.json --drift-analyzer
   ```
-  *Runs the Drift Analyzer helper before each Universal Kriging pass as an on-the-fly override across all passes (equivalent to enabling `drift_analyzer: true` on both Kriging passes). Omitting the flag preserves the per-pass `drift_analyzer` settings configured in `pysole.json`. Automatically skipped for Ordinary Kriging.*
+  *Runs the Drift Analyzer helper before each Universal Kriging pass as an on-the-fly override across all passes (equivalent to enabling `drift_analyzer: true` on both Kriging passes). Omitting the flag preserves the per-pass `drift_analyzer` settings configured in `pysole.json`. Ignored (with a warning) for Ordinary Kriging.*
 
   ```bash
   pysole pysole.json --drift-analyzer --profile-col profile_name
@@ -787,8 +768,12 @@ model = pysole.Solver(
     dem="surface_dem.asc",
     outline="creeping_body.shp",
     survey_data_type="one_way_traveltime",
+    pre_interpolation_target="T",
     pre_kriging_method="universal",
+    pre_drift_terms=["sia"],
+    post_interpolation_target="D",
     post_kriging_method="universal",
+    post_drift_terms=["sia"],
     perform_migration=True,
 )
 
@@ -865,7 +850,7 @@ print(f"Optimal Corner Frequency: {opt_res.optimal_kc:.4f} rad/m")
 
 # 4. Standalone Dual Kriging Vector Sub-Engine (pysole.interpolation.KrigingEngine)
 krig_engine = KrigingEngine(dem=dem_grid, geometry=geometry, outline_mask=outline_mask)
-krig_res = krig_engine.interpolate(sample_points=survey_pts, method="universal", variogram_model="spherical")
+krig_res = krig_engine.interpolate(sample_points=survey_pts, method="universal", drift_terms=["z_dem"], variogram_model="spherical")
 # Returns typed KrigingResult dataclass containing krig_res.bedrock_grid and krig_res.variance_grid
 
 # 5. Standalone Bedrock Finalizer Sub-Engine (pysole.interpolation.BedrockFinalizer)

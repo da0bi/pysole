@@ -16,16 +16,16 @@ from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 import os
 import numpy as np
-from scipy.spatial.distance import cdist
 from scipy.interpolate import griddata, RBFInterpolator, RegularGridInterpolator
-from scipy.linalg import lu_factor, lu_solve
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 from sklearn.ensemble import RandomForestRegressor
+from .drift import RASTER_DRIFT_TERMS, normalize_engine, normalize_method, parse_drift_terms
 from .raster import GridGeometry
 from .logging import logger, get_progress_bar
 from .smoothing import compute_gradients, compute_surface_curvature
 from .variogram import resolve_native_variogram_model
-from .memory import MAX_FRACTION_CAP, kriging_chunk_size, plan_native_kriging, resolve_threads
+from .kriging_core import KrigingSystem, max_pairwise_distance, polynomial_drift_columns, resolve_variogram_params
+from .memory import MAX_FRACTION_CAP, blas_thread_limit, kriging_chunk_size, plan_native_kriging, resolve_threads
 
 
 @dataclass
@@ -91,14 +91,14 @@ class KrigingEngine:
         ----------
         sample_points : np.ndarray
             Array of shape (N, >=3) containing survey points [x, y, value, ...].
-        method : {"universal", "sia", "ordinary", "regression"}, default="universal"
-            Kriging formulation.
+        method : {"universal", "ordinary", "regression"}, default="universal"
+            Kriging formulation. ``"universal"`` needs ``drift_terms`` (use ``["sia"]`` for the SIA drift).
         variogram_model : {"spherical", "exponential", "gaussian", "linear"}, default="spherical"
             Theoretical semivariogram model function.
         opt_slope_grid : np.ndarray, optional
             Smoothed surface slope grid in radians for SIA drift calculation.
         drift_terms : list of str, optional
-            List of drift basis names (e.g., ['sia', 'linear_xy', 'curvature_dem']).
+            Primitive drift terms of one model (e.g., ['sia', 'linear_xy', 'curvature_dem']).
         include_zero_boundary_condition : bool, default=True
             Whether to enforce zero ice thickness along the perimeter mask boundary.
         n_cores : int, default=-1
@@ -307,27 +307,108 @@ def blend_margin_topography(
     return dem - final_thickness
 
 
-CURVATURE_DRIFT_TERMS: frozenset[str] = frozenset(
-    {
-        "curvature_dem",
-        "sia_curvature_dem",
-        "z_dem_curvature_dem",
-        "sia_z_dem_curvature_dem",
-        "full_physical",
-        "full_spatial_physical",
-    }
-)
-"""Drift term names (primitive and compound) whose expansion includes the surface-curvature raster."""
+def build_drift_grids(
+    drift_terms: list[str] | set[str] | None,
+    geometry: GridGeometry,
+    dem_grid: np.ndarray | None = None,
+    opt_slope_grid: np.ndarray | None = None,
+    slope_floor_deg: float = 5.0,
+    provided: dict[str, np.ndarray] | None = None,
+) -> dict[str, np.ndarray]:
+    """
+    Builds the raster covariate grids required by raster drift terms (single source for production and analyzer).
 
-COMPOUND_DRIFT_MAP: dict[str, set[str]] = {
-    "sia_space": {"sia", "linear_xy"},
-    "sia_z_dem": {"sia", "z_dem"},
-    "sia_curvature_dem": {"sia", "curvature_dem"},
-    "z_dem_curvature_dem": {"z_dem", "curvature_dem"},
-    "sia_z_dem_curvature_dem": {"sia", "z_dem", "curvature_dem"},
-    "full_physical": {"sia", "z_dem", "curvature_dem"},
-    "full_spatial_physical": {"sia", "z_dem", "curvature_dem", "linear_xy"},
-}
+    Parameters
+    ----------
+    drift_terms : list or set of str
+        Primitive drift terms; only ``'sia'``, ``'z_dem'`` and ``'curvature_dem'`` need a grid.
+    geometry : GridGeometry
+        Grid definition; all returned grids have ``geometry.shape``.
+    dem_grid : np.ndarray, optional
+        Surface DEM [m]; source of ``z_dem`` and, if not supplied through ``provided``, of ``curvature_dem``
+        (raw DEM curvature) and, without ``opt_slope_grid``, of the SIA slope.
+    opt_slope_grid : np.ndarray, optional
+        Optimised smoothed slope grid [rad]; ``sia`` = ``1 / max(sin(alpha), sin(slope_floor_deg))``.
+    slope_floor_deg : float, default 5.0
+        Lower bound of the surface slope [deg] for the SIA drift.
+    provided : dict of str to np.ndarray, optional
+        Pre-computed grids (e.g. the k_c-smoothed ``curvature_dem`` of the Solver, or user-supplied external
+        drifts). They are returned unchanged, are never recomputed and may carry any name.
+
+    Returns
+    -------
+    dict of str to np.ndarray
+        ``provided`` plus the grids of all requested raster terms.
+
+    Raises
+    ------
+    ValueError
+        If a requested raster term cannot be built because the required DEM / slope grid is missing.
+    """
+    grids: dict[str, np.ndarray] = dict(provided) if provided else {}
+    terms = set(drift_terms or [])
+    shape = tuple(geometry.shape)
+    dem_ok = dem_grid is not None and dem_grid.shape == shape
+
+    if "sia" in terms and "sia" not in grids:
+        if opt_slope_grid is not None and opt_slope_grid.shape == shape:
+            slope_sin = np.sin(opt_slope_grid)
+        elif dem_ok:
+            slope_sin = np.sin(compute_gradients(dem_grid, dx=geometry.dx, dy=geometry.dy)["slope_rad"])
+        else:
+            raise ValueError("Universal Kriging with 'sia' drift requested, but neither surface DEM grid nor slope grid was provided.")
+        grids["sia"] = 1.0 / np.maximum(slope_sin, np.sin(np.radians(slope_floor_deg)))
+
+    if "z_dem" in terms and "z_dem" not in grids:
+        if not dem_ok:
+            raise ValueError("Universal Kriging with 'z_dem' elevation drift requested, but surface DEM grid was not provided.")
+        grids["z_dem"] = dem_grid
+
+    if "curvature_dem" in terms and "curvature_dem" not in grids:
+        if not dem_ok:
+            raise ValueError("Universal Kriging with 'curvature_dem' drift requested, but surface DEM grid was not provided.")
+        grids["curvature_dem"] = compute_surface_curvature(dem_grid, dx=geometry.dx, dy=geometry.dy)
+
+    return grids
+
+
+def standardise_drift_grid(name: str, grid: np.ndarray) -> np.ndarray | None:
+    """
+    Grid-level standardisation (mean 0, standard deviation 1) of a raster drift covariate.
+
+    Both Kriging engines use the same standardised columns, so the drift coefficients are comparable and the
+    systems are well conditioned. A flat raster would only duplicate the constant column: it is skipped
+    (``None``) with a warning.
+    """
+    spread = float(np.nanstd(grid))
+    if spread < 1e-12:
+        logger.warning(f"External drift raster '{name}' has zero spatial variance (flat). Skipping redundant constant drift column.")
+        return None
+    return (grid - float(np.nanmean(grid))) / spread
+
+
+def sample_drift_grid(
+    name: str, standardised: np.ndarray, x_coords: np.ndarray, y_coords: np.ndarray, x: np.ndarray, y: np.ndarray
+) -> np.ndarray:
+    """
+    Samples a standardised raster at the points ``(x, y)`` by bilinear interpolation (rows follow ``y_coords``).
+
+    Points outside the grid and NaN cells get the grid mean (standardised value 0); a warning reports them.
+    """
+    if len(y_coords) > 1 and y_coords[1] < y_coords[0]:
+        y_asc, grid_asc = y_coords[::-1], standardised[::-1, :]
+    else:
+        y_asc, grid_asc = y_coords, standardised
+    values = RegularGridInterpolator((y_asc, x_coords), grid_asc, bounds_error=False, fill_value=0.0)(
+        np.column_stack((y, x))
+    )
+    missing = np.isnan(values)
+    if missing.any():
+        logger.warning(
+            f"External drift raster '{name}' is NaN at {int(missing.sum())} sample location(s); "
+            "imputing the grid mean (standardised value 0)."
+        )
+    return np.nan_to_num(values, nan=0.0)
 
 
 def built_in_kriging_interpolation(
@@ -347,8 +428,8 @@ def built_in_kriging_interpolation(
     """
     Robust native NumPy/SciPy Ordinary & Universal Kriging solver with zero-centered
     spatial coordinate normalization and diagonal regularization to prevent ill-conditioned matrix explosion.
-    Supports default quadratic spatial drift terms (1, x, y, x^2, y^2, x*y), custom external drifts
-    (e.g., elevation z_surface, SIA thickness, surface curvature), and multi-drift combinations.
+    Supports the polynomial drift terms ``linear_xy`` (x, y) and ``quadratic_xy`` (x, y, x^2, y^2, x*y), raster
+    external drifts (e.g., elevation z_surface, SIA 1/sin(alpha), surface curvature) and their combinations.
     Accelerated with multi-core CPU chunk parallelization via n_cores.
 
     Parameters
@@ -360,22 +441,25 @@ def built_in_kriging_interpolation(
         1-D cell-centre coordinates [m] of the output grid; the result has shape
         ``(len(y_coords), len(x_coords))``.
     method : str, default "universal"
-        ``"ordinary"`` (constant unknown mean) or ``"universal"`` / ``"sia"`` (drift model). Universal Kriging
-        needs at least 4 valid points and is also selected automatically whenever an external drift is supplied.
+        ``"ordinary"`` (constant unknown mean; drift terms and external drift grids are ignored with a warning) or
+        ``"universal"`` (drift model; needs at least one drift column, otherwise ``ValueError``). Universal Kriging
+        needs at least 4 valid points (fewer fall back to Ordinary with a warning).
     variogram_model : str, default "spherical"
         ``"spherical"``, ``"exponential"``, ``"gaussian"`` or ``"linear"`` (see Notes for the caveat).
     external_drift_grid : np.ndarray or dict[str, np.ndarray], optional
-        One ``(M, N)`` grid or a dict of named grids used as external drifts. Each grid is standardised and
-        adds one drift column; grids without spatial variance are skipped with a warning.
+        One ``(M, N)`` grid or a dict of named grids used as external drifts (universal only). Each grid is
+        standardised and adds one drift column; grids without spatial variance are skipped with a warning. A raster
+        term (``"sia"``, ``"z_dem"``, ``"curvature_dem"``) in ``drift_terms`` needs its grid here (key = term name).
     drift_terms : list of str, optional
-        ``"linear_xy"`` adds x, y; ``"quadratic_xy"`` adds x, y, x², y², xy. Without external drifts and
-        without terms, Universal Kriging uses the full quadratic drift (6 columns incl. the constant);
-        with only ``"linear_xy"`` it uses 3 columns.
+        ``"linear_xy"`` adds x, y; ``"quadratic_xy"`` adds x, y, x², y², xy (it contains the linear columns).
+        Raster terms select the matching ``external_drift_grid`` entries.
     variogram_params : tuple (range, sill, nugget) or dict, optional
         Variogram parameters (dict keys ``"range"``, ``"sill"``, ``"nugget"``). If omitted:
         range = 0.6 x the largest inter-point distance, sill = variance of the values, nugget = 0.
     n_cores : int, default -1
-        Number of worker threads for the grid evaluation (-1 uses all CPUs).
+        Number of worker threads for the grid evaluation (-1 uses all CPUs). BLAS threads are capped to the
+        physical cores for the factorisation and set to one inside the parallel grid chunks (see
+        :func:`pysole.memory.blas_thread_limit`); the algebra itself lives in :class:`pysole.kriging_core.KrigingSystem`.
     show_progress : bool, default True
         Show a progress bar.
     return_variance : bool, default True
@@ -427,65 +511,58 @@ def built_in_kriging_interpolation(
     pts_x_norm = (pts[:, 0] - x_mean) / x_scale
     pts_y_norm = (pts[:, 1] - y_mean) / y_scale
 
-    from .variogram import evaluate_variogram_model
-
-
-    method_clean = str(method).lower().strip()
+    method_clean = normalize_method(method)
+    if method_clean == "regression":
+        raise ValueError(
+            "The native Kriging engine supports the methods 'ordinary' and 'universal'; "
+            "'regression' requires the 'pykrige' engine."
+        )
     ext_dict: dict[str, np.ndarray] = {}
     if isinstance(external_drift_grid, dict):
         ext_dict = external_drift_grid
     elif isinstance(external_drift_grid, np.ndarray) and external_drift_grid.shape == (M, N):
         ext_dict = {"external_drift": external_drift_grid}
+    poly_terms = set(drift_terms or [])
 
-    use_universal = (method_clean in ["universal", "universal_kriging", "sia"]) or (len(ext_dict) > 0)
-    use_universal = use_universal and (N_pts >= 4)
+    if method_clean == "ordinary":
+        if ext_dict or drift_terms:
+            logger.warning("Kriging method 'ordinary' ignores drift_terms and external drift grids.")
+        ext_dict = {}
+        poly_terms = set()
+
+    use_universal = method_clean == "universal"
+    if use_universal and N_pts < 4:
+        logger.warning(f"Universal Kriging needs at least 4 valid points (got {N_pts}); falling back to Ordinary Kriging.")
+        ext_dict = {}
+        poly_terms = set()
+        use_universal = False
+
+    if use_universal:
+        for term in RASTER_DRIFT_TERMS:
+            if term in poly_terms and term not in ext_dict:
+                raise ValueError(f"Drift term '{term}' needs its raster grid in external_drift_grid, but none was provided.")
 
     # Process external drift rasters and sample point values
     ext_drifts: list[tuple[np.ndarray, np.ndarray]] = []  # List of (u_flat, pts_u_norm)
-    if use_universal and len(ext_dict) > 0:
-        if len(y_coords) > 1 and y_coords[1] < y_coords[0]:
-            y_asc = y_coords[::-1]
-            flip_y = True
-        else:
-            y_asc = y_coords
-            flip_y = False
-
-        pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))  # (Y, X)
-
-        for _, grid in ext_dict.items():
-            if grid is not None and grid.shape == (M, N):
-                u_std = float(np.nanstd(grid))
-                if u_std < 1e-12:
-                    logger.warning("External drift raster has zero spatial variance (flat). Skipping redundant constant drift column.")
-                    continue
-                u_mean = float(np.nanmean(grid))
-                u_grid_norm = (grid - u_mean) / u_std
-                u_flat = u_grid_norm.ravel()
-
-                u_asc = u_grid_norm[::-1, :] if flip_y else u_grid_norm
-                interp_u = RegularGridInterpolator((y_asc, x_coords), u_asc, bounds_error=False, fill_value=0.0)
-                pts_u_norm = interp_u(pts_xy)
-                pts_u_norm = np.nan_to_num(pts_u_norm, nan=0.0)
-                ext_drifts.append((u_flat, pts_u_norm))
-
-    has_poly_quad = (drift_terms is not None) and ("quadratic_xy" in drift_terms)
-    has_poly_lin = (drift_terms is not None) and ("linear_xy" in drift_terms)
-
     if use_universal:
-        n_ext = len(ext_drifts)
-        if n_ext > 0:
-            n_drift = 1 + n_ext
-            if has_poly_quad:
-                n_drift += 5  # x, y, x^2, y^2, xy
-            elif has_poly_lin:
-                n_drift += 2  # x, y
-        else:
-            if has_poly_lin and not has_poly_quad:
-                n_drift = 3  # 1, x, y
-            else:
-                n_drift = 6  # 1, x, y, x^2, y^2, xy
-    else:
-        n_drift = 1
+        for name, grid in ext_dict.items():
+            if grid is not None and grid.shape == (M, N):
+                u_grid_norm = standardise_drift_grid(name, grid)
+                if u_grid_norm is not None:
+                    pts_u_norm = sample_drift_grid(name, u_grid_norm, x_coords, y_coords, pts[:, 0], pts[:, 1])
+                    ext_drifts.append((u_grid_norm.ravel(), pts_u_norm))
+
+    has_poly_quad = "quadratic_xy" in poly_terms
+    has_poly_lin = "linear_xy" in poly_terms
+    n_poly = 5 if has_poly_quad else (2 if has_poly_lin else 0)  # x, y[, x^2, y^2, xy]
+
+    n_ext = len(ext_drifts)
+    if use_universal and n_ext + n_poly == 0:
+        raise ValueError(
+            "Universal Kriging has no drift column: give drift_terms with 'linear_xy' / 'quadratic_xy' or a "
+            "raster drift grid with spatial variance (use method 'ordinary' for a constant mean)."
+        )
+    n_drift = 1 + n_ext + n_poly
 
     # Memory guard: decided before any N x N matrix is allocated.
     mem_plan = plan_native_kriging(
@@ -499,91 +576,31 @@ def built_in_kriging_interpolation(
     return_variance = mem_plan.return_variance
     effective_n_cores = mem_plan.n_threads
 
-    sample_dists = cdist(pts[:, :2], pts[:, :2])
-    max_d = float(np.max(sample_dists)) if N_pts > 1 else 100.0
+    # Drift columns at the sample points: external rasters first, then the polynomial terms. The grid rows of the
+    # chunk loop below follow exactly the same order.
+    point_columns = [pts_u_norm for _, pts_u_norm in ext_drifts]
+    if n_poly > 0:
+        point_columns += polynomial_drift_columns(pts_x_norm, pts_y_norm, has_poly_quad)
+    system = KrigingSystem(
+        pts[:, 0],
+        pts[:, 1],
+        pts[:, 2],
+        np.column_stack(point_columns) if point_columns else None,
+        variogram_model,
+        variogram_params,
+    )
+    logger.info(
+        f"   [Dual Kriging Engine] Applied {system.reg_value:.1e} Tikhonov matrix regularization "
+        f"(N={N_pts} points, n_drift={n_drift})"
+    )
 
-    if variogram_params is not None:
-        if isinstance(variogram_params, dict):
-            range_a = float(variogram_params.get("range", max(max_d * 0.6, 1.0)))
-            sill = float(variogram_params.get("sill", np.var(pts[:, 2]) if N_pts > 1 else 1.0))
-            nugget = float(variogram_params.get("nugget", 0.0))
-        else:
-            range_a, sill, nugget = variogram_params
-    else:
-        range_a = max(max_d * 0.6, 1.0)
-        sill = float(np.var(pts[:, 2])) if N_pts > 1 else 1.0
-        if sill == 0:
-            sill = 1.0
-        nugget = 0.0
-
-    def variogram_func(h: np.ndarray) -> np.ndarray:
-        gamma = evaluate_variogram_model(h, variogram_model, range_a, sill, nugget)
-        gamma = np.where(h == 0, 0.0, gamma)
-        return gamma
-
-    K_sample = variogram_func(sample_dists)
-    del sample_dists  # free one N x N matrix before the augmented matrix is allocated
-    k_diag_mean = float(np.mean(np.diag(K_sample)))
-
-    K = np.zeros((N_pts + n_drift, N_pts + n_drift))
-    K[:N_pts, :N_pts] = K_sample
-    del K_sample
-    K[:N_pts, N_pts] = 1.0
-    K[N_pts, :N_pts] = 1.0
-
-    curr_col = 1
-    # Add external drift terms to point matrix K
-    for _, pts_u_norm in ext_drifts:
-        K[:N_pts, N_pts + curr_col] = pts_u_norm
-        K[N_pts + curr_col, :N_pts] = pts_u_norm
-        curr_col += 1
-
-    # Add spatial polynomial terms to point matrix K
-    if use_universal and (has_poly_lin or has_poly_quad or (len(ext_drifts) == 0 and n_drift > 1)):
-        # x, y terms
-        K[:N_pts, N_pts + curr_col] = pts_x_norm
-        K[N_pts + curr_col, :N_pts] = pts_x_norm
-        curr_col += 1
-
-        K[:N_pts, N_pts + curr_col] = pts_y_norm
-        K[N_pts + curr_col, :N_pts] = pts_y_norm
-        curr_col += 1
-
-        if has_poly_quad or (len(ext_drifts) == 0 and n_drift >= 6):
-            K[:N_pts, N_pts + curr_col] = pts_x_norm**2
-            K[N_pts + curr_col, :N_pts] = pts_x_norm**2
-            curr_col += 1
-
-            K[:N_pts, N_pts + curr_col] = pts_y_norm**2
-            K[N_pts + curr_col, :N_pts] = pts_y_norm**2
-            curr_col += 1
-
-            K[:N_pts, N_pts + curr_col] = pts_x_norm * pts_y_norm
-            K[N_pts + curr_col, :N_pts] = pts_x_norm * pts_y_norm
-            curr_col += 1
-
-    reg_val = 1e-6 * max(float(sill), k_diag_mean)
-    K[:N_pts, :N_pts] += np.eye(N_pts) * reg_val
-    logger.info(f"   [Dual Kriging Engine] Applied {reg_val:.1e} Tikhonov matrix regularization (N={N_pts} points, n_drift={n_drift})")
-
-    z_aug = np.zeros(N_pts + n_drift, dtype=np.float64)
-    z_aug[:N_pts] = pts[:, 2]
-
-    # Pre-compute inverse matrix K_inv when return_variance is True to ensure
-    # 100% thread-safe Level-3 BLAS matrix multiplication across parallel worker threads.
-    K_inv = None
-    try:
-        lu_piv = lu_factor(K)
-        w_z = lu_solve(lu_piv, z_aug)  # Dual Kriging 1D weight vector
+    # The explicit inverse (variance) is computed before the worker threads start, so that all threads only read
+    # shared state and run Level-3 BLAS on it.
+    with blas_thread_limit():
+        system.factorize()
         if return_variance:
-            K_inv = lu_solve(lu_piv, np.eye(N_pts + n_drift, dtype=np.float64))
-        del lu_piv
-        K = None
-    except Exception:
-        w_z = np.linalg.lstsq(K, z_aug, rcond=None)[0]
-        if return_variance:
-            K_inv = np.linalg.pinv(K)
-        K = None
+            system.inverse()
+        system.release()
 
     xx, yy = np.meshgrid(x_coords, y_coords)
     xx_flat = xx.ravel()
@@ -595,65 +612,23 @@ def built_in_kriging_interpolation(
 
     chunks = [(start_idx, min(start_idx + chunk_size, M_grid)) for start_idx in range(0, M_grid, chunk_size)]
 
-    w_sample = w_z[:N_pts]
-    w_drift = w_z[N_pts:]
-
     def _process_chunk(chunk_tuple: tuple[int, int]) -> tuple[int, int, np.ndarray, np.ndarray | None]:
         start_idx, end_idx = chunk_tuple
-        sub_size = end_idx - start_idx
         sub_x = xx_flat[start_idx:end_idx]
         sub_y = yy_flat[start_idx:end_idx]
-        sub_grid_coords = np.column_stack((sub_x, sub_y))
 
-        sub_grid_dists = cdist(pts[:, :2], sub_grid_coords)
-        K_grid_sub = variogram_func(sub_grid_dists)
-
-        K_rhs_drift_sub = np.zeros((n_drift, sub_size), dtype=np.float64)
-        K_rhs_drift_sub[0, :] = 1.0
-
-        sub_col = 1
-        for u_flat, _ in ext_drifts:
-            K_rhs_drift_sub[sub_col, :] = u_flat[start_idx:end_idx]
-            sub_col += 1
-
-        if use_universal and (has_poly_lin or has_poly_quad or (len(ext_drifts) == 0 and n_drift > 1)):
-            sub_x_norm = (sub_x - x_mean) / x_scale
-            sub_y_norm = (sub_y - y_mean) / y_scale
-            K_rhs_drift_sub[sub_col, :] = sub_x_norm
-            sub_col += 1
-            K_rhs_drift_sub[sub_col, :] = sub_y_norm
-            sub_col += 1
-
-            if has_poly_quad or (len(ext_drifts) == 0 and n_drift >= 6):
-                K_rhs_drift_sub[sub_col, :] = sub_x_norm**2
-                sub_col += 1
-                K_rhs_drift_sub[sub_col, :] = sub_y_norm**2
-                sub_col += 1
-                K_rhs_drift_sub[sub_col, :] = sub_x_norm * sub_y_norm
-                sub_col += 1
-
-        # High-performance Dual Kriging elevation prediction (O(N) 1D dot product)
-        z_sub = np.dot(w_sample, K_grid_sub) + np.dot(w_drift, K_rhs_drift_sub)
-
-        if not return_variance:
-            # Conditional variance: skip the O((N+d)^2) per-cell variance solve entirely
-            return start_idx, end_idx, z_sub, None
-
-        # Estimation variance via thread-safe BLAS matrix multiplication with precomputed K_inv
-        K_rhs_sub = np.zeros((N_pts + n_drift, sub_size), dtype=np.float64)
-        K_rhs_sub[:N_pts, :] = K_grid_sub
-        K_rhs_sub[N_pts:, :] = K_rhs_drift_sub
-
-        W_sub = np.dot(K_inv, K_rhs_sub)
-
-        weights_sub = W_sub[:N_pts, :]
-        mu_drift_sub = np.sum(W_sub[N_pts:, :] * K_rhs_drift_sub, axis=0)
-        var_sub = np.maximum(np.sum(weights_sub * K_grid_sub, axis=0) + mu_drift_sub, 0.0)
-
+        rows = [u_flat[start_idx:end_idx] for u_flat, _ in ext_drifts]
+        if n_poly > 0:
+            rows += polynomial_drift_columns((sub_x - x_mean) / x_scale, (sub_y - y_mean) / y_scale, has_poly_quad)
+        z_sub, var_sub = system.predict_points(
+            sub_x, sub_y, np.vstack(rows) if rows else None, return_variance=return_variance
+        )
         return start_idx, end_idx, z_sub, var_sub
 
     if len(chunks) > 1 and effective_n_cores > 1:
-        with ThreadPoolExecutor(max_workers=effective_n_cores) as executor:
+        # The chunks already run in parallel threads: one BLAS thread each (the cap is process-wide, so it is set
+        # around the whole executor instead of inside the threads).
+        with blas_thread_limit(1), ThreadPoolExecutor(max_workers=effective_n_cores) as executor:
             chunk_results = list(
                 get_progress_bar(
                     executor.map(_process_chunk, chunks),
@@ -664,15 +639,16 @@ def built_in_kriging_interpolation(
                 )
             )
     else:
-        chunk_results = [
-            _process_chunk(chunk_tuple)
-            for chunk_tuple in get_progress_bar(
-                chunks,
-                desc="   [Dual Kriging Engine] Interpolating DEM grid",
-                unit="chunks",
-                disable=not show_progress,
-            )
-        ]
+        with blas_thread_limit():
+            chunk_results = [
+                _process_chunk(chunk_tuple)
+                for chunk_tuple in get_progress_bar(
+                    chunks,
+                    desc="   [Dual Kriging Engine] Interpolating DEM grid",
+                    unit="chunks",
+                    disable=not show_progress,
+                )
+            ]
 
     for start_idx, end_idx, z_sub, var_sub in chunk_results:
         z_interp_flat[start_idx:end_idx] = z_sub
@@ -685,20 +661,42 @@ def built_in_kriging_interpolation(
     return z_interp, var_interp
 
 
+def _pykrige_variogram_kwargs(
+    variogram_model: str, variogram_params: tuple[float, float, float] | dict[str, float] | None, pts: np.ndarray
+) -> dict[str, Any]:
+    """
+    PyKrige keyword arguments that make it use the given ``(range, sill, nugget)`` variogram of PySole.
+
+    Without parameters (and for the PyKrige-only ``linear`` model, whose parameters are ``[slope, nugget]``) PyKrige
+    fits its own variogram. PyKrige's spherical and exponential models equal PySole's; its Gaussian model uses
+    ``exp(-d^2 / (4 a / 7)^2)`` instead of ``exp(-3 (d / a)^2)``, so the range is rescaled by ``7 / sqrt(48)``.
+    """
+    model = str(variogram_model).lower().strip()
+    if variogram_params is None or model == "linear":
+        return {}
+    range_a, sill, nugget = resolve_variogram_params(variogram_params, pts[:, 2], max_pairwise_distance(pts[:, :2]))
+    if model == "gaussian":
+        range_a *= 7.0 / np.sqrt(48.0)
+    return {"variogram_parameters": [sill, range_a, nugget]}
+
+
 def pykrige_kriging_interpolation(
     sample_points: np.ndarray,
     x_coords: np.ndarray,
     y_coords: np.ndarray,
     method: str = "universal",
     variogram_model: str = "spherical",
-    external_drift_grid: np.ndarray | None = None,
+    external_drift_grid: np.ndarray | dict[str, np.ndarray] | None = None,
+    drift_terms: list[str] | None = None,
+    variogram_params: tuple[float, float, float] | dict[str, float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Execute 3rd-party PyKrige Ordinary, Universal, or Regression Kriging.
 
-    Provides an alternative Kriging backend leveraging the PyKrige package.
-    Supports 2D linear variogram models, regional linear drifts, user-specified
-    drift grids, and Random Forest residual Regression Kriging.
+    Provides an alternative Kriging backend leveraging the PyKrige package. Universal Kriging supports every drift
+    term of the native engine (any number of raster drifts as ``specified`` drifts and the scaled polynomial columns
+    as ``functional`` drifts) and reproduces the native estimates for the same variogram. Regression Kriging uses
+    the drift terms as Random Forest covariates.
 
     Parameters
     ----------
@@ -712,8 +710,17 @@ def pykrige_kriging_interpolation(
         Kriging formulation.
     variogram_model : {"spherical", "exponential", "gaussian", "linear"}, default="spherical"
         Theoretical semivariogram model function.
-    external_drift_grid : np.ndarray or None, optional
-        2D grid of shape (len(y_coords), len(x_coords)) containing external drift covariates.
+    external_drift_grid : np.ndarray or dict of str to np.ndarray, optional
+        Raster drift covariates of shape (len(y_coords), len(x_coords)) (a dict keyed by term name; a bare array is
+        one covariate). Flat rasters are skipped with a warning.
+    drift_terms : list of str, optional
+        Primitive drift terms: the polynomial terms ``linear_xy`` / ``quadratic_xy`` select the ``functional``
+        drift columns (``x, y`` / ``x, y, x^2, y^2, xy``, scaled like the native engine); the raster terms are taken
+        from ``external_drift_grid``. For ``regression`` all terms are Random Forest covariates; without terms the
+        covariates are ``x, y``.
+    variogram_params : tuple (range, sill, nugget) or dict, optional
+        Variogram parameters of PySole (the fitted ones); PyKrige fits its own variogram if omitted. Ignored for
+        ``regression`` (its variogram is that of the residuals) and for the ``linear`` model.
 
     Returns
     -------
@@ -726,6 +733,8 @@ def pykrige_kriging_interpolation(
     ------
     ImportError
         If the optional `pykrige` dependency is not installed.
+    ValueError
+        For universal Kriging without any drift column.
     """
     try:
         import pykrige
@@ -742,30 +751,10 @@ def pykrige_kriging_interpolation(
     if len(pts) == 0:
         return np.zeros((M, N)), np.zeros((M, N))
 
-    method_clean = str(method).lower().strip()
+    method_clean = normalize_method(method)
+    terms = set(drift_terms or [])
 
-    if method_clean in ["regression", "regression_kriging"]:
-        from pykrige.rk import RegressionKriging
-        from sklearn.ensemble import RandomForestRegressor
-
-        rk = RegressionKriging(
-            regression_model=RandomForestRegressor(n_estimators=50, random_state=42),
-            method="ordinary",
-            variogram_model=variogram_model,
-        )
-        P_train = pts[:, :2]
-        z_train = pts[:, 2]
-        rk.fit(P_train, P_train, z_train)
-
-        xx, yy = np.meshgrid(x_coords, y_coords)
-        P_pred = np.column_stack((xx.ravel(), yy.ravel()))
-        z_flat = rk.predict(P_pred, P_pred)
-        z_b = z_flat.reshape((M, N))
-        # RegressionKriging exposes no estimation variance: NaN (not zero!) marks it as unavailable
-        v_b = np.full((M, N), np.nan)
-        return z_b, v_b
-
-    elif method_clean in ["ordinary", "ordinary_kriging"]:
+    if method_clean == "ordinary":
         from pykrige.ok import OrdinaryKriging
 
         ok = OrdinaryKriging(
@@ -775,58 +764,95 @@ def pykrige_kriging_interpolation(
             variogram_model=variogram_model,
             verbose=False,
             enable_plotting=False,
+            **_pykrige_variogram_kwargs(variogram_model, variogram_params, pts),
         )
         z_b, v_b = ok.execute("grid", x_coords, y_coords)
         return np.asarray(z_b, dtype=np.float64), np.asarray(v_b, dtype=np.float64)
 
-    else:
-        from pykrige.uk import UniversalKriging
+    # Drift columns shared by universal and regression Kriging: standardised rasters and scaled polynomial terms
+    sources: dict[str, np.ndarray] = {}
+    if isinstance(external_drift_grid, dict):
+        sources = external_drift_grid
+    elif isinstance(external_drift_grid, np.ndarray) and external_drift_grid.shape == (M, N):
+        sources = {"external_drift": external_drift_grid}
+    rasters: list[tuple[str, np.ndarray]] = []
+    for name, grid in sources.items():
+        if grid is not None and grid.shape == (M, N):
+            standardised = standardise_drift_grid(name, grid)
+            if standardised is not None:
+                rasters.append((name, standardised))
 
-        first_grid = None
-        if isinstance(external_drift_grid, dict) and len(external_drift_grid) > 0:
-            first_grid = next(iter(external_drift_grid.values()))
-        elif isinstance(external_drift_grid, np.ndarray) and external_drift_grid.shape == (M, N):
-            first_grid = external_drift_grid
+    x_mean, x_scale = float(np.mean(x_coords)), max(float(np.ptp(x_coords)), 1.0)
+    y_mean, y_scale = float(np.mean(y_coords)), max(float(np.ptp(y_coords)), 1.0)
+    quadratic = "quadratic_xy" in terms
+    n_poly = 5 if quadratic else (2 if "linear_xy" in terms else 0)
 
-        if first_grid is not None and first_grid.shape == (M, N):
-            from scipy.interpolate import RegularGridInterpolator
+    def poly_columns(x: np.ndarray, y: np.ndarray) -> list[np.ndarray]:
+        return polynomial_drift_columns((x - x_mean) / x_scale, (y - y_mean) / y_scale, quadratic)[:n_poly]
 
-            if len(y_coords) > 1 and y_coords[1] < y_coords[0]:
-                y_asc = y_coords[::-1]
-                u_asc = first_grid[::-1, :]
-            else:
-                y_asc = y_coords
-                u_asc = first_grid
+    if method_clean == "regression":
+        from pykrige.rk import RegressionKriging
 
-            interp_u = RegularGridInterpolator((y_asc, x_coords), u_asc, bounds_error=False, fill_value=0.0)
-            pts_xy = np.column_stack((pts[:, 1], pts[:, 0]))
-            pts_u = interp_u(pts_xy)
-            pts_u = np.nan_to_num(pts_u, nan=0.0)
+        xx, yy = np.meshgrid(x_coords, y_coords)
+        grid_x, grid_y = xx.ravel(), yy.ravel()
+        train_cols = [sample_drift_grid(name, g, x_coords, y_coords, pts[:, 0], pts[:, 1]) for name, g in rasters]
+        grid_cols = [g.ravel() for _, g in rasters]
+        if n_poly:
+            train_cols += poly_columns(pts[:, 0], pts[:, 1])
+            grid_cols += poly_columns(grid_x, grid_y)
+        if not train_cols:  # no drift terms: the coordinates are the covariates
+            train_cols, grid_cols = [pts[:, 0], pts[:, 1]], [grid_x, grid_y]
 
-            uk = UniversalKriging(
-                pts[:, 0],
-                pts[:, 1],
-                pts[:, 2],
-                variogram_model=variogram_model,
-                drift_terms=["specified"],
-                specified_drift=[pts_u],
-                verbose=False,
-                enable_plotting=False,
-            )
-            z_b, v_b = uk.execute("grid", x_coords, y_coords, specified_drift_data=[first_grid])
-        else:
-            uk = UniversalKriging(
-                pts[:, 0],
-                pts[:, 1],
-                pts[:, 2],
-                variogram_model=variogram_model,
-                drift_terms=["regional_linear"],
-                verbose=False,
-                enable_plotting=False,
-            )
-            z_b, v_b = uk.execute("grid", x_coords, y_coords)
+        rk = RegressionKriging(
+            regression_model=RandomForestRegressor(n_estimators=50, random_state=42),
+            method="ordinary",
+            variogram_model=variogram_model,
+            verbose=False,
+        )
+        rk.fit(np.column_stack(train_cols), pts[:, :2], pts[:, 2])
+        z_flat = rk.predict(np.column_stack(grid_cols), np.column_stack((grid_x, grid_y)))
+        # RegressionKriging exposes no estimation variance: NaN (not zero!) marks it as unavailable
+        return np.asarray(z_flat, dtype=np.float64).reshape((M, N)), np.full((M, N), np.nan)
 
-        return np.asarray(z_b, dtype=np.float64), np.asarray(v_b, dtype=np.float64)
+    from pykrige.uk import UniversalKriging
+
+    if not rasters and not n_poly:
+        raise ValueError(
+            "Universal Kriging has no drift column: give drift_terms with 'linear_xy' / 'quadratic_xy' or a "
+            "raster drift grid with spatial variance (use method 'ordinary' for a constant mean)."
+        )
+    drift_names: list[str] = []
+    drift_kwargs: dict[str, Any] = {}
+    if rasters:
+        drift_names.append("specified")
+        drift_kwargs["specified_drift"] = [
+            sample_drift_grid(name, g, x_coords, y_coords, pts[:, 0], pts[:, 1]) for name, g in rasters
+        ]
+    if n_poly:
+        drift_names.append("functional")
+        drift_kwargs["functional_drift"] = [
+            lambda x, y, j=j: poly_columns(np.asarray(x), np.asarray(y))[j] for j in range(n_poly)
+        ]
+
+    uk = UniversalKriging(
+        pts[:, 0],
+        pts[:, 1],
+        pts[:, 2],
+        variogram_model=variogram_model,
+        drift_terms=drift_names,
+        verbose=False,
+        enable_plotting=False,
+        **_pykrige_variogram_kwargs(variogram_model, variogram_params, pts),
+        **drift_kwargs,
+    )
+    # PyKrige needs ascending grid axes
+    flip = len(y_coords) > 1 and y_coords[1] < y_coords[0]
+    execute_kwargs: dict[str, Any] = {}
+    if rasters:
+        execute_kwargs["specified_drift_arrays"] = [g[::-1, :] if flip else g for _, g in rasters]
+    z_b, v_b = uk.execute("grid", x_coords, y_coords[::-1] if flip else y_coords, **execute_kwargs)
+    z_b, v_b = np.asarray(z_b, dtype=np.float64), np.asarray(v_b, dtype=np.float64)
+    return (z_b[::-1, :], v_b[::-1, :]) if flip else (z_b, v_b)
 
 
 def kriging_interpolation(
@@ -849,11 +875,11 @@ def kriging_interpolation(
     max_memory_fraction: float = 0.5,
 ) -> KrigingResult:
     """
-    Applies Kriging spatial interpolation on scattered points supporting four distinct approaches:
-    1. 'universal' / 'universal_kriging' (Universal Kriging with default quadratic spatial drift)
-    2. 'sia' (Shallow Ice Approximation custom physical drift U_sia = 1 / sin(alpha_safe))
-    3. 'ordinary' / 'ordinary_kriging' (Ordinary Kriging assuming constant mean)
-    4. 'regression' / 'regression_kriging' (Regression Kriging combining ML regressor with residual Kriging via PyKrige)
+    Applies Kriging spatial interpolation on scattered points supporting three methods:
+    1. 'universal' / 'universal_kriging' (Universal Kriging with the explicitly listed drift terms, e.g. the
+       Shallow Ice Approximation drift U_sia = 1 / sin(alpha_safe) via ``drift_terms=['sia']``)
+    2. 'ordinary' / 'ordinary_kriging' (Ordinary Kriging assuming constant mean; ignores drift terms)
+    3. 'regression' / 'regression_kriging' (Regression Kriging combining ML regressor with residual Kriging via PyKrige)
 
     When include_zero_boundary_condition is True, enforces zero-value boundary points (T=0 ns or D=0 m)
     along both the outer perimeter and any interior rock outcrop/nunatak margin boundaries.
@@ -865,7 +891,8 @@ def kriging_interpolation(
     geometry : GridGeometry
         Output grid definition (shape, spacing, cell-centre coordinates).
     method : str, default "universal"
-        ``"ordinary"``, ``"universal"``, ``"sia"`` or ``"regression"`` (the ``*_kriging`` spellings are accepted).
+        ``"ordinary"``, ``"universal"`` or ``"regression"`` (the ``*_kriging`` spellings are accepted). The former
+        method ``"sia"`` is rejected: use ``"universal"`` with ``drift_terms=["sia"]``.
     variogram_model : str, default "spherical"
         ``"spherical"``, ``"exponential"``, ``"gaussian"`` or ``"linear"``.
     variogram_params : tuple (range, sill, nugget) or dict, optional
@@ -877,9 +904,9 @@ def kriging_interpolation(
     opt_slope_grid : np.ndarray, optional
         Optimised smoothed slope grid [rad] used to build the SIA drift ``1 / sin(alpha)``.
     drift_terms : list of str, optional
-        Drift basis names (primitives such as ``"sia"``, ``"z_dem"``, ``"curvature_dem"``, ``"linear_xy"`` or the
-        compound shortcuts ``"sia_space"``, ``"sia_z_dem"``, ``"full_physical"``, ...). An unknown name raises
-        ``ValueError``.
+        Primitive drift terms of ONE multi-drift model: ``"sia"``, ``"z_dem"``, ``"curvature_dem"``,
+        ``"linear_xy"``, ``"quadratic_xy"``. ``"universal"`` needs at least one term (or ``external_drift_grid``);
+        ``"ordinary"`` ignores them with a warning. An unknown name raises ``ValueError``.
     outline_mask : np.ndarray, optional
         Boolean glacier mask; also defines the boundary used for the zero-value boundary condition.
     include_zero_boundary_condition : bool, default True
@@ -913,6 +940,10 @@ def kriging_interpolation(
     ``variogram_model="linear"`` is supported under ``engine="pykrige"``. Under ``engine="native"``,
     selecting ``"linear"`` logs a warning and automatically falls back to ``"spherical"``
     (the 2-D valid model with near-origin linear slope behavior).
+
+    ``method="regression"`` always runs through PyKrige (also with ``engine="native"``); its ``drift_terms`` are
+    the RandomForest covariates. ``engine="pykrige"`` Universal Kriging applies every drift term and uses the
+    fitted ``variogram_params``; PyKrige's own kriging variance differs from the native one by about 1 %.
     """
     M, N = geometry.shape
     x_coords = geometry.x_coords
@@ -947,24 +978,9 @@ def kriging_interpolation(
     if len(pts) == 0:
         return KrigingResult(bedrock_grid=np.zeros((M, N)), variance_grid=np.zeros((M, N)))
 
-    if isinstance(engine, str):
-        engine_clean = str(engine).lower().replace("_kriging", "").strip()
-    else:
-        engine_clean = "native"
+    engine_clean = normalize_engine(engine)
     var_model_clean = str(variogram_model).lower().strip()
-
-    method_clean = str(method).lower().replace("_kriging", "").strip()
-    valid_methods = {"ordinary", "universal", "sia", "regression"}
-    if method_clean not in valid_methods:
-        raise ValueError(
-            f"Invalid interpolation method '{method}'. Supported methods: 'ordinary', 'universal', 'sia', 'regression'."
-        )
-
-    valid_engines = {"native", "pykrige"}
-    if engine_clean not in valid_engines:
-        raise ValueError(
-            f"Invalid Kriging engine '{engine}'. Supported engines: 'native', 'pykrige'."
-        )
+    method_clean = normalize_method(method)
 
     valid_variogram_models = {"spherical", "exponential", "gaussian", "linear"}
     if var_model_clean not in valid_variogram_models:
@@ -978,65 +994,42 @@ def kriging_interpolation(
     elif isinstance(external_drift_grid, np.ndarray) and external_drift_grid.shape == (M, N):
         external_drift_grids["external_drift"] = external_drift_grid
 
-    expanded_primitives: set[str] = set()
-    if drift_terms:
-        for term in drift_terms:
-            if term in COMPOUND_DRIFT_MAP:
-                expanded_primitives.update(COMPOUND_DRIFT_MAP[term])
-            elif term in DriftBasis.SUPPORTED_TERMS:
-                expanded_primitives.add(term)
-            else:
-                raise ValueError(f"Unknown drift term '{term}'. Supported terms: {sorted(DriftBasis.SUPPORTED_TERMS)}")
+    valid_terms: list[str] = parse_drift_terms(drift_terms)[0] if drift_terms else []
 
-    if method_clean == "sia":
-        expanded_primitives.add("sia")
+    if method_clean == "ordinary":
+        if valid_terms or external_drift_grids:
+            logger.warning("Kriging method 'ordinary' ignores drift_terms and external drift grids.")
+        valid_terms = []
+        external_drift_grids = {}
 
-    is_sia_mode = "sia" in expanded_primitives
-    is_z_dem_mode = "z_dem" in expanded_primitives
-    is_curvature_mode = "curvature_dem" in expanded_primitives
+    # Raster drift covariates (SIA 1/sin(alpha), DEM elevation z_dem, surface curvature_dem)
+    external_drift_grids = build_drift_grids(
+        valid_terms,
+        geometry=geometry,
+        dem_grid=dem_grid,
+        opt_slope_grid=opt_slope_grid,
+        slope_floor_deg=slope_floor_deg,
+        provided=external_drift_grids,
+    )
 
-    # Compute external drift grids (SIA 1/sin(alpha), DEM elevation z_dem, surface curvature_dem)
-    if is_sia_mode and "sia" not in external_drift_grids:
-        if opt_slope_grid is not None and opt_slope_grid.shape == (M, N):
-            opt_slope_sin = np.sin(opt_slope_grid)
-        elif dem_grid is not None and dem_grid.shape == (M, N):
-            grads = compute_gradients(dem_grid, dx=geometry.dx, dy=geometry.dy)
-            opt_slope_sin = np.sin(grads["slope_rad"])
-        else:
-            opt_slope_sin = None
-
-        if opt_slope_sin is not None:
-            min_slope_sin = np.sin(np.radians(slope_floor_deg))
-            safe_slope_grid = np.maximum(opt_slope_sin, min_slope_sin)
-            external_drift_grids["sia"] = 1.0 / safe_slope_grid
-        else:
-            raise ValueError("Universal Kriging with 'sia' drift requested, but neither surface DEM grid nor slope grid was provided.")
-
-    if is_z_dem_mode and "z_dem" not in external_drift_grids:
-        if dem_grid is not None and dem_grid.shape == (M, N):
-            external_drift_grids["z_dem"] = dem_grid
-        else:
-            raise ValueError("Universal Kriging with 'z_dem' elevation drift requested, but surface DEM grid was not provided.")
-
-    if is_curvature_mode and "curvature_dem" not in external_drift_grids:
-        if dem_grid is not None and dem_grid.shape == (M, N):
-            external_drift_grids["curvature_dem"] = compute_surface_curvature(dem_grid, dx=geometry.dx, dy=geometry.dy)
-        else:
-            raise ValueError("Universal Kriging with 'curvature_dem' drift requested, but surface DEM grid was not provided.")
-
-    if method_clean in ["universal", "universal_kriging"] and drift_terms is not None and len(drift_terms) == 0 and not external_drift_grids:
-        raise ValueError("Universal Kriging requested with empty drift_terms and no external drift grids.")
+    if method_clean == "universal" and not valid_terms and not external_drift_grids:
+        raise ValueError(
+            "Universal Kriging requires drift_terms or an external drift grid - "
+            "specify drift_terms or use method 'ordinary'."
+        )
 
     has_ext_drifts = len(external_drift_grids) > 0
 
-    if engine_clean in ["pykrige"] or method_clean in ["regression", "regression_kriging"]:
+    if engine_clean == "pykrige" or method_clean == "regression":
         z_b, v_b = pykrige_kriging_interpolation(
             pts,
             x_coords,
             y_coords,
-            method="sia" if has_ext_drifts else method_clean,
+            method=method_clean,
             variogram_model=variogram_model,
             external_drift_grid=external_drift_grids if has_ext_drifts else None,
+            drift_terms=valid_terms,
+            variogram_params=variogram_params,
         )
     else:
         # Fast, robust native vector Kriging engine
@@ -1044,10 +1037,10 @@ def kriging_interpolation(
             pts,
             x_coords,
             y_coords,
-            method="sia" if has_ext_drifts else method_clean,
+            method=method_clean,
             variogram_model=variogram_model,
             external_drift_grid=external_drift_grids if has_ext_drifts else None,
-            drift_terms=list(expanded_primitives) if expanded_primitives else drift_terms,
+            drift_terms=valid_terms,
             variogram_params=variogram_params,
             n_cores=n_cores,
             show_progress=show_progress,
@@ -1152,137 +1145,113 @@ def random_forest_hole_filling(
 
 class DriftBasis:
     """
-    Unified spatial drift basis evaluator and pre-calculated feature cache.
+    Unified spatial drift basis evaluator for the Drift Analyzer.
 
-    Computes standardized drift covariates across spatial coordinates or whole DEM grids,
-    maintaining fixed global standardization statistics (mean, scale) per feature column
-    to ensure numerical conditioning in Universal and Dual Kriging solvers.
+    Reproduces the drift columns of the native production engine
+    (``built_in_kriging_interpolation``) at arbitrary coordinates: every raster covariate is standardised with
+    the mean and standard deviation of its full grid and sampled with the bottom-up bilinear interpolator of
+    ``GridGeometry.create_interpolator`` (outside the grid, or at NaN cells, the standardised value is 0); the
+    polynomial columns use the grid-coordinate centring and range scaling of the production engine.
+
+    Column order: ``sia``, ``z_dem``, ``curvature_dem`` (raster terms, as available), then ``x``, ``y`` for
+    ``linear_xy`` and ``x, y, x^2, y^2, xy`` for ``quadratic_xy`` (``quadratic_xy`` contains the linear
+    columns, so ``linear_xy`` + ``quadratic_xy`` does not duplicate them).
 
     Parameters
     ----------
     drift_terms : list of str
-        List of drift covariate identifiers (e.g. ['sia', 'linear_xy', 'z_dem', 'curvature_dem']).
+        Primitive drift term identifiers (``'sia'``, ``'z_dem'``, ``'curvature_dem'``, ``'linear_xy'``,
+        ``'quadratic_xy'``).
     x_ref : np.ndarray
-        Reference easting coordinates in meters used to establish centering and scaling.
+        Sample easting coordinates in meters; used for the polynomial standardisation only when no
+        ``geometry`` is given.
     y_ref : np.ndarray
-        Reference northing coordinates in meters used to establish centering and scaling.
-    dem_grid : np.ndarray, optional
-        2D surface DEM grid of shape (M_rows, N_cols) in meters.
-    dx : float, default=10.0
-        Cell spacing along the X axis in meters.
-    dy : float, default=10.0
-        Cell spacing along the Y axis in meters.
-    bounds : tuple of float, optional
-        Four-element bounding box (minx, miny, maxx, maxy) in meters.
-    alpha_opt_deg : np.ndarray, optional
-        Optimized smoothed surface slope grid in degrees for SIA drift calculations.
-    slope_floor_deg : float, default=5.0
-        Lower cutoff angle in degrees to prevent numerical divergence in 1 / sin(alpha).
+        Sample northing coordinates in meters; used for the polynomial standardisation only when no
+        ``geometry`` is given.
+    geometry : GridGeometry, optional
+        Spatial grid definition of the drift rasters. Required for the raster terms.
+    drift_grids : dict of str to np.ndarray, optional
+        Raster covariates of shape ``geometry.shape`` keyed by term name (``'sia'`` = ``1 / sin(alpha)``,
+        ``'z_dem'``, ``'curvature_dem'``), e.g. from :func:`build_drift_grids`. A requested raster term without
+        its grid raises ``ValueError``.
     """
-    SUPPORTED_TERMS = {
-        "linear_xy", "quadratic_xy", "z_dem", "sia", "curvature_dem",
-        "sia_space", "sia_z_dem", "sia_curvature_dem", "z_dem_curvature_dem",
-        "sia_z_dem_curvature_dem", "full_physical", "full_spatial_physical"
-    }
-
     def __init__(
         self,
         drift_terms: list[str],
         x_ref: np.ndarray,
         y_ref: np.ndarray,
-        dem_grid: np.ndarray | None = None,
-        dx: float = 10.0,
-        dy: float = 10.0,
-        bounds: tuple[float, float, float, float] | None = None,
-        alpha_opt_deg: np.ndarray | None = None,
-        slope_floor_deg: float = 5.0,
+        geometry: GridGeometry | None = None,
+        drift_grids: dict[str, np.ndarray] | None = None,
     ):
-        self.drift_terms = drift_terms or []
-        self.dx = dx
-        self.dy = dy
-        self.bounds = bounds
-        self.slope_floor_deg = slope_floor_deg
+        self.drift_terms = parse_drift_terms(drift_terms)[0] if drift_terms else []
+        self.primitives: set[str] = set(self.drift_terms)
 
-        primitives: set[str] = set()
-        for term in self.drift_terms:
-            if term not in self.SUPPORTED_TERMS:
-                raise ValueError(f"Unknown drift term '{term}'. Supported terms: {sorted(self.SUPPORTED_TERMS)}")
-            if term in COMPOUND_DRIFT_MAP:
-                primitives.update(COMPOUND_DRIFT_MAP[term])
-            else:
-                primitives.add(term)
-
-        self.primitives = primitives
-
-        # Precompute DEM curvature & SIA grids ONCE if dem_grid is provided
-        self.curvature_grid = None
-        self.sia_grid = None
-        if dem_grid is not None:
-            if "curvature_dem" in primitives:
-                from .smoothing import compute_surface_curvature
-                self.curvature_grid = compute_surface_curvature(dem_grid, dx=dx, dy=dy)
-            if "sia" in primitives and alpha_opt_deg is not None:
-                sin_a = np.sin(np.radians(np.maximum(alpha_opt_deg, slope_floor_deg)))
-                self.sia_grid = 1.0 / np.maximum(sin_a, 1e-3)
-
-        x_ref = np.asarray(x_ref, dtype=np.float64)
-        y_ref = np.asarray(y_ref, dtype=np.float64)
-
-        self.means: list[float] = []
-        self.scales: list[float] = []
+        self.column_names: list[str] = []
         self.evaluators: list[Any] = []
+        self._nan_warned: set[str] = set()
 
-        if "linear_xy" in primitives:
-            m_x, s_x = float(np.mean(x_ref)), max(float(np.ptp(x_ref)), 1.0)
-            m_y, s_y = float(np.mean(y_ref)), max(float(np.ptp(y_ref)), 1.0)
-            self.means.extend([m_x, m_y])
-            self.scales.extend([s_x, s_y])
-            self.evaluators.extend([
-                lambda x, y: x,
-                lambda x, y: y,
-            ])
+        for term in RASTER_DRIFT_TERMS:
+            if term not in self.primitives:
+                continue
+            grid = None if drift_grids is None else drift_grids.get(term)
+            if geometry is None or grid is None:
+                raise ValueError(
+                    f"Drift term '{term}' requires its raster grid and the grid geometry, but "
+                    f"{'no geometry' if geometry is None else 'no grid'} was provided."
+                )
+            grid = np.asarray(grid, dtype=np.float64)
+            if grid.shape != tuple(geometry.shape):
+                raise ValueError(
+                    f"Drift raster '{term}' has shape {grid.shape}, expected the grid shape {tuple(geometry.shape)}."
+                )
+            spread = float(np.nanstd(grid))
+            if spread < 1e-12:
+                logger.warning(
+                    f"Drift raster '{term}' has zero spatial variance (flat). Skipping redundant constant drift column."
+                )
+                continue
+            standardised = (grid - float(np.nanmean(grid))) / spread
+            interpolator = geometry.create_interpolator(standardised, fill_value=0.0)
+            self._add_column(term, lambda x, y, f=interpolator, t=term: self._sample(f, x, y, t))
 
-        if "quadratic_xy" in primitives:
-            m_x, s_x = float(np.mean(x_ref)), max(float(np.ptp(x_ref)), 1.0)
-            m_y, s_y = float(np.mean(y_ref)), max(float(np.ptp(y_ref)), 1.0)
-            self.means.extend([0.0, 0.0, 0.0])
-            self.scales.extend([1.0, 1.0, 1.0])
-            self.evaluators.extend([
-                lambda x, y, mx=m_x, sx=s_x: ((x - mx) / sx) ** 2,
-                lambda x, y, my=m_y, sy=s_y: ((y - my) / sy) ** 2,
-                lambda x, y, mx=m_x, sx=s_x, my=m_y, sy=s_y: ((x - mx) / sx) * ((y - my) / sy),
-            ])
+        if self.primitives & {"linear_xy", "quadratic_xy"}:
+            x_axis = geometry.x_coords if geometry is not None else np.asarray(x_ref, dtype=np.float64)
+            y_axis = geometry.y_coords if geometry is not None else np.asarray(y_ref, dtype=np.float64)
+            m_x, s_x = float(np.mean(x_axis)), max(float(np.ptp(x_axis)), 1.0)
+            m_y, s_y = float(np.mean(y_axis)), max(float(np.ptp(y_axis)), 1.0)
+            self._add_column("x", lambda x, y: (x - m_x) / s_x)
+            self._add_column("y", lambda x, y: (y - m_y) / s_y)
+            if "quadratic_xy" in self.primitives:
+                self._add_column("x^2", lambda x, y: ((x - m_x) / s_x) ** 2)
+                self._add_column("y^2", lambda x, y: ((y - m_y) / s_y) ** 2)
+                self._add_column("x*y", lambda x, y: ((x - m_x) / s_x) * ((y - m_y) / s_y))
 
-        if "z_dem" in primitives and dem_grid is not None and bounds is not None:
-            geom = GridGeometry.create(dem_grid.shape, dx=dx, dy=dy, bounds=bounds)
-            r, c = geom.coords_to_grid_indices(x_ref, y_ref)
-            z_vals = dem_grid[r, c]
-            m_z, s_z = float(np.nanmean(z_vals)), max(float(np.nanstd(z_vals)), 1e-6)
-            self.means.append(m_z)
-            self.scales.append(s_z)
-            self.evaluators.append(lambda x, y: dem_grid[geom.coords_to_grid_indices(x, y)])
+    @property
+    def n_columns(self) -> int:
+        """Number of drift columns (excluding the constant of the Kriging system)."""
+        return len(self.evaluators)
 
-        if "sia" in primitives and self.sia_grid is not None and bounds is not None:
-            geom = GridGeometry.create(dem_grid.shape, dx=dx, dy=dy, bounds=bounds)
-            r, c = geom.coords_to_grid_indices(x_ref, y_ref)
-            sia_vals = self.sia_grid[r, c]
-            m_sia, s_sia = float(np.nanmean(sia_vals)), max(float(np.nanstd(sia_vals)), 1e-6)
-            self.means.append(m_sia)
-            self.scales.append(s_sia)
-            self.evaluators.append(lambda x, y: self.sia_grid[geom.coords_to_grid_indices(x, y)])
+    def _add_column(self, name: str, evaluator: Any) -> None:
+        self.column_names.append(name)
+        self.evaluators.append(evaluator)
 
-        if "curvature_dem" in primitives and self.curvature_grid is not None and bounds is not None:
-            geom = GridGeometry.create(dem_grid.shape, dx=dx, dy=dy, bounds=bounds)
-            r, c = geom.coords_to_grid_indices(x_ref, y_ref)
-            curv_vals = self.curvature_grid[r, c]
-            m_curv, s_curv = float(np.nanmean(curv_vals)), max(float(np.nanstd(curv_vals)), 1e-6)
-            self.means.append(m_curv)
-            self.scales.append(s_curv)
-            self.evaluators.append(lambda x, y: self.curvature_grid[geom.coords_to_grid_indices(x, y)])
+    def _sample(self, interpolator: Any, x: np.ndarray, y: np.ndarray, term: str) -> np.ndarray:
+        """Samples a standardised raster at (x, y); NaN values are imputed with 0 and reported once per term."""
+        values = interpolator(np.column_stack((y, x)))
+        missing = np.isnan(values)
+        if missing.any():
+            if term not in self._nan_warned:
+                self._nan_warned.add(term)
+                logger.warning(
+                    f"Drift raster '{term}' is NaN at {int(missing.sum())} sample location(s); "
+                    "imputing the grid mean (standardised value 0)."
+                )
+            values = np.where(missing, 0.0, values)
+        return values
 
     def evaluate(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         """
-        Evaluate and standardize drift basis matrix for arbitrary query coordinates (x, y).
+        Evaluate the standardised drift design matrix for arbitrary query coordinates (x, y).
 
         Parameters
         ----------
@@ -1294,205 +1263,10 @@ class DriftBasis:
         Returns
         -------
         np.ndarray
-            Standardized drift design matrix of shape (len(x), n_drift_terms).
+            Standardised drift design matrix of shape (len(x), n_columns).
         """
         x = np.asarray(x, dtype=np.float64)
         y = np.asarray(y, dtype=np.float64)
-        n_pts = len(x)
         if not self.evaluators:
-            return np.zeros((n_pts, 0))
-
-        cols = []
-        for fn, mean_val, scale_val in zip(self.evaluators, self.means, self.scales):
-            raw_v = fn(x, y)
-            cols.append((raw_v - mean_val) / scale_val)
-        return np.column_stack(cols)
-
-
-class DualKrigingSolver:
-    """
-    Fast Dual Kriging solver used for point validation in DriftAnalyzer cross-validation.
-
-    Computes dual kriging weights directly from the augmented kriging system, enabling
-    O(N) evaluation per validation point during spatial leave-one-out and leave-profile-out testing.
-
-    Parameters
-    ----------
-    x_pts : np.ndarray
-        1D array of training point easting coordinates in meters.
-    y_pts : np.ndarray
-        1D array of training point northing coordinates in meters.
-    z_pts : np.ndarray
-        1D array of training point values (e.g., bedrock elevation in meters or depth).
-    variogram_model : str, default="spherical"
-        Semivariogram model ('spherical', 'exponential', 'gaussian').
-    nugget : float, default=0.0
-        Variogram nugget variance parameter.
-    sill : float, default=1.0
-        Variogram sill variance parameter.
-    range_param : float, default=100.0
-        Variogram range parameter in meters.
-    drift_terms : list of str, optional
-        List of drift covariate names.
-    drift_basis : DriftBasis, optional
-        Pre-initialized `DriftBasis` instance sharing standardized parameters.
-    dem_grid : np.ndarray, optional
-        Surface DEM grid in meters.
-    dx : float, default=5.0
-        DEM grid spacing along X in meters.
-    dy : float, default=5.0
-        DEM grid spacing along Y in meters.
-    bounds : tuple of float, optional
-        Spatial bounding box (minx, miny, maxx, maxy) in meters.
-    alpha_opt_deg : np.ndarray, optional
-        Surface slope grid in degrees.
-    """
-
-    def __init__(
-        self,
-        x_pts: np.ndarray,
-        y_pts: np.ndarray,
-        z_pts: np.ndarray,
-        variogram_model: str = "spherical",
-        nugget: float = 0.0,
-        sill: float = 1.0,
-        range_param: float = 100.0,
-        drift_terms: list[str] | None = None,
-        drift_basis: DriftBasis | None = None,
-        dem_grid: np.ndarray | None = None,
-        dx: float = 5.0,
-        dy: float = 5.0,
-        bounds: tuple[float, float, float, float] | None = None,
-        alpha_opt_deg: np.ndarray | None = None,
-    ):
-        self.x_pts = np.asarray(x_pts, dtype=np.float64)
-        self.y_pts = np.asarray(y_pts, dtype=np.float64)
-        self.z_pts = np.asarray(z_pts, dtype=np.float64)
-        self.variogram_model = resolve_native_variogram_model(variogram_model)
-        self.nugget = float(nugget)
-        self.sill = float(sill) if sill > 0 else 1.0
-        self.range_param = float(range_param) if range_param > 0 else 100.0
-        self.drift_terms = drift_terms or []
-
-        if drift_basis is not None:
-            self.drift_basis = drift_basis
-        elif self.drift_terms:
-            self.drift_basis = DriftBasis(
-                drift_terms=self.drift_terms,
-                x_ref=self.x_pts,
-                y_ref=self.y_pts,
-                dem_grid=dem_grid,
-                dx=dx,
-                dy=dy,
-                bounds=bounds,
-                alpha_opt_deg=alpha_opt_deg,
-            )
-        else:
-            self.drift_basis = None
-
-        N = len(self.x_pts)
-        pts_xy = np.column_stack((self.x_pts, self.y_pts))
-        dists = cdist(pts_xy, pts_xy)
-
-        if "exp" in self.variogram_model:
-            K = self.nugget + self.sill * (1.0 - np.exp(-3.0 * dists / max(self.range_param, 1e-6)))
-        elif "gauss" in self.variogram_model:
-            K = self.nugget + self.sill * (1.0 - np.exp(-3.0 * (dists / max(self.range_param, 1e-6))**2))
-        else:
-            h_ratio = np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
-            gamma = self.sill * (1.5 * h_ratio - 0.5 * (h_ratio**3))
-            gamma[dists > self.range_param] = self.sill
-            K = self.nugget + gamma
-
-        np.fill_diagonal(K, 0.0)
-
-        F_list = [np.ones((N, 1))]
-        if self.drift_basis is not None:
-            F_drift = self.drift_basis.evaluate(self.x_pts, self.y_pts)
-            if F_drift.shape[1] > 0:
-                F_list.append(F_drift)
-
-        F = np.hstack(F_list)
-        n_drift = F.shape[1]
-
-        A = np.zeros((N + n_drift, N + n_drift))
-        A[:N, :N] = K + np.eye(N) * 1e-8
-        A[:N, N:] = F
-        A[N:, :N] = F.T
-
-        rhs = np.zeros(N + n_drift)
-        rhs[:N] = self.z_pts
-
-        try:
-            sol = np.linalg.solve(A, rhs)
-            self.b = sol[:N]
-            self.a = sol[N:]
-            self.success = True
-        except Exception:
-            self.success = False
-
-    def predict(
-        self,
-        x_val: np.ndarray,
-        y_val: np.ndarray,
-        dem_grid: np.ndarray | None = None,
-        dx: float = 5.0,
-        dy: float = 5.0,
-        bounds: tuple[float, float, float, float] | None = None,
-        alpha_opt_deg: np.ndarray | None = None,
-    ) -> np.ndarray:
-        """
-        Predict values at validation coordinates (x_val, y_val) using fitted dual kriging weights.
-
-        Parameters
-        ----------
-        x_val : np.ndarray
-            1D array of validation point eastings in meters.
-        y_val : np.ndarray
-            1D array of validation point northings in meters.
-        dem_grid : np.ndarray, optional
-            Surface DEM grid in meters.
-        dx : float, default=5.0
-            Cell resolution along X in meters.
-        dy : float, default=5.0
-            Cell resolution along Y in meters.
-        bounds : tuple of float, optional
-            Spatial bounding box in meters.
-        alpha_opt_deg : np.ndarray, optional
-            Surface slope grid in degrees.
-
-        Returns
-        -------
-        np.ndarray
-            1D array of predicted values at validation locations, or filled with NaNs if solve failed.
-        """
-        if not self.success:
-            return np.full_like(x_val, np.nan)
-
-        x_val = np.asarray(x_val, dtype=np.float64)
-        y_val = np.asarray(y_val, dtype=np.float64)
-        N_val = len(x_val)
-
-        val_xy = np.column_stack((x_val, y_val))
-        pts_xy = np.column_stack((self.x_pts, self.y_pts))
-        dists = cdist(val_xy, pts_xy)
-
-        if "exp" in self.variogram_model:
-            K_val = self.nugget + self.sill * (1.0 - np.exp(-3.0 * dists / max(self.range_param, 1e-6)))
-        elif "gauss" in self.variogram_model:
-            K_val = self.nugget + self.sill * (1.0 - np.exp(-3.0 * (dists / max(self.range_param, 1e-6))**2))
-        else:
-            h_ratio = np.clip(dists / max(self.range_param, 1e-6), 0.0, 1.0)
-            gamma = self.sill * (1.5 * h_ratio - 0.5 * (h_ratio**3))
-            gamma[dists > self.range_param] = self.sill
-            K_val = self.nugget + gamma
-
-        F_list = [np.ones((N_val, 1))]
-        if self.drift_basis is not None:
-            F_drift = self.drift_basis.evaluate(x_val, y_val)
-            if F_drift.shape[1] > 0:
-                F_list.append(F_drift)
-
-        F_val = np.hstack(F_list)
-        return K_val @ self.b + F_val @ self.a
-
+            return np.zeros((len(x), 0))
+        return np.column_stack([fn(x, y) for fn in self.evaluators])

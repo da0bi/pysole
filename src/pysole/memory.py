@@ -11,12 +11,21 @@ safe execution plan *before* any large allocation:
    the thread count),
 3. otherwise skip the Kriging variance (which keeps the LU factorisation alive during grid evaluation),
 4. otherwise run single-threaded without variance and warn (nothing more can be saved).
+
+The module also owns the BLAS thread policy (:func:`blas_thread_limit`): dense factorisations run with at most
+the number of physical cores (more BLAS threads are slower, e.g. 15.6 s versus 0.5 s for a 2501 x 2501 inverse on a
+16-thread machine), and the already parallel grid chunks run with one BLAS thread each.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+
+import psutil
+from threadpoolctl import threadpool_limits
 
 from .logging import logger
 
@@ -306,3 +315,111 @@ def resolve_threads(n_cores: int | None) -> int:
         Effective positive worker thread count (minimum 1).
     """
     return (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
+
+
+def physical_core_count() -> int:
+    """Number of physical CPU cores (falls back to the logical count, minimum 1)."""
+    return max(1, psutil.cpu_count(logical=False) or os.cpu_count() or 1)
+
+
+@contextmanager
+def blas_thread_limit(limit: int | None = None) -> Iterator[int]:
+    """
+    Context manager that caps the number of BLAS/LAPACK threads and restores the previous setting on exit
+    (also when the body raises).
+
+    Parameters
+    ----------
+    limit : int, optional
+        Maximum number of BLAS threads. ``None`` uses :func:`physical_core_count`. The cap is process-wide while
+        the context is active, so use ``blas_thread_limit(1)`` around a block that already runs in parallel
+        threads (such as the grid chunks) instead of inside the individual threads.
+
+    Yields
+    ------
+    effective_limit : int
+        The cap that was applied.
+    """
+    effective = max(1, int(limit)) if limit is not None else physical_core_count()
+    with threadpool_limits(limits=effective, user_api="blas"):
+        yield effective
+
+
+# Drift Analyzer cross-validation: the Ordinary base system needs the point matrix, its LU factors and the explicit
+# inverse (3 matrices of (N + 1)^2 doubles at the peak, 2 without the inverse), plus the stacked block matrices.
+_CV_MATRICES_FULL = 3.5  # measured/derived 3.0 plus margin
+_CV_MATRICES_FALLBACK = 2.5  # point matrix + LU factors (2.0) plus margin
+_CV_WORKING_BYTES = 256 * 1024**2  # stacked (g, m, m) block matrices and temporaries
+CV_MIN_EVALUATION_POINTS = 100
+"""Smallest number of evaluation points of the large-N fallback."""
+
+
+@dataclass
+class CvMemoryPlan:
+    """
+    Plan returned by :func:`plan_cv_memory`.
+
+    Attributes
+    ----------
+    full_inverse : bool
+        True if the explicit inverse of the base system fits into the budget (fastest path).
+    n_eval : int or None
+        Number of evaluation points of the large-N fallback (a deterministic farthest-point subset);
+        ``None`` evaluates every observation.
+    message : str
+        Log message describing a fallback (empty if everything fits).
+    """
+
+    full_inverse: bool
+    n_eval: int | None
+    message: str = ""
+
+
+def plan_cv_memory(n_pts: int, mean_block_size: float = 1.0, fraction: float = 0.5) -> CvMemoryPlan:
+    """
+    Decides how the Drift Analyzer evaluates its cross-validation for ``n_pts`` observations.
+
+    The exact block leave-out evaluation needs about ``3 N^2`` doubles (point matrix, LU factors, inverse; N = 5000
+    -> 0.6 GB, N = 10 000 -> 2.4 GB). If that does not fit into ``fraction`` of the available memory, the LU factors
+    are kept instead of the inverse and only the inverse columns of a deterministic farthest-point subset of
+    evaluation points (and the members of their blocks) are computed, never fewer than
+    :data:`CV_MIN_EVALUATION_POINTS`.
+
+    Parameters
+    ----------
+    n_pts : int
+        Number of observations.
+    mean_block_size : float, default 1.0
+        Mean number of observations removed per evaluation point (buffer neighbourhood or profile size).
+    fraction : float, default 0.5
+        Fraction of the available memory that may be used.
+
+    Returns
+    -------
+    plan : CvMemoryPlan
+    """
+    avail = available_memory_bytes()
+    if avail is None:
+        return CvMemoryPlan(True, None)
+    n_aug = int(n_pts) + 1
+    budget = float(fraction) * avail
+    full_bytes = _CV_MATRICES_FULL * _FLOAT64 * n_aug**2 + _CV_WORKING_BYTES
+    if full_bytes <= budget:
+        return CvMemoryPlan(True, None)
+
+    fixed = _CV_MATRICES_FALLBACK * _FLOAT64 * n_aug**2 + _CV_WORKING_BYTES
+    per_column = _FLOAT64 * n_aug
+    n_columns = max(0.0, (budget - fixed) / per_column)
+    n_eval = int(n_columns / max(float(mean_block_size), 1.0))
+    if n_eval >= n_pts:
+        return CvMemoryPlan(False, None, "   [Memory Guard] The cross-validation keeps LU factors instead of the explicit inverse.")
+    n_eval = max(CV_MIN_EVALUATION_POINTS, n_eval)
+    n_eval = min(n_eval, int(n_pts))
+    msg = (
+        f"   [Memory Guard] Exact cross-validation of all N = {n_pts} points needs about "
+        f"{_gb(full_bytes):.1f} GB but only {_gb(budget):.1f} GB are allowed ({fraction:.0%} of {_gb(avail):.1f} GB "
+        f"available). Evaluating a deterministic farthest-point subset of {n_eval} points instead."
+    )
+    if fixed > budget:
+        msg += " Even the LU factors exceed the budget; the run may exhaust memory."
+    return CvMemoryPlan(False, n_eval, msg)

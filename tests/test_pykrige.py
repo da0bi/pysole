@@ -26,6 +26,7 @@ class TestPyKrigeIntegration(unittest.TestCase):
             sample_points=self.sample_pts,
             geometry=self.geometry,
             method="universal",
+            drift_terms=["quadratic_xy"],
             engine="native",
         )
         self.assertIsInstance(krig_res, KrigingResult)
@@ -44,6 +45,7 @@ class TestPyKrigeIntegration(unittest.TestCase):
                 sample_points=self.sample_pts,
                 geometry=self.geometry,
                 method="universal",
+                drift_terms=["quadratic_xy"],
                 engine="pykrige",
             )
             self.assertIsInstance(res_uk, KrigingResult)

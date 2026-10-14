@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pysole
 from pysole.drift_analyzer import DriftAnalyzer
+from pysole.drift import RASTER_DRIFT_TERMS, build_drift_suite
 
 
 class TestDriftAnalyzer(unittest.TestCase):
@@ -42,17 +43,13 @@ class TestDriftAnalyzer(unittest.TestCase):
             survey_profile_column=None,
         )
 
-        opt_alpha = np.degrees(model.opt_slope) if model.opt_slope is not None else np.zeros_like(model.dem_grid)
-
         results = analyzer.run_diagnostics(
             x_pts=mig_pts[:, 0],
             y_pts=mig_pts[:, 1],
             z_values=mig_pts[:, 2],
-            dem_grid=model.dem_grid,
-            dx=model.dx,
-            dy=model.dy,
-            bounds=model.bounds,
-            alpha_opt_deg=opt_alpha,
+            geometry=model.geometry,
+            drift_grids=model.get_drift_grids(RASTER_DRIFT_TERMS),
+            candidates=build_drift_suite(None),
             variogram_model="spherical",
             variogram_params={"range": 100.0, "sill": 1.0, "nugget": 0.0},
             interactive=False,
@@ -79,17 +76,13 @@ class TestDriftAnalyzer(unittest.TestCase):
             survey_profile_column="profile_id",
         )
 
-        opt_alpha = np.degrees(model.opt_slope) if model.opt_slope is not None else np.zeros_like(model.dem_grid)
-
         results = analyzer.run_diagnostics(
             x_pts=mig_pts[:, 0],
             y_pts=mig_pts[:, 1],
             z_values=mig_pts[:, 2],
-            dem_grid=model.dem_grid,
-            dx=model.dx,
-            dy=model.dy,
-            bounds=model.bounds,
-            alpha_opt_deg=opt_alpha,
+            geometry=model.geometry,
+            drift_grids=model.get_drift_grids(RASTER_DRIFT_TERMS),
+            candidates=build_drift_suite(None),
             variogram_model="spherical",
             variogram_params={"range": 100.0, "sill": 1.0, "nugget": 0.0},
             profile_data=profile_ids,
@@ -117,10 +110,15 @@ class TestDriftAnalyzer(unittest.TestCase):
         self.assertIsInstance(recommended, list)
         self.assertGreater(len(recommended), 0)
 
-        # Verify sia slope drift receives is_penalized=True on Product P target
-        sia_res = next((r for r in recommended if r.name == "sia"), None)
-        if sia_res is not None:
-            self.assertTrue(sia_res.is_penalized)
+        # sia on the Product P target carries a warning but is ranked normally (not penalised)
+        sia_res = next(r for r in recommended if r.name == "sia")
+        self.assertFalse(sia_res.is_penalized)
+        self.assertIsNotNone(sia_res.warning_msg)
+
+        # The ranking exposes its deltas: the best non-penalised model has dAICc == 0, the winner dRMSE% == 0
+        self.assertEqual(recommended[0].delta_rmse_pct, 0.0)
+        best = [r for r in recommended if not r.is_penalized]
+        self.assertEqual(min(r.delta_aicc for r in best), 0.0)
 
 
 if __name__ == "__main__":
