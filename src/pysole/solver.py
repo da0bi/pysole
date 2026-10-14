@@ -1236,6 +1236,7 @@ class Solver:
             include_zero_boundary=zero_boundary,
             survey_profile_column=self.survey_profile_column or self.config.get("inputs", {}).get("survey_profile_column"),
             max_memory_fraction=self.max_memory_fraction,
+            show_progress=self.show_progress,
         )
         return analyzer.run_diagnostics(
             x_pts=sample_pts[:, 0],

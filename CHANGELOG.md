@@ -5,6 +5,18 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-10-14
+
+Progress display for the Drift Analyzer and a CI fix.
+
+### Fixed
+- **[CI] (`tests/test_golden_kriging_engine.py`)**: the golden test imported its fixture with a relative import that failed under `python -m unittest discover -s tests` ("attempted relative import with no known parent package"); it now uses `from tests.golden_fixture import ...`.
+- **[BLAS thread cap in the analyzer] (`src/pysole/kriging_core.py`)**: the factorisation and inverse of the base system in `LeaveBlockOut` now run under `blas_thread_limit()` like the production engine (the 0.5.0 note about the cap covered only the production engine). Measured on a 16-thread / 8-core machine: equal at N = 1000 and 8 to 17 % faster for N ≥ 2000 (N = 3000: 0.96 s to 0.80 s, N = 6000: 5.5 s to 4.8 s); a fixed cost of about 1.5 ms per call is visible only for very small N (N = 500: 17 ms to 23 ms). The residuals differ from the uncapped run by ≤ 1.1e-12 relative (summation order).
+
+### Added
+- **[Drift Analyzer progress display] (`src/pysole/drift_analyzer.py`, `src/pysole/logging.py`)**: `DriftAnalyzer(show_progress=True)` shows one progress bar over the leave-block-out evaluation (points, or profiles for LOPO) and an elapsed-time line while the base kriging system is factorised (`activity_indicator`, appears after about one second). The display only reports: a daemon thread redraws a line and `LeaveBlockOut.residuals(..., progress=callback)` reports once per processed block stack, so the calculation is neither slowed (measured within noise: N = 3000 buffer 1.124 s vs 1.113 s, N = 6000 4.786 s vs 4.803 s) nor changed (bit-identical results). `Solver` passes `inputs.show_progress`; `--batch` shows nothing.
+- `LeaveBlockOut.n_blocks`; the `tqdm` fallback stub accepts all keyword arguments.
+
 ## [0.5.0] - 2026-10-14
 
 Multi-drift Universal Kriging, a corrected and much faster Drift Analyzer, and one shared kriging engine.

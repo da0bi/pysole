@@ -16,7 +16,7 @@ from scipy.spatial import cKDTree
 from .drift import DRIFT_PRIMITIVES, ORDINARY_NAME, format_drift_name
 from .interpolation import DriftBasis
 from .kriging_core import KrigingSystem, LeaveBlockOut, max_pairwise_distance, resolve_variogram_params
-from .logging import logger
+from .logging import activity_indicator, get_progress_bar, logger
 from .memory import plan_cv_memory
 from .raster import GridGeometry
 from .variogram import resolve_native_variogram_model
@@ -231,6 +231,9 @@ class DriftAnalyzer:
         Minimum slope angle in degrees [°] for stabilizing the SIA drift denominator.
     max_memory_fraction : float, default 0.5
         Fraction of the available memory the cross-validation may use (see :func:`pysole.memory.plan_cv_memory`).
+    show_progress : bool, default True
+        Show an elapsed-time spinner while the base kriging system is factorised and a progress bar over the
+        leave-block-out evaluation. The display only reports; it never changes or slows the calculation.
     """
 
     def __init__(
@@ -243,6 +246,7 @@ class DriftAnalyzer:
         vif_threshold: float = 10.0,
         slope_floor_deg: float = 5.0,
         max_memory_fraction: float = 0.5,
+        show_progress: bool = True,
     ):
         self.mode = mode
         self.target_name = target_name
@@ -252,6 +256,7 @@ class DriftAnalyzer:
         self.vif_threshold = vif_threshold
         self.slope_floor_deg = slope_floor_deg
         self.max_memory_fraction = max_memory_fraction
+        self.show_progress = show_progress
 
     def calculate_vif(self, X_drift: np.ndarray) -> tuple[float, list[float]]:
         """
@@ -457,8 +462,20 @@ class DriftAnalyzer:
             columns_list.append(x_drift if basis.n_columns else None)
             meta.append((name, drift_terms, basis.n_columns, vif_max, vif_max > self.vif_threshold, warning_msg))
 
-        system = KrigingSystem(x_pts, y_pts, z_values, None, model, params)
-        residuals = LeaveBlockOut(system, blocks, targets, full_inverse=plan.full_inverse).residuals(columns_list)
+        label = self.mode.replace("_", " ").title()
+        with activity_indicator(
+            f"   [Drift Analyzer] {label}: factorising kriging system (N = {n_points})",
+            disable=not self.show_progress,
+        ):
+            system = KrigingSystem(x_pts, y_pts, z_values, None, model, params)
+            leave_block_out = LeaveBlockOut(system, blocks, targets, full_inverse=plan.full_inverse)
+        with get_progress_bar(
+            total=leave_block_out.n_blocks,
+            desc=f"   [Drift Analyzer] {label}: leave-block-out CV",
+            unit="profiles" if cv_mode == "lopo" and profile_ids is not None else "points",
+            disable=not self.show_progress,
+        ) as bar:
+            residuals = leave_block_out.residuals(columns_list, progress=bar.update)
 
         valid = ~np.isnan(residuals) & evaluated
         failed = [valid[k].sum() < meta[k][2] + 3 for k in range(len(meta))]

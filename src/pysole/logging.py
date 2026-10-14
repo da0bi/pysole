@@ -4,19 +4,25 @@ Provides centralized logging to both console (stdout) and a log file (default: p
 """
 
 import logging
+import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
 import sys
 try:
     from tqdm import tqdm
 except ImportError:
-    def tqdm(iterable=None, total=None, desc="", unit="", ascii=None, bar_format=None, disable=False, leave=True):
+    def tqdm(iterable=None, total=None, desc="", unit="", ascii=None, bar_format=None, disable=False, leave=True, **kwargs):
         if iterable is not None:
             return iterable
         class DummyBar:
             def __enter__(self): return self
             def __exit__(self, *args): pass
             def update(self, n=1): pass
-            def set_description(self, desc=None): pass
+            def refresh(self): pass
+            def close(self): pass
+            def set_description(self, desc=None, refresh=True): pass
+            def set_description_str(self, desc=None, refresh=True): pass
         return DummyBar()
 
 # Global PySole logger
@@ -123,4 +129,62 @@ def get_progress_bar(
         disable=disable,
         leave=True,
     )
+
+
+def _format_clock(seconds: float) -> str:
+    """Formats a duration as ``MM:SS`` (``H:MM:SS`` from one hour on)."""
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+@contextmanager
+def activity_indicator(desc: str, disable: bool = False, delay: float = 1.0, interval: float = 1.0):
+    """Shows an elapsed-time spinner while a long, uninterruptible computation runs (e.g. a dense LAPACK call).
+
+    A daemon thread redraws one line ``<desc> [MM:SS]`` every ``interval`` seconds. It only sleeps and redraws
+    (the BLAS/LAPACK calls release the GIL), so the computation is neither slowed nor changed. Nothing is shown
+    for computations that finish within ``delay`` seconds. The thread is stopped and joined when the context
+    exits, also if the body raises.
+
+    Parameters
+    ----------
+    desc : str
+        Description label shown in front of the elapsed time.
+    disable : bool, default False
+        If True nothing is shown and no thread is started (non-interactive / batch modes).
+    delay : float, default 1.0
+        Seconds before the line appears.
+    interval : float, default 1.0
+        Seconds between redraws.
+    """
+    if disable:
+        yield
+        return
+
+    started = time.monotonic()
+    stop = threading.Event()
+    shown: list = []
+
+    def line() -> str:
+        return f"{desc} [{_format_clock(time.monotonic() - started)}]"
+
+    def run() -> None:
+        if stop.wait(delay):
+            return
+        bar = tqdm(total=None, desc=line(), bar_format="{desc}", leave=True)
+        shown.append(bar)
+        while not stop.wait(interval):
+            bar.set_description_str(line())
+
+    worker = threading.Thread(target=run, name="pysole-activity-indicator", daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        worker.join()
+        if shown:
+            shown[0].set_description_str(line())
+            shown[0].close()
 

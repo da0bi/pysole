@@ -151,6 +151,7 @@ These residuals equal those of a freshly fitted kriging system per fold up to ro
 - **Every survey point is evaluated** ($n = N$, deterministic; there is no fold count, no random sub-sampling and no tuning knob). All candidates are scored on the same points: a block that leaves fewer than $n_{\text{drift}} + 3$ training points is skipped for the candidate.
 - The cost is one $O(N^3)$ factorization plus cheap low-rank updates. Measured on a 16-thread workstation for the complete default suite (24 candidates, all points): Wuk (N = 982) 3.1 s pre- and 3.3 s post-migration, Gok (N = 2033) 7.0 s.
 - The memory demand is about $3 N^2$ doubles (N = 5000: 0.6 GB, N = 10 000: 2.4 GB). If this exceeds `max_memory_fraction` of the available memory, the LU factors are kept instead of the inverse and only a deterministic farthest-point subset of the evaluation points (at least 100) is evaluated; a warning is logged and $n$ is then the size of the subset.
+- With `inputs.show_progress` (default `true`) the terminal shows an elapsed-time line while the base system is factorised (it appears only after about one second) and one progress bar over the blocks (points, or profiles for LOPO). The display only reports; it never changes or slows the calculation (results are bit-identical with it switched off).
 
 #### 4. Cross-Validation Performance Metrics
 For observed values $y_i$ and cross-validated predictions $\hat{y}_i$ of the $n$ evaluated points ($i = 1, \dots, n$):

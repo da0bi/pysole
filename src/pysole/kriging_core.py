@@ -20,7 +20,7 @@ Thread safety: after :meth:`KrigingSystem.factorize` (and :meth:`KrigingSystem.i
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 from scipy.linalg import lu_factor, lu_solve
@@ -351,21 +351,28 @@ class LeaveBlockOut:
         for j, block in enumerate(self.blocks):
             self.groups.setdefault(len(block), []).append(j)
 
-        system.factorize()
-        self.v = system.dual_weights[:n]
-        if full_inverse:
-            self._inverse = system.inverse()[:n, :n]
-            self._columns = None
-            self._position = None
-            system.release()
-        else:
-            union = np.unique(np.concatenate(self.blocks)) if self.blocks else np.zeros(0, dtype=np.intp)
-            rhs = np.zeros((n + 1, len(union)))
-            rhs[union, np.arange(len(union))] = 1.0
-            self._inverse = None
-            self._columns = system.solve(rhs)[:n]
-            self._position = np.full(n, -1, dtype=np.intp)
-            self._position[union] = np.arange(len(union))
+        # Same BLAS policy as the production engine: dense factorisations use at most the physical core count.
+        with blas_thread_limit():
+            system.factorize()
+            self.v = system.dual_weights[:n]
+            if full_inverse:
+                self._inverse = system.inverse()[:n, :n]
+                self._columns = None
+                self._position = None
+                system.release()
+            else:
+                union = np.unique(np.concatenate(self.blocks)) if self.blocks else np.zeros(0, dtype=np.intp)
+                rhs = np.zeros((n + 1, len(union)))
+                rhs[union, np.arange(len(union))] = 1.0
+                self._inverse = None
+                self._columns = system.solve(rhs)[:n]
+                self._position = np.full(n, -1, dtype=np.intp)
+                self._position[union] = np.arange(len(union))
+
+    @property
+    def n_blocks(self) -> int:
+        """Number of blocks (the total of the increments reported to the ``progress`` callback of :meth:`residuals`)."""
+        return len(self.blocks)
 
     # ------------------------------------------------------------------ helpers
     def _apply_inverse(self, columns: np.ndarray) -> np.ndarray:
@@ -449,7 +456,9 @@ class LeaveBlockOut:
             return np.full(len(target), np.nan)
 
     # ------------------------------------------------------------------ evaluation
-    def residuals(self, candidates: Sequence[np.ndarray | None]) -> np.ndarray:
+    def residuals(
+        self, candidates: Sequence[np.ndarray | None], progress: Callable[[int], None] | None = None
+    ) -> np.ndarray:
         """
         Leave-block-out residuals ``z - zhat`` of every candidate.
 
@@ -458,6 +467,10 @@ class LeaveBlockOut:
         candidates : sequence of np.ndarray or None
             Drift columns of every candidate at the observations, shape (N, p); ``None`` (or ``p = 0``) is Ordinary
             Kriging.
+        progress : callable, optional
+            Called as ``progress(k)`` with the number ``k`` of blocks just processed (once per processed stack and
+            once per group that is skipped because its blocks leave too few observations); the increments sum to
+            :attr:`n_blocks`. It only reports; it never influences the result.
 
         Returns
         -------
@@ -479,6 +492,8 @@ class LeaveBlockOut:
         with blas_thread_limit(1):
             for m, members in self.groups.items():
                 if n - m < 3:
+                    if progress is not None:
+                        progress(len(members))
                     continue
                 per_stack = max(1, self.STACK_ENTRIES // (m * (m + 1 + unique.shape[1])))
                 for start in range(0, len(members), per_stack):
@@ -497,6 +512,8 @@ class LeaveBlockOut:
                         if len(bad):  # ill-conditioned block: dense solve of Q_BB, then a fresh fit
                             e[bad] = self._block_solve(cand, p_blocks[bad], stacked[bad], [chunk[r] for r in bad])
                         out[k, points] = e[rows, cols]
+                    if progress is not None:
+                        progress(len(chunk))
         return out
 
     def _shared_solve(self, p_blocks: np.ndarray, stacked: np.ndarray, update_unique: np.ndarray) -> np.ndarray:

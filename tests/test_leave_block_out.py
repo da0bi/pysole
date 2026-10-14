@@ -125,6 +125,67 @@ class TestLeaveBlockOut(unittest.TestCase):
         np.testing.assert_allclose(chunked, expected, rtol=1e-10, atol=1e-10, equal_nan=True)
 
 
+class TestProgressAndThreadCap(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.x, cls.y, cls.z, cls.cands = _fixture()
+        cls.n = len(cls.z)
+
+    def _engine(self, blocks, targets, full=True):
+        return LeaveBlockOut(KrigingSystem(self.x, self.y, self.z, None, "spherical", PARAMS), blocks, targets, full)
+
+    def _count(self, engine):
+        increments = []
+        residuals = engine.residuals(self.cands, progress=increments.append)
+        return residuals, increments
+
+    def test_increments_sum_to_number_of_blocks(self):
+        blocks, targets = _buffer_blocks(self.x, self.y, 120.0, range(0, self.n, 4))
+        for full in (True, False):
+            engine = self._engine(blocks, targets, full)
+            residuals, increments = self._count(engine)
+            self.assertEqual(engine.n_blocks, len(blocks))
+            self.assertEqual(sum(increments), len(blocks))
+            np.testing.assert_array_equal(residuals, engine.residuals(self.cands))
+
+    def test_chunked_stacks_report_every_stack(self):
+        blocks, targets = _buffer_blocks(self.x, self.y, 200.0, range(0, self.n, 2))
+        with mock.patch.object(LeaveBlockOut, "STACK_ENTRIES", 1):
+            engine = self._engine(blocks, targets)
+            _, increments = self._count(engine)
+        self.assertEqual(sum(increments), len(blocks))
+        self.assertEqual(set(increments), {1})
+
+    def test_skipped_groups_are_counted(self):
+        # The block holding every observation leaves none for the fit and is skipped without a residual.
+        blocks = [np.arange(self.n)] + [np.array([i]) for i in range(20)]
+        targets = [np.array([40])] + [np.array([i]) for i in range(20)]
+        engine = self._engine(blocks, targets)
+        residuals, increments = self._count(engine)
+        self.assertEqual(sum(increments), len(blocks))
+        self.assertTrue(np.isnan(residuals[:, 40]).all())
+        self.assertTrue(np.isfinite(residuals[0, :20]).all())
+
+    def test_factorisation_runs_under_the_physical_core_cap(self):
+        active = []
+
+        class RecordingLimit:
+            def __init__(self, limit=None):
+                self.limit = limit
+
+            def __enter__(self):
+                active.append(self.limit)
+
+            def __exit__(self, *args):
+                active.append("exit")
+
+        blocks, targets = _buffer_blocks(self.x, self.y, 120.0, range(0, self.n, 4))
+        system = KrigingSystem(self.x, self.y, self.z, None, "spherical", PARAMS)
+        with mock.patch("pysole.kriging_core.blas_thread_limit", RecordingLimit):
+            LeaveBlockOut(system, blocks, targets)
+        self.assertEqual(active, [None, "exit"])
+
+
 class TestMaxPairwiseDistance(unittest.TestCase):
     def test_equals_brute_force(self):
         rng = np.random.default_rng(5)

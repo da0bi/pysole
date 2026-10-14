@@ -6,6 +6,7 @@ The analyzer must reproduce an independent per-fold refit of the production krig
 answers strictly, and degrade deterministically when the memory plan asks for a subset.
 """
 
+import contextlib
 import os
 import tempfile
 import unittest
@@ -62,7 +63,7 @@ class AnalyzerFixture(unittest.TestCase):
         self.x, self.y, self.z = make_points(self.geom, self.dem, n=60)
 
     def run_cv(self, candidates=CANDIDATES, target="D", **kwargs):
-        analyzer = DriftAnalyzer(interpolation_target=target)
+        analyzer = DriftAnalyzer(interpolation_target=target, show_progress=False)
         return analyzer.evaluate_spatial_cv(
             self.x, self.y, self.z, self.geom, self.grids, candidates, "spherical", dict(VARIOGRAM), **kwargs
         )
@@ -313,7 +314,7 @@ class TestMemoryFallbackIsDeterministic(AnalyzerFixture):
 
 class TestInteractiveSelection(AnalyzerFixture):
     def run_interactive(self, answers):
-        analyzer = DriftAnalyzer(interpolation_target="D", survey_profile_column=None)
+        analyzer = DriftAnalyzer(interpolation_target="D", survey_profile_column=None, show_progress=False)
         with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", side_effect=answers) as mocked, \
                 patch("builtins.print") as printed:
             results = analyzer.run_diagnostics(
@@ -355,6 +356,71 @@ class TestInteractiveSelection(AnalyzerFixture):
         self.assertEqual(len(results), 3)
 
 
+class TestProgressDisplay(AnalyzerFixture):
+    """The spinner and the loop bar only report: same ranking, right totals, nothing created when disabled."""
+
+    SUITE = [[], ["z_dem"], ["linear_xy"]]
+
+    def run_recorded(self, show_progress, **kwargs):
+        bars, spinners = [], []
+
+        class RecordingBar:
+            def __init__(self, **bar_kwargs):
+                self.kwargs = bar_kwargs
+                self.total_updated = 0
+                bars.append(self)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def update(self, n=1):
+                self.total_updated += n
+
+        @contextlib.contextmanager
+        def recording_spinner(desc, disable=False, **spinner_kwargs):
+            spinners.append((desc, disable))
+            yield
+
+        analyzer = DriftAnalyzer(interpolation_target="D", show_progress=show_progress)
+        with patch("pysole.drift_analyzer.get_progress_bar", RecordingBar), \
+                patch("pysole.drift_analyzer.activity_indicator", recording_spinner):
+            results = analyzer.evaluate_spatial_cv(
+                self.x, self.y, self.z, self.geom, self.grids, self.SUITE, "spherical", dict(VARIOGRAM), **kwargs
+            )
+        return results, bars, spinners
+
+    def test_buffer_mode_reports_points(self):
+        results, bars, spinners = self.run_recorded(True, cv_mode="buffer", buffer_radius_m=60.0)
+        self.assertEqual(len(bars), 1)
+        self.assertEqual(bars[0].kwargs["unit"], "points")
+        self.assertFalse(bars[0].kwargs["disable"])
+        self.assertEqual(bars[0].kwargs["total"], len(self.z))
+        self.assertEqual(bars[0].total_updated, len(self.z))
+        self.assertEqual(len(spinners), 1)
+        self.assertFalse(spinners[0][1])
+        self.assertIn(f"N = {len(self.z)}", spinners[0][0])
+
+    def test_lopo_mode_reports_profiles(self):
+        profiles = np.arange(len(self.z)) % 5
+        _, bars, _ = self.run_recorded(True, cv_mode="lopo", profile_ids=profiles)
+        self.assertEqual(bars[0].kwargs["unit"], "profiles")
+        self.assertEqual(bars[0].kwargs["total"], 5)
+        self.assertEqual(bars[0].total_updated, 5)
+
+    def test_disabled_display_and_identical_results(self):
+        shown, _, _ = self.run_recorded(True, cv_mode="buffer", buffer_radius_m=60.0)
+        hidden, bars, spinners = self.run_recorded(False, cv_mode="buffer", buffer_radius_m=60.0)
+        self.assertTrue(bars[0].kwargs["disable"])
+        self.assertTrue(spinners[0][1])
+        self.assertEqual([(r.name, r.cv_rmse, r.aicc) for r in shown], [(r.name, r.cv_rmse, r.aicc) for r in hidden])
+
+    def test_default_is_to_show_progress(self):
+        self.assertTrue(DriftAnalyzer().show_progress)
+
+
 class TestSolverUsesFittedVariogram(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -363,7 +429,7 @@ class TestSolverUsesFittedVariogram(unittest.TestCase):
         x, y, z = make_points(geom, self.dem)
         self.solver = Solver(
             dem=self.dem, bounds=geom.bounds, survey_data_type="depth", post_variogram_model="gaussian",
-            output_dir=os.path.join(self._tmp.name, "out"),
+            output_dir=os.path.join(self._tmp.name, "out"), show_progress=False,
         )
         self.solver.opt_slope = self.slope
         self.solver.opt_kc = 0.03
@@ -383,6 +449,14 @@ class TestSolverUsesFittedVariogram(unittest.TestCase):
         init = mock_analyzer.call_args.kwargs
         self.assertEqual(init["mode"], "post_migration")
         self.assertEqual(init["target_name"], "depth")
+
+    def test_recommend_drift_model_forwards_the_progress_setting(self):
+        for value in (True, False):
+            self.solver.show_progress = value
+            with patch("pysole.solver.DriftAnalyzer") as mock_analyzer:
+                mock_analyzer.return_value.run_diagnostics.return_value = []
+                self.solver.recommend_drift_model(stage="post_migration", interactive=False)
+            self.assertIs(mock_analyzer.call_args.kwargs["show_progress"], value)
 
     def test_recommend_drift_model_on_real_analyzer(self):
         self.solver.opt_variogram_params = {"range": 120.0, "sill": 4.0, "nugget": 0.05}

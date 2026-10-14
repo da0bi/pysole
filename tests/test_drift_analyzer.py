@@ -41,6 +41,7 @@ class TestDriftAnalyzer(unittest.TestCase):
             interpolation_target="D",
             include_zero_boundary=True,
             survey_profile_column=None,
+            show_progress=False,
         )
 
         results = analyzer.run_diagnostics(
@@ -74,6 +75,7 @@ class TestDriftAnalyzer(unittest.TestCase):
             interpolation_target="D",
             include_zero_boundary=True,
             survey_profile_column="profile_id",
+            show_progress=False,
         )
 
         results = analyzer.run_diagnostics(
