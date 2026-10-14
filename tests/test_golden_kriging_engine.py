@@ -10,7 +10,7 @@ import numpy as np
 
 from pysole.interpolation import kriging_interpolation
 
-from .golden_fixture import VARIOGRAM_PARAMS, build_fixture, cases
+from tests.golden_fixture import VARIOGRAM_PARAMS, build_fixture, cases
 
 GOLDEN = os.path.join(os.path.dirname(__file__), "data", "golden_kriging_engine.npz")
 
