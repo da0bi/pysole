@@ -557,18 +557,20 @@ If `drift_terms` is `null` or a flat list of up to the maximum of the five primi
 | `"universal"` | `false` | **ONE multi-drift model (required)**: all listed terms, e.g. `drift_terms: ["sia", "z_dem"]`,  are applied together as **ONE** multi-drift model. |
 | `"universal"` | `true` | **Candidate suite**: every combination of the listed terms. In case of `drift_terms: ["sia", "z_dem"]`, the Drift Analyzer will evaluate three model candidates: `["sia"]`, `["z_dem"]`, and `["sia", "z_dem"]`. Adding `[]`,  `drift_terms: [[], "sia", "z_dem"]`, includes Ordinary Kriging as a 4th candidate. If `null` then the full suite of available drift models (24 candidates) is evaluated. The best-ranked candidate is applied. |
 | `"regression"` | `false` | **Random Forest feature covariates**: The listed terms specify the predictor features (e.g. `["sia", "z_dem"]`) used to train a Random Forest model to predict the large-scale trend; Ordinary Kriging is then used to interpolate the residuals. **Default (`null`)**: trains on all available primitives (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]`). To use spatial coordinates only, specify `drift_terms: ["linear_xy"]`. (Executed via [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige); automatically used even if `engine: "native"`). |
-| `"regression"` | `true` | **Analyzer skipped with warning**: The Drift Analyzer evaluates and ranks linear combinations for Universal Kriging and does not evaluate Random Forest models. PySole logs a warning, skips the analyzer, and directly runs Regression Kriging with the specified `drift_terms`. |
+| `"regression"` | `true` | **Analyzer skipped with warning**: The Drift Analyzer does not evaluate Random Forest models. `PySole` logs a warning, skips the analyzer, and directly runs Regression Kriging with the specified `drift_terms`. |
 
-The **default suite** (analyzer on, `drift_terms: null`) evaluates all **24 candidates** (23 drift models + Ordinary) listed above. If both `"linear_xy"` and `"quadratic_xy"` are given, `"linear_xy"` is dropped with a warning, falling back to `["quadratic_xy"]`. Examples: all five primitives (no nested `[]`) = 23 candidates; `[[], "sia", "z_dem"]` = 4 (Ordinary, `sia`, `z_dem`, `sia + z_dem`); `["sia", "z_dem", "curvature_dem"]` = 7. A suite of exactly one candidate (e.g. `["sia"]`) overrides the analyzer and that model is applied; for one *multi*-drift model switch the analyzer off. With the analyzer on, a list of several terms is always a suite!
+The **default suite** (analyzer on, `drift_terms: null`) evaluates all **24 candidates** (23 drift models + Ordinary) listed above. If both `"linear_xy"` and `"quadratic_xy"` are given, `"linear_xy"` is dropped with a warning, falling back to `["quadratic_xy"]`.
+
+Examples:
+- all five primitives (no nested `[]`) = 23 candidates;
+- `[[], "sia", "z_dem"]` = 4 (Ordinary, `sia`, `z_dem`, `sia + z_dem`);
+- `["sia", "z_dem", "curvature_dem"]` = 7.
+
+A suite of exactly one candidate (e.g. `["sia"]`) overrides the analyzer and that model is applied; for one *multi*-drift model switch the analyzer off. With the analyzer on, a list of several terms is always a suite!
 
 For the BSS product target `"P"`, every candidate with `sia` is evaluated and ranked normally but logs a warning (the `1/sin²(α)` double scaling); `ordinary` and the terrain terms do not have it.
 
-| Engine | `ordinary` | `universal` (all 23 drift models) | `regression` | `drift_analyzer` |
-| :--- | :--- | :--- | :--- | :--- |
-| `"native"` | yes | yes | PyKrige is used (logged) | yes |
-| `"pykrige"` | yes | yes (same result as native, ≤ 1e-4), **slow for many survey points** (warning, see below) | yes | candidates are ranked natively, the winner is applied with PyKrige |
-
-**Speed of `"pykrige"` with `"universal"`:** PyKrige's `UniversalKriging` computes a leave-one-out fit statistic every time it is created (the class has no option to switch it off, unlike `OrdinaryKriging`). Its run time grows roughly with N³ to N⁴ in the number of survey points, independent of the drift terms and of the grid size: about 2 s for 400 points, 19 s for 800 and several minutes for the 1098 points of the WUK example, while the kriging itself is fast. PySole logs a warning when `engine: "pykrige"` is combined with `method: "universal"`. Use the `"native"` engine (all drift terms, kriging variance) for Universal Kriging with more than a few hundred survey points; `"ordinary"` and `"regression"` with PyKrige are not affected.
+**Speed of `"pykrige"` with `"universal"`:** `PyKrige`'s `UniversalKriging` computes a leave-one-out fit statistic every time it is created (the class has no option to switch it off, unlike `OrdinaryKriging`). Its run time grows roughly with N³ to N⁴ in the number of survey points, independent of the drift terms and of the grid size: about 2 s for 400 points, 19 s for 800 and several minutes for the 1098 points of the WUK example, while the kriging itself is fast. `PySole` logs a warning when `engine: "pykrige"` is combined with `method: "universal"`. Use the `"native"` engine (all drift terms, kriging variance) for Universal Kriging with more than a few hundred survey points; `"ordinary"` and `"regression"` with `PyKrige` are not affected.
 
 For detailed mathematical formulations, parameter counts ($n_{\text{drift}}$), and glaciological interpretations of each combination, see the comprehensive [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer_&_survey_planner.md#18-systematic-multi-drift-model-suite).
 
