@@ -548,6 +548,7 @@ In principle, the `Drift Analyzer` can be activated for pre- and/or post-migrati
 
 For detailed mathematical formulations, parameter counts ($n_{\text{drift}}$), and glaciological interpretations of each combination, see the comprehensive [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer_&_survey_planner.md#18-systematic-multi-drift-model-suite).
 <br>
+<br>
 
 <a id="how-drift-terms-is-interpreted"></a>
 **How `drift_terms` is interpreted**
@@ -561,6 +562,7 @@ The Kriging parameters `method` and `drift_analyzer` decide what the `drift_term
 | `"universal"` | `true` | **Candidate suite**: every combination of the listed terms is evaluated as a separate candidate model. For example, `drift_terms: ["sia", "z_dem"]` tests three candidates: `["sia"]`, `["z_dem"]`, and `["sia", "z_dem"]`. Adding `[]`,  `drift_terms: [[], "sia", "z_dem"]`, includes Ordinary Kriging as a 4th candidate. **Default (`null`)**: evaluates the full suite of **24 candidates** (Ordinary Kriging + 23 single and multi-drift models: 8 with `linear_xy`, 8 with `quadratic_xy`, and 7 raster-only). The best-ranked candidate is applied. |
 | `"regression"` | `false` | **Random Forest feature covariates**: The listed terms specify the predictor features (e.g. `["sia", "z_dem"]`) used to train a Random Forest model to predict the large-scale trend; Ordinary Kriging is then used to interpolate the residuals. **Default (`null`)**: trains on all available primitives simultaneously as a multivariate model (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]`). To use spatial coordinates only, specify `drift_terms: ["linear_xy"]`. (Executed via [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige); automatically used even if `engine: "native"`). |
 | `"regression"` | `true` | **Analyzer skipped with warning**: The Drift Analyzer does not evaluate Random Forest models. `PySole` logs a warning, skips the analyzer, and directly runs Regression Kriging with the specified `drift_terms`. |
+<br>
 
 **Candidate suite vs. single-model rules:**
 - **In an analyzer suite (`drift_analyzer: true`)**: Candidates never combine `linear_xy` and `quadratic_xy` *within the same candidate* (to prevent collinearity), but all models featuring `linear_xy` alone (8 candidates) and `quadratic_xy` alone (8 candidates) are fully and independently evaluated. A suite of exactly one candidate (e.g. `["sia"]`) overrides the analyzer and that model is applied.
