@@ -477,7 +477,7 @@ In principle, the `Drift Analyzer` can be activated for pre- and/or post-migrati
    $$U(x,y) = \sin(\alpha_{\text{opt}}(x,y))^{-1}$$
    </p>
 
-   Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute $\tau_{\text{b}}$ values. The SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps low slope angles prior to computing the inverse-sine drift, preventing matrix singularities. Just use it with `interpolation_target`: `"T"`, or `"D"` to avoid double-scaling artifacts .
+   Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute $\tau_{\text{b}}$ values. The SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps low slope angles prior to computing the inverse-sine drift, preventing matrix singularities. Just use it with `interpolation_target`: `"T"`, or `"D"` to avoid double-scaling artifacts.
 
 - **Surface Elevation Drift Model (`["z_dem"]`)**:
    Uses the DEM surface elevation $Z_{\text{dem}}(x,y)$ as a spatial drift variable:
@@ -563,10 +563,9 @@ The Kriging parameters `method` and `drift_analyzer` decide what the `drift_term
 **Candidate suite vs. single-model rules:**
 - **In an analyzer suite (`drift_analyzer: true`)**: Candidates never combine `linear_xy` and `quadratic_xy` *within the same candidate* (to prevent collinearity), but all models featuring `linear_xy` alone (8 candidates) and `quadratic_xy` alone (8 candidates) are fully and independently evaluated. A suite of exactly one candidate (e.g. `["sia"]`) overrides the analyzer and that model is applied.
 - **In a single model (`drift_analyzer: false`)**: If `drift_terms: ["linear_xy", "quadratic_xy"]` is passed, `"linear_xy"` is dropped with a warning, falling back to `["quadratic_xy"]`.
+- For the `interpolation_target: "P"`, the `drift_analyzer` also ranks every candidate containing the `sia` drift model but logs a warning (the `1/sin²(α)` double scaling).
 
-For the BSS product target `"P"`, every candidate with `sia` is evaluated and ranked normally but logs a warning (the `1/sin²(α)` double scaling); `ordinary` and the terrain terms do not have it.
-
-**Speed of `engine: "pykrige"` with `method: "universal"`:**
+**Speed of `engine: "pykrige"` with `method: "universal"`:**<br>
 `PyKrige`'s `UniversalKriging` computes a leave-one-out fit statistic every time it is created (the class has no option to switch it off, unlike `OrdinaryKriging`). Its run time grows roughly with N³ to N⁴ in the number of survey points, independent of the drift terms and of the grid size: about 2 s for 400 points, 19 s for 800 and several minutes for the 1098 points of the WUK example, while the kriging itself is fast. `PySole` logs a warning when `engine: "pykrige"` is combined with `method: "universal"`. Use the `"native"` engine (all drift terms, kriging variance) for Universal Kriging with more than a few hundred survey points; `"ordinary"` and `"regression"` with `PyKrige` are not affected.
 
 For detailed mathematical formulations, parameter counts ($n_{\text{drift}}$), and glaciological interpretations of each combination, see the comprehensive [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer_&_survey_planner.md#18-systematic-multi-drift-model-suite).
