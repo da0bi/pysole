@@ -19,7 +19,7 @@ import numpy as np
 from scipy.interpolate import griddata, RBFInterpolator, RegularGridInterpolator
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 from sklearn.ensemble import RandomForestRegressor
-from .drift import RASTER_DRIFT_TERMS, normalize_engine, normalize_method, parse_drift_terms
+from .drift import DEFAULT_REGRESSION_DRIFT_TERMS, RASTER_DRIFT_TERMS, normalize_engine, normalize_method, parse_drift_terms
 from .raster import GridGeometry
 from .logging import logger, get_progress_bar
 from .smoothing import compute_gradients, compute_surface_curvature
@@ -1003,6 +1003,18 @@ def kriging_interpolation(
         external_drift_grids = {}
     elif method_clean == "universal":
         if "linear_xy" in valid_terms and "quadratic_xy" in valid_terms:
+            valid_terms = [t for t in valid_terms if t != "linear_xy"]
+            logger.warning(
+                "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
+                "which contains the linear terms [x, y]."
+            )
+    elif method_clean == "regression":
+        if drift_terms is None and not external_drift_grids:
+            if dem_grid is not None:
+                valid_terms = list(DEFAULT_REGRESSION_DRIFT_TERMS)
+            else:
+                valid_terms = ["linear_xy"]
+        elif "linear_xy" in valid_terms and "quadratic_xy" in valid_terms:
             valid_terms = [t for t in valid_terms if t != "linear_xy"]
             logger.warning(
                 "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "

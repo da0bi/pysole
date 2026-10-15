@@ -21,7 +21,8 @@ rejected (use ``None``).
   models), a list evaluates all non-empty subsets of the listed primitives (never ``linear_xy`` together with
   ``quadratic_xy``) plus Ordinary if ``[]`` is nested. A suite of exactly one candidate overrides the analyzer
   and that model is applied.
-* ``regression``: ``drift_terms`` are the Random Forest covariates (``None``: x, y); the analyzer is skipped.
+* ``regression``: ``drift_terms`` are the Random Forest covariates (default ``None``: all primitives
+  ``["sia", "z_dem", "curvature_dem", "quadratic_xy"]``; spatial coordinates only: ``["linear_xy"]``); the analyzer is skipped.
   The method is only available through PyKrige (also with ``engine`` ``native``, which is reported).
 """
 
@@ -36,6 +37,9 @@ DRIFT_PRIMITIVES: tuple[str, ...] = ("sia", "z_dem", "curvature_dem", "linear_xy
 
 RASTER_DRIFT_TERMS: tuple[str, ...] = ("sia", "z_dem", "curvature_dem")
 """Primitive drift terms that need a raster covariate grid, in canonical column order."""
+
+DEFAULT_REGRESSION_DRIFT_TERMS: tuple[str, ...] = ("sia", "z_dem", "curvature_dem", "quadratic_xy")
+"""Default feature covariates for method 'regression' when drift_terms is None (all primitives with quadratic_xy providing coordinates)."""
 
 KRIGING_METHODS: tuple[str, ...] = ("ordinary", "universal", "regression")
 KRIGING_ENGINES: tuple[str, ...] = ("native", "pykrige")
@@ -250,7 +254,8 @@ class DriftPlan:
         if self.method == "ordinary":
             return "Ordinary Kriging"
         if self.method == "regression":
-            return f"Regression Kriging (covariates: {self.terms or 'x, y'})"
+            covs = format_drift_name(self.terms) if self.terms else "x, y"
+            return f"Regression Kriging (covariates: {covs})"
         if self.analyze:
             return f"Universal Kriging (drift analyzer on {len(self.suite)} candidate models)"
         return f"Universal Kriging (drift: {format_drift_name(self.terms)})"
@@ -283,8 +288,18 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
         return DriftPlan(method="ordinary", notices=notices)
 
     if method_clean == "regression":
-        terms = [] if drift_terms is None else parse_drift_terms(drift_terms)[0]
         notices = []
+        if drift_terms is None:
+            terms = list(DEFAULT_REGRESSION_DRIFT_TERMS)
+        else:
+            terms = parse_drift_terms(drift_terms)[0]
+            if "linear_xy" in terms and "quadratic_xy" in terms:
+                terms = [t for t in terms if t != "linear_xy"]
+                notices.append((
+                    "warning",
+                    "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
+                    "which contains the linear terms [x, y].",
+                ))
         if engine_clean == "native":
             notices.append((
                 "info",

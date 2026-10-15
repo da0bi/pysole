@@ -40,8 +40,8 @@ In `PySole`, candidate spatial covariates $f_k(\mathbf{x})$ include:
 | `ordinary` | any | **`ordinary` overrides `drift_analyzer` and `drift_terms`**: both are ignored (the terms are not even validated); one warning is logged if either is set. The analyzer never runs for `ordinary`. |
 | `universal` | `false` | The list is **ONE multi-drift model** (all terms together). `null` or `[]` is an error ("specify drift_terms or use method ordinary"). If both `linear_xy` and `quadratic_xy` are specified, `linear_xy` is dropped with a warning (fallback to `["quadratic_xy"]` which contains the linear terms [x, y]). |
 | `universal` | `true` | `null`: the **default suite** (24 candidates). A list: the **suite** of all combinations of the listed terms. The winner decides the final model: the Ordinary candidate gives `ordinary`, any drift model gives `universal` with its terms. |
-| `regression` | `false` | The terms are the **Random Forest covariates** (`null`: x and y); works for every primitive. |
-| `regression` | `true` | The analyzer is skipped with a warning (it ranks Universal Kriging drift models). |
+| `regression` | `false` | The terms are the **Random Forest covariates** (predictor features, e.g. `["sia", "z_dem"]`) used to train a Random Forest model to predict the large-scale trend before Ordinary Kriging interpolates the residuals. **Default (`null`)**: trains on all available primitives (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]`); spatial coordinates only: `["linear_xy"]`; works for every primitive; executed via PyKrige. |
+| `regression` | `true` | The analyzer is skipped with a warning (the Drift Analyzer evaluates Universal Kriging linear drift models; Regression Kriging proceeds directly using the specified `drift_terms`). |
 
 If the method is omitted altogether, the target decides: the direct targets (`"T"` before, `"D"` after migration) use `universal` with `["sia"]` (with `drift_analyzer: true` and `null` terms: the default suite), the product target `"P"` uses `ordinary`.
 

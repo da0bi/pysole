@@ -21,6 +21,10 @@ Interactive terminal parameter setup for the Unprobed Glacier Survey Planner in 
   - Automated dispatch via `run_from_config()` or `Solver.run_pipeline()` when `inputs.survey_data_path` is `null`/omitted seamlessly inherits interactive terminal prompting.
 
 ### Changed
+- **[Multivariate full-primitive default for Regression Kriging (`drift_terms: null`)] (`src/pysole/drift.py`, `src/pysole/interpolation.py`)**:
+  - In Regression Kriging (`method: "regression"`), `drift_terms: null` (omitted) now defaults to all available primitive drift features (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]`), training a rich multivariate Random Forest trend model (8 standardized feature columns) before Ordinary Kriging interpolates the residuals.
+  - Users who explicitly desire coordinate-only regression can pass `drift_terms: ["linear_xy"]` (spatial coordinates $x, y$).
+  - If both `"linear_xy"` and `"quadratic_xy"` are provided in `drift_terms`, `"linear_xy"` is dropped with a warning (falling back to `"quadratic_xy"`).
 - **[Warning and fallback for `drift_terms: ["linear_xy", "quadratic_xy"]`] (`src/pysole/drift.py`, `src/pysole/interpolation.py`)**:
   - In Universal Kriging without `drift_analyzer` (`drift_analyzer: false`), specifying both `"linear_xy"` and `"quadratic_xy"` in `drift_terms` now emits a warning notice that `drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] which contains the linear terms [x, y].`
   - `"linear_xy"` is automatically dropped from the resolved plan and execution falls back cleanly to `["quadratic_xy"]` (along with any other specified drift terms), avoiding redundant linear term definitions.

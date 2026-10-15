@@ -179,6 +179,21 @@ class TestPyKrigeRegressionCovariates(PyKrigeFixture):
                 show_progress=False, include_zero_boundary_condition=False,
             )
 
+    def test_regression_default_null_uses_all_primitives(self):
+        res = kriging_interpolation(
+            sample_points=self.pts, geometry=self.geom, method="regression",
+            dem_grid=self.grids["z_dem"], opt_slope_grid=self.grids["sia"],
+            show_progress=False, include_zero_boundary_condition=False,
+        )
+        self.assertTrue(np.isfinite(res.bedrock_grid).all())
+
+    def test_regression_default_null_without_dem_falls_back_to_coordinates(self):
+        res = kriging_interpolation(
+            sample_points=self.pts, geometry=self.geom, method="regression",
+            show_progress=False, include_zero_boundary_condition=False,
+        )
+        self.assertTrue(np.isfinite(res.bedrock_grid).all())
+
 
 if __name__ == "__main__":
     unittest.main()

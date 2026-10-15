@@ -17,6 +17,7 @@ from pysole import ConfigError
 from pysole.config import DEFAULT_CONFIG, load_config
 from pysole.drift_analyzer import FAILED_AICC
 from pysole.drift import (
+    DEFAULT_REGRESSION_DRIFT_TERMS,
     DRIFT_PRIMITIVES,
     build_drift_suite,
     default_model,
@@ -227,7 +228,18 @@ class TestRuleTable(unittest.TestCase):
     def test_regression_terms_are_covariates_and_analyzer_is_skipped(self):
         plan = resolve_drift_plan("regression", False, ["z_dem", "linear_xy"], engine="pykrige")
         self.assertEqual((plan.method, plan.terms, plan.notices), ("regression", ["z_dem", "linear_xy"], []))
-        self.assertEqual(resolve_drift_plan("regression", False, None, engine="pykrige").terms, [])
+        # drift_terms: None defaults to all primitives with quadratic_xy providing coordinates
+        self.assertEqual(
+            resolve_drift_plan("regression", False, None, engine="pykrige").terms,
+            list(DEFAULT_REGRESSION_DRIFT_TERMS),
+        )
+        # linear_xy + quadratic_xy in regression falls back to quadratic_xy with warning
+        warned = resolve_drift_plan("regression", False, ["linear_xy", "quadratic_xy"], engine="pykrige")
+        self.assertEqual(warned.terms, ["quadratic_xy"])
+        self.assertEqual(len(warned.notices), 1)
+        self.assertEqual(warned.notices[0][0], "warning")
+        self.assertIn("falling back to ['quadratic_xy']", warned.notices[0][1])
+
         skipped = resolve_drift_plan("regression", True, None, engine="pykrige")
         self.assertFalse(skipped.analyze)
         self.assertEqual([lvl for lvl, _ in skipped.notices], ["warning"])
