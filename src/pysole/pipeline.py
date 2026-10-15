@@ -168,7 +168,8 @@ def run_from_config(
                 solver.show_progress = False
                 solver.is_batch_mode = True
 
-            plan_res = solver.plan_survey()
+            interactive = not is_batch and sys.stdin.isatty()
+            plan_res = solver.plan_survey(interactive=interactive)
 
             sia_grid = plan_res["sia_modelled_depth"]
             final_raster = BedrockMap(

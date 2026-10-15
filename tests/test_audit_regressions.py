@@ -97,7 +97,7 @@ class TestAuditRegressions(unittest.TestCase):
         BedrockMap(dem, bounds=(0, 0, 500, 500), crs="EPSG:32633").save(dem_path)
 
         planner = SurveyPlanner(dem=dem_path)
-        res = planner.plan_survey(kc=0.0314, max_length_km=5.0, output_dir=self.output_dir)
+        res = planner.plan_survey(kc=0.0314, max_length_km=5.0, output_dir=self.output_dir, interactive=False)
 
         self.assertIn("sia_modelled_depth", res)
         self.assertIn("tracks", res)
@@ -806,7 +806,7 @@ class TestAuditRegressions(unittest.TestCase):
         old_cwd = os.getcwd()
         os.chdir(cwd_dir)
         try:
-            solver.plan_survey(output_prefix=str(plan_dir / "run"), max_length_km=1.0, output_format="tif")
+            solver.plan_survey(output_prefix=str(plan_dir / "run"), max_length_km=1.0, output_format="tif", interactive=False)
             cwd_content = os.listdir(cwd_dir)
         finally:
             os.chdir(old_cwd)
@@ -821,13 +821,13 @@ class TestAuditRegressions(unittest.TestCase):
         pdir = self.output_dir / "plan_figs"
         solver = self._wuk_solver()
         solver.plan_survey(output_prefix="rel", output_dir=str(out), plots_dir=str(pdir),
-                           max_length_km=1.0, output_format="tif")
+                           max_length_km=1.0, output_format="tif", interactive=False)
         self.assertTrue((out / "rel_sia_modelled_depth.tif").exists())
         self.assertTrue((pdir / "rel_survey_plan_map.png").exists())
         self.assertFalse((out / "figures").exists())
 
         solver2 = self._wuk_solver()
-        solver2.plan_survey(output_prefix="rel2", output_dir=str(out), max_length_km=1.0, output_format="tif")
+        solver2.plan_survey(output_prefix="rel2", output_dir=str(out), max_length_km=1.0, output_format="tif", interactive=False)
         self.assertTrue((out / "figures" / "rel2_survey_plan_map.png").exists())
 
     def test_fft_padding_scales_with_kernel_width(self):

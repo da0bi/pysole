@@ -527,7 +527,10 @@ pysole pysole.json --drift-analyzer --profile-col line_id
 # Force non-interactive batch mode
 pysole pysole.json --batch
 
-# Standalone Survey Planning (defaults: k_c=0.0314, tau=100 kPa, max-km=5.0 km)
+# Interactive Survey Planning (prompts for omitted parameters: tau_0, k_c, max-km)
+pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp
+
+# Fully specified non-interactive execution (or using --batch)
 pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 0.0314 --tau 100 --max-km 5.0 --out-dir results --format tif
 ```
 
@@ -535,16 +538,21 @@ pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 0.03
 
 Computes the shallow-ice-approximation (SIA) thickness model and proposes survey tracks within a length budget.
 
+- **Interactive Parameter Configuration**:
+  When running via the Python API (`SurveyPlanner.plan_survey()`, `Solver.plan_survey()`, or automated dispatch when `inputs.survey_data_path` is `null`/omitted) or the CLI (`pysole plan-survey`), PySole interactively prompts for any omitted parameters (`tau_0`, `k_c`, `max_length_km`) via terminal `input()`. Each prompt displays the default value in brackets (e.g. `[default: 100.0]`). Pressing <kbd>Enter</kbd> (empty response) automatically adopts the default value. Non-numeric or negative entries trigger a helpful warning and re-prompt. In non-TTY environments (CI, background scripts, pipes) or when `--batch` / `interactive=False` is passed, prompts are bypassed and defaults are used automatically.
+
 - **Options:**
   - `--dem`: File path to surface DEM raster (required).
   - `--outline`: File path to creeping body / glacier boundary polygon (optional).
   - `--kc`: FFT corner wavenumber in rad/m (default `0.0314`).
   - `--tau`: Target basal shear stress $\tau_0$ in kPa (default `100`).
   - `--max-km`: Survey length budget in km (default `5.0`).
+  - `--batch`: Force non-interactive batch mode (accept defaults for omitted parameters without terminal prompts).
   - `--prefix`: Output prefix (default `final`).
   - `--out-dir`: Output directory for generated deliverables.
   - `--plots-dir`: Output directory for diagnostic figures.
   - `--format`: Export raster format (`tif` or `asc`, default `tif`).
 
 - **Output Path Resolution:** Outputs are kept together: files go to `--out-dir` (current directory if omitted); an absolute `--prefix` places all files beside it; figures are saved in `figures/` next to the data files unless `--plots-dir` is an absolute path.
+
 

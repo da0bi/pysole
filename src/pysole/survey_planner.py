@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import json
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -16,6 +17,34 @@ from .logging import logger
 from .plotting import _save_figure
 from .raster import BedrockMap, load_dem, load_outline
 from .smoothing import compute_gradients, fft_gaussian_smooth
+
+
+DEFAULT_SURVEY_TAU_KPA: float = 100.0  # 100 kPa = 100,000 Pa
+DEFAULT_SURVEY_KC: float = 0.0314      # rad/m (lambda_c ≈ 200 m)
+DEFAULT_SURVEY_MAX_KM: float = 5.0     # km
+
+
+def _prompt_survey_parameter(
+    prompt_label: str,
+    default_value: float,
+    unit: str,
+) -> float:
+    """Prompts user for a positive numeric survey parameter; empty input uses default."""
+    prompt_msg = f"[SurveyPlanner] {prompt_label} [{unit}] [default: {default_value}]: "
+    while True:
+        try:
+            raw = input(prompt_msg).strip()
+        except EOFError:
+            return default_value
+        if not raw:
+            return default_value
+        try:
+            val = float(raw)
+            if np.isfinite(val) and val > 0:
+                return val
+            print(f"[SurveyPlanner] Value must be a positive number (> 0). Got {val}.")
+        except ValueError:
+            print(f"[SurveyPlanner] '{raw}' is not a valid number. Please enter a positive number or press Enter for default.")
 
 
 @dataclass
@@ -364,13 +393,14 @@ class SurveyPlanner:
 
     def plan_survey(
         self,
-        kc: float = 0.0314,
-        tau_0: float = 100e3,
-        max_length_km: float = 5.0,
+        kc: float | None = None,
+        tau_0: float | None = None,
+        max_length_km: float | None = None,
         output_prefix: str = "final",
         output_dir: str | Path | None = None,
         plots_dir: str | Path | None = None,
         output_format: str = "tif",
+        interactive: bool = True,
     ) -> dict[str, Any]:
         """
         Executes the full forward survey planning workflow for unprobed glaciers.
@@ -381,12 +411,15 @@ class SurveyPlanner:
 
         Parameters
         ----------
-        kc : float, default 0.0314
-            Corner frequency cutoff wavenumber [rad/m] for DEM surface smoothing.
-        tau_0 : float, default 100e3
-            Characteristic basal shear stress target in Pascals [Pa] (100 kPa = 100,000 Pa).
-        max_length_km : float, default 5.0
-            Maximum total line length budget in kilometers [km].
+        kc : float, optional
+            Corner frequency cutoff wavenumber [rad/m] for DEM surface smoothing. If None,
+            prompts interactively (default: 0.0314 rad/m, lambda_c ≈ 200 m).
+        tau_0 : float, optional
+            Characteristic basal shear stress target in Pascals [Pa]. If None, prompts
+            interactively in kPa (default: 100 kPa = 100,000 Pa).
+        max_length_km : float, optional
+            Maximum total line length budget in kilometers [km]. If None, prompts
+            interactively (default: 5.0 km).
         output_prefix : str, default "final"
             File prefix for generated raster and vector outputs.
         output_dir : str or Path, optional
@@ -395,6 +428,8 @@ class SurveyPlanner:
             Directory for saving the diagnostic plan map figure.
         output_format : str, default "tif"
             Raster export format ('tif' or 'asc').
+        interactive : bool, default True
+            If True and running in an interactive terminal, prompts for any omitted parameters.
 
         Returns
         -------
@@ -407,6 +442,26 @@ class SurveyPlanner:
             - ``'saved_gpx'``: Path of exported GPX track lines.
             - ``'saved_plot'``: Path of saved diagnostic survey plan map figure.
         """
+        is_interactive = bool(interactive and sys.stdin.isatty())
+
+        if tau_0 is None:
+            if is_interactive:
+                tau_kpa = _prompt_survey_parameter("Target basal shear stress tau_0", DEFAULT_SURVEY_TAU_KPA, "kPa")
+                tau_0 = tau_kpa * 1000.0
+            else:
+                tau_0 = DEFAULT_SURVEY_TAU_KPA * 1000.0
+
+        if kc is None:
+            if is_interactive:
+                kc = _prompt_survey_parameter("Corner frequency cutoff wavenumber k_c", DEFAULT_SURVEY_KC, "rad/m")
+            else:
+                kc = DEFAULT_SURVEY_KC
+
+        if max_length_km is None:
+            if is_interactive:
+                max_length_km = _prompt_survey_parameter("Maximum survey track length budget", DEFAULT_SURVEY_MAX_KM, "km")
+            else:
+                max_length_km = DEFAULT_SURVEY_MAX_KM
         prefix_path = Path(output_prefix).expanduser()
         if output_dir:
             out_dir = Path(output_dir)

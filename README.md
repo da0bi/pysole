@@ -154,7 +154,7 @@ pip install -e .
 <a id="json-configuration"></a>
 ## JSON Configuration File
 
-All execution options can be fully defined in a single JSON configuration file, which by default is named `pysole.json`. Unknown keys in the configuration file never stop a `PySole` run - they are reported in a single warning and ignored.
+All execution options can be fully defined in a single JSON configuration file, which by default is named `pysole.json`. Whenever an optional parameter key or entire section is omitted from the JSON file, `PySole` automatically populates it with its default value and continues without error. This is, however, not true for the `survey_data_path` key - if this is left empty, or totally omitted, the `Survey Planner` is automatically started - see [here](docs/drift_analyzer_&_survey_planner.md) for details. Unknown keys in the configuration file never stop a `PySole` run - they are reported in a single warning and ignored.
 
 ```json
 {
@@ -466,7 +466,7 @@ To guarantee numerical stability during matrix decomposition, diagonal Tikhonov 
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Drift Models
-In principle, the `Drift Analyzer` can be activated for pre- and/or post-migration Kriging and provides automated ranking of candidate Universal Kriging drift models using quantitative statistical metrics - see [here](docs/drift_analyzer_&_survey_planner.md) for details. However, statistical rankings should not replace physical judgment. Users are therefore encouraged to check the governing assumptions and spatial behavior of whichever drift model they consider applying.
+In principle, the `Drift Analyzer` can be activated for pre- and/or post-migration Kriging and provides automated ranking of the available Universal Kriging drift models using quantitative statistical metrics - see [here](docs/drift_analyzer_&_survey_planner.md) for details. However, statistical rankings should not replace physical judgment. Users are therefore encouraged to check the governing assumptions and spatial behavior of whichever drift model they consider applying.
 
 `PySole` provides the following **Single Drift Models**:
 
@@ -477,7 +477,7 @@ In principle, the `Drift Analyzer` can be activated for pre- and/or post-migrati
    $$U(x,y) = \sin(\alpha_{\text{opt}}(x,y))^{-1}$$
    </p>
 
-   Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute $\tau_{\text{b}}$ values. The custom physical SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps ultra-low slope angles prior to computing the inverse-sine drift, preventing matrix singularities. Just use it with `interpolation_target`: `"T"`, or `"D"` to avoid double-scaling artifacts .
+   Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute $\tau_{\text{b}}$ values. The SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps low slope angles prior to computing the inverse-sine drift, preventing matrix singularities. Just use it with `interpolation_target`: `"T"`, or `"D"` to avoid double-scaling artifacts .
 
 - **Surface Elevation Drift Model (`["z_dem"]`)**:
    Uses the DEM surface elevation $Z_{\text{dem}}(x,y)$ as a spatial drift variable:
@@ -515,10 +515,14 @@ In principle, the `Drift Analyzer` can be activated for pre- and/or post-migrati
 
    <i>This captures regional spatial bends, ice cap domes, or radial thickness distributions across the entire map space.</i>
 
-- **No Drift (Ordinary Kriging)**:
-   `method: "ordinary"` assumes a constant local spatial mean (no external drift). Inside a `Drift Analyzer` suite this candidate is written as one nested empty list, e.g. `[[], "sia", "z_dem"]`. A top-level `drift_terms: []` is not accepted - omit the terms with `null` instead.
+- **No Drift (`[]` - Ordinary Kriging)**:
+   Assumes a constant local spatial mean without external drift covariates, which is mathematically equivalent to Ordinary Kriging (`method: "ordinary"`). To include Ordinary Kriging in a `Drift Analyzer` candidate suite, add `[]` as an entry inside the list, e.g. `drift_terms: [[], "sia", "z_dem"]`. Ordinary Kriging is evaluated solely as a standalone candidate and is never combined with external drift terms. Note that a top-level empty list (`drift_terms: []`) is invalid and rejected with an error; use `null` to evaluate the full suite, or set `method: "ordinary"`.
 
-<br>`PySole` natively supports combining external raster drift models (`["z_dem"]`, `["curvature_dem"]`, or `["sia"]`) with polynomial spatial coordinate trends (`["quadratic_xy"]` or `["linear_xy"]`) into an augmented multi-drift Universal Kriging system.<br>
+`PySole` natively supports combining any external raster drift (`"z_dem"`, `"curvature_dem"`, or `"sia"`) with polynomial spatial coordinate trends (`"linear_xy"` or `"quadratic_xy"`) into an augmented multi-drift Universal Kriging system. When `drift_analyzer: true`:
+
+- **Default Suite (`drift_terms: null`)**: Evaluates all available single- and multi-drift combinations plus Ordinary Kriging—a total of **24 candidate models**.
+- **User-Defined Suite (e.g. `drift_terms: ["sia", "z_dem"]`)**: The Drift Analyzer automatically generates, evaluates, and ranks all possible combinations of the specified terms—in this example: `["sia"]`, `["z_dem"]`, and `["sia", "z_dem"]` (3 candidates). Adding `[]` (e.g. `drift_terms: [[], "sia", "z_dem"]`) includes Ordinary Kriging as a 4th candidate.
+<br>
 <br>`PySole` provides the following **Multi Drift Models**:
 
 **4 Multi-Raster Physical Combinations (No coordinate trend):**
@@ -709,9 +713,13 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
 
 * **Survey Planner (no survey data required):**
   ```bash
+  # Interactive mode: prompts for omitted parameters (tau_0, k_c, max-km)
+  pysole plan-survey --dem dem.tif --outline outline.geojson
+
+  # Non-interactive mode: fully defined flags (or pass --batch)
   pysole plan-survey --dem dem.tif --outline outline.geojson --kc 0.0314 --tau 100 --max-km 5 --out-dir results --format tif
   ```
-  *Computes a SIA thickness model and proposes survey tracks within a length budget.*
+  *Computes a synthetic SIA thickness model and proposes optimal GPR/seismic survey tracks within a length budget. If parameters are omitted, PySole interactively prompts with defaults in the terminal (or applies defaults in batch mode).*
 
   *See [here](docs/drift_analyzer_&_survey_planner.md) for full details and CLI options.*
 

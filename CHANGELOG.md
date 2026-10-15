@@ -5,6 +5,21 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Interactive terminal parameter setup for the Unprobed Glacier Survey Planner in API and CLI modes.
+
+### Added
+- **[Interactive Survey Planner in API & CLI] (`src/pysole/survey_planner.py`, `src/pysole/solver.py`, `src/pysole/pipeline.py`, `src/pysole/config.py`)**:
+  - The Unprobed Glacier Survey Planner now provides interactive parameter configuration when running in an interactive terminal (`sys.stdin.isatty()`).
+  - Prompts for any omitted survey planning parameters: target basal shear stress $\tau_0$ [kPa] (default `100.0` kPa = $100{,}000\text{ Pa}$), corner frequency cutoff wavenumber $k_c$ [rad/m] (default `0.0314` rad/m, $\lambda_c \approx 200\text{ m}$), and maximum survey track length budget $L_{\text{max}}$ [km] (default `5.0` km).
+  - Prompts display default values in brackets (e.g. `[default: 100.0]`). Pressing <kbd>Enter</kbd> (empty input) automatically adopts the displayed default value.
+  - Robust input validation re-prompts with descriptive guidance on non-numeric or non-positive values, and safely falls back on `EOFError`.
+  - When invoked from the CLI (`pysole plan-survey`), any parameters provided on the command line (e.g. `--tau 120`) are applied directly without prompting, while omitted parameters are prompted interactively.
+  - Added `--batch` flag to `pysole plan-survey` to enforce non-interactive execution and use default values for omitted flags without prompting.
+  - In non-interactive environments (CI, background scripts, piped streams) or when `interactive=False` / `--batch` is specified, prompts are bypassed and defaults are applied automatically without blocking.
+  - Automated dispatch via `run_from_config()` or `Solver.run_pipeline()` when `inputs.survey_data_path` is `null`/omitted seamlessly inherits interactive terminal prompting.
+
 ## [0.5.1] - 2026-10-14
 
 Progress display for the Drift Analyzer and a CI fix.

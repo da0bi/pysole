@@ -2162,13 +2162,14 @@ class Solver:
 
     def plan_survey(
         self,
-        kc: float = 0.0314,
-        tau_0: float = 100e3,
-        max_length_km: float = 5.0,
+        kc: float | None = None,
+        tau_0: float | None = None,
+        max_length_km: float | None = None,
         output_prefix: str | None = None,
         output_dir: str | Path | None = None,
         plots_dir: str | Path | None = None,
         output_format: str | None = None,
+        interactive: bool | None = None,
     ) -> dict[str, Any]:
         """Executes forward survey planning for unprobed glaciers using synthetic SIA modeling.
 
@@ -2180,12 +2181,12 @@ class Solver:
 
         Parameters
         ----------
-        kc : float, default 0.0314
-            Spatial cutoff wavenumber k_c [rad/m] for filtering surface slopes (default corresponds to lambda_c = 200 m).
-        tau_0 : float, default 100e3
-            Assumed target basal shear stress threshold [Pa] (100 kPa = 100,000 Pa).
-        max_length_km : float, default 5.0
-            Maximum cumulative distance per survey loop [km].
+        kc : float, optional
+            Spatial cutoff wavenumber k_c [rad/m] for filtering surface slopes (default: 0.0314 rad/m, lambda_c = 200 m).
+        tau_0 : float, optional
+            Assumed target basal shear stress threshold [Pa] (default: 100 kPa = 100,000 Pa).
+        max_length_km : float, optional
+            Maximum cumulative distance per survey loop [km] (default: 5.0 km).
         output_prefix : str, optional
             Filename prefix for exported survey track files (GPX, GeoJSON, CSV).
         output_dir : str or Path, optional
@@ -2194,6 +2195,9 @@ class Solver:
             Output filesystem directory for diagnostic planning maps.
         output_format : str, optional
             Format for synthetic raster export ('tif', 'asc').
+        interactive : bool, optional
+            If True and running in an interactive terminal, prompts for any omitted parameters.
+            If None, defaults to False in batch mode and True otherwise.
 
         Returns
         -------
@@ -2222,6 +2226,9 @@ class Solver:
         if isinstance(fmt, list):
             fmt = fmt[0]
 
+        if interactive is None:
+            interactive = not getattr(self, "is_batch_mode", False)
+
         planner = SurveyPlanner(
             dem=self.dem_grid,
             outline=self.outline_mask,
@@ -2240,11 +2247,13 @@ class Solver:
             output_dir=out_d,
             plots_dir=plots_d,
             output_format=fmt,
+            interactive=interactive,
         )
 
     def run_pipeline(
         self,
         survey_data_path: str | Path | os.PathLike | None = None,
+        interactive: bool | None = None,
     ) -> BedrockMap:
         """Executes the complete 5-step PySole glaciological workflow.
 
@@ -2261,6 +2270,9 @@ class Solver:
         ----------
         survey_data_path : str, Path, or os.PathLike, optional
             Path to survey observation file. Overrides configured survey_data_path attribute.
+        interactive : bool, optional
+            Whether to prompt interactively on the terminal. If None, automatically determined
+            by batch mode and terminal capabilities.
 
         Returns
         -------
@@ -2279,7 +2291,8 @@ class Solver:
         survey_data_path = self.survey_data_path or inputs.get("survey_data_path")
         if not survey_data_path:
             logger.info("[INFO] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
-            res = self.plan_survey()
+            is_interactive = not getattr(self, "is_batch_mode", False) if interactive is None else bool(interactive)
+            res = self.plan_survey(interactive=is_interactive)
             return BedrockMap(grid=res["sia_modelled_depth"], bounds=self.bounds, crs=self.meta.get("crs"), transform=self.meta.get("transform"), name="sia_modelled_depth")
 
         cfg_name = getattr(self, "config_path", "pysole.json")

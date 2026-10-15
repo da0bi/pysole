@@ -746,9 +746,10 @@ def main_cli() -> None:
     plan_parser = argparse.ArgumentParser(prog="pysole plan-survey", description="Run the unprobed glacier survey planner.")
     plan_parser.add_argument("--dem", required=True, help="Path to surface DEM raster.")
     plan_parser.add_argument("--outline", default=None, help="Path to glacier boundary outline.")
-    plan_parser.add_argument("--kc", type=float, default=0.0314, help="FFT corner wavenumber cutoff k_c [rad/m] (default: 0.0314 rad/m, cutoff wavelength lambda_c ≈ 200m).")
-    plan_parser.add_argument("--tau", type=float, default=100.0, help="Target basal shear stress tau_0 in kPa.")
-    plan_parser.add_argument("--max-km", type=float, default=5.0, help="Maximum total survey length budget in km.")
+    plan_parser.add_argument("--kc", type=float, default=None, help="FFT corner wavenumber cutoff k_c [rad/m] (default: 0.0314 rad/m, cutoff wavelength lambda_c ≈ 200m).")
+    plan_parser.add_argument("--tau", type=float, default=None, help="Target basal shear stress tau_0 in kPa (default: 100.0 kPa).")
+    plan_parser.add_argument("--max-km", type=float, default=None, help="Maximum total survey length budget in km (default: 5.0 km).")
+    plan_parser.add_argument("--batch", action="store_true", help="Non-interactive batch mode (accept defaults for omitted parameters without prompting).")
     plan_parser.add_argument("--prefix", default="final", help="Output prefix.")
     plan_parser.add_argument("--out-dir", default=None, help="Output directory.")
     plan_parser.add_argument("--plots-dir", default=None, help="Plots output directory.")
@@ -772,14 +773,17 @@ def main_cli() -> None:
         if args.subcommand == "plan-survey":
             from .survey_planner import SurveyPlanner
             planner = SurveyPlanner(dem=plan_args.dem, outline=plan_args.outline)
+            is_interactive = not plan_args.batch and sys.stdin.isatty()
+            tau_0_pa = plan_args.tau * 1000.0 if plan_args.tau is not None else None
             planner.plan_survey(
                 kc=plan_args.kc,
-                tau_0=plan_args.tau * 1000.0,
+                tau_0=tau_0_pa,
                 max_length_km=plan_args.max_km,
                 output_prefix=plan_args.prefix,
                 output_dir=plan_args.out_dir,
                 plots_dir=plan_args.plots_dir,
                 output_format=plan_args.format,
+                interactive=is_interactive,
             )
             sys.exit(0)
 
