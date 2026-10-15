@@ -42,9 +42,9 @@ def _prompt_survey_parameter(
             val = float(raw)
             if np.isfinite(val) and val > 0:
                 return val
-            print(f"[SurveyPlanner] Value must be a positive number (> 0). Got {val}.")
+            print(f"[SurveyPlanner] Value must be a positive number (> 0). Got {val}.", flush=True)
         except ValueError:
-            print(f"[SurveyPlanner] '{raw}' is not a valid number. Please enter a positive number or press Enter for default.")
+            print(f"[SurveyPlanner] '{raw}' is not a valid number. Please enter a positive number or press Enter for default.", flush=True)
 
 
 @dataclass
@@ -165,6 +165,40 @@ class SurveyPlanner:
         self.outline_mask = load_outline(outline, self.dem, self.meta)
         self.ice_density = ice_density
         self.g = g
+        self._transformer: Any = None
+        self._crs_warned: bool = False
+        self._transform_warned: bool = False
+
+    def _get_wgs84_transformer(self) -> Any:
+        """Returns a cached pyproj.Transformer to EPSG:4326, or None if CRS is missing/invalid."""
+        if self._transformer is None:
+            if self.crs is None:
+                if not self._crs_warned:
+                    logger.warning("No CRS metadata provided for survey tracks. Exporting projected metric coordinates.")
+                    self._crs_warned = True
+            else:
+                try:
+                    from pyproj import Transformer
+                    self._transformer = Transformer.from_crs(self.crs, "EPSG:4326", always_xy=True)
+                except Exception as e:
+                    if not self._crs_warned:
+                        logger.warning(f"Failed to initialize WGS84 transformer for CRS {self.crs!r}: {e}. Exporting raw coordinates.")
+                        self._crs_warned = True
+        return self._transformer
+
+    def _transform_coords_to_wgs84(self, coords: np.ndarray) -> np.ndarray:
+        """Transforms projected metric coordinates [X, Y] to WGS84 [lon, lat] using the cached transformer."""
+        transformer = self._get_wgs84_transformer()
+        if transformer is None:
+            return coords
+        try:
+            lon, lat = transformer.transform(coords[:, 0], coords[:, 1])
+            return np.column_stack([lon, lat])
+        except Exception as e:
+            if not self._transform_warned:
+                logger.warning(f"Failed to transform coordinates to WGS84 (EPSG:4326): {e}. Exporting raw coordinates.")
+                self._transform_warned = True
+            return coords
 
     def compute_synthetic_sia_depth(
         self,
@@ -332,7 +366,7 @@ class SurveyPlanner:
         """
         features = []
         for trk in tracks:
-            wgs_coords = _transform_coords_to_wgs84(trk.coordinates, self.crs)
+            wgs_coords = self._transform_coords_to_wgs84(trk.coordinates)
             features.append({
                 "type": "Feature",
                 "geometry": {
@@ -380,7 +414,7 @@ class SurveyPlanner:
             '<gpx version="1.1" creator="PySole SurveyPlanner" xmlns="http://www.topografix.com/GPX/1/1">',
         ]
         for trk in tracks:
-            wgs_coords = _transform_coords_to_wgs84(trk.coordinates, self.crs)
+            wgs_coords = self._transform_coords_to_wgs84(trk.coordinates)
             lines.append(f'  <trk><name>{trk.track_id}</name><trkseg>')
             for pt in wgs_coords:
                 lines.append(f'    <trkpt lat="{pt[1]:.6f}" lon="{pt[0]:.6f}"></trkpt>')

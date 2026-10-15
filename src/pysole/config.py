@@ -773,7 +773,7 @@ def main_cli() -> None:
         if args.subcommand == "plan-survey":
             from .survey_planner import SurveyPlanner
             planner = SurveyPlanner(dem=plan_args.dem, outline=plan_args.outline)
-            is_interactive = not plan_args.batch and sys.stdin.isatty()
+            is_interactive = not plan_args.batch
             tau_0_pa = plan_args.tau * 1000.0 if plan_args.tau is not None else None
             planner.plan_survey(
                 kc=plan_args.kc,

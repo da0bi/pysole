@@ -41,6 +41,33 @@ RASTER_DRIFT_TERMS: tuple[str, ...] = ("sia", "z_dem", "curvature_dem")
 DEFAULT_REGRESSION_DRIFT_TERMS: tuple[str, ...] = ("sia", "z_dem", "curvature_dem", "quadratic_xy")
 """Default feature covariates for method 'regression' when drift_terms is None (all primitives with quadratic_xy providing coordinates)."""
 
+FALLBACK_QUADRATIC_NOTICE: str = (
+    "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
+    "which contains the linear terms [x, y]."
+)
+
+
+def prune_redundant_drift_terms(terms: list[str]) -> tuple[list[str], bool]:
+    """
+    Removes 'linear_xy' from a single model term list if 'quadratic_xy' is also present,
+    as 'quadratic_xy' already fits the linear plane [x, y].
+
+    Parameters
+    ----------
+    terms : list of str
+        Primitive drift terms for a single model.
+
+    Returns
+    -------
+    pruned_terms : list of str
+        The terms with 'linear_xy' removed if 'quadratic_xy' is present.
+    was_pruned : bool
+        True if 'linear_xy' was removed because 'quadratic_xy' was present.
+    """
+    if "linear_xy" in terms and "quadratic_xy" in terms:
+        return [t for t in terms if t != "linear_xy"], True
+    return list(terms), False
+
 KRIGING_METHODS: tuple[str, ...] = ("ordinary", "universal", "regression")
 KRIGING_ENGINES: tuple[str, ...] = ("native", "pykrige")
 
@@ -254,8 +281,7 @@ class DriftPlan:
         if self.method == "ordinary":
             return "Ordinary Kriging"
         if self.method == "regression":
-            covs = format_drift_name(self.terms) if self.terms else "x, y"
-            return f"Regression Kriging (covariates: {covs})"
+            return f"Regression Kriging (covariates: {format_drift_name(self.terms)})"
         if self.analyze:
             return f"Universal Kriging (drift analyzer on {len(self.suite)} candidate models)"
         return f"Universal Kriging (drift: {format_drift_name(self.terms)})"
@@ -292,14 +318,10 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
         if drift_terms is None:
             terms = list(DEFAULT_REGRESSION_DRIFT_TERMS)
         else:
-            terms = parse_drift_terms(drift_terms)[0]
-            if "linear_xy" in terms and "quadratic_xy" in terms:
-                terms = [t for t in terms if t != "linear_xy"]
-                notices.append((
-                    "warning",
-                    "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
-                    "which contains the linear terms [x, y].",
-                ))
+            raw_terms = parse_drift_terms(drift_terms)[0]
+            terms, pruned = prune_redundant_drift_terms(raw_terms)
+            if pruned:
+                notices.append(("warning", FALLBACK_QUADRATIC_NOTICE))
         if engine_clean == "native":
             notices.append((
                 "info",
@@ -321,15 +343,11 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
                 "Kriging method 'universal' requires drift_terms (a list of drift terms) or an enabled "
                 "drift_analyzer - specify drift_terms or use method 'ordinary'."
             )
-        terms, _ = parse_drift_terms(drift_terms)
+        raw_terms, _ = parse_drift_terms(drift_terms)
+        terms, pruned = prune_redundant_drift_terms(raw_terms)
         notices = list(slow_universal)
-        if "linear_xy" in terms and "quadratic_xy" in terms:
-            terms = [t for t in terms if t != "linear_xy"]
-            notices.append((
-                "warning",
-                "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
-                "which contains the linear terms [x, y].",
-            ))
+        if pruned:
+            notices.append(("warning", FALLBACK_QUADRATIC_NOTICE))
         return DriftPlan(method="universal", terms=terms, notices=notices)
 
     suite = build_drift_suite(drift_terms)

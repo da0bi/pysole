@@ -19,8 +19,16 @@ import numpy as np
 from scipy.interpolate import griddata, RBFInterpolator, RegularGridInterpolator
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 from sklearn.ensemble import RandomForestRegressor
-from .drift import DEFAULT_REGRESSION_DRIFT_TERMS, RASTER_DRIFT_TERMS, normalize_engine, normalize_method, parse_drift_terms
 from .raster import GridGeometry
+from .drift import (
+    DEFAULT_REGRESSION_DRIFT_TERMS,
+    FALLBACK_QUADRATIC_NOTICE,
+    RASTER_DRIFT_TERMS,
+    normalize_engine,
+    normalize_method,
+    parse_drift_terms,
+    prune_redundant_drift_terms,
+)
 from .logging import logger, get_progress_bar
 from .smoothing import compute_gradients, compute_surface_curvature
 from .variogram import resolve_native_variogram_model
@@ -1001,25 +1009,23 @@ def kriging_interpolation(
             logger.warning("Kriging method 'ordinary' ignores drift_terms and external drift grids.")
         valid_terms = []
         external_drift_grids = {}
-    elif method_clean == "universal":
-        if "linear_xy" in valid_terms and "quadratic_xy" in valid_terms:
-            valid_terms = [t for t in valid_terms if t != "linear_xy"]
-            logger.warning(
-                "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
-                "which contains the linear terms [x, y]."
-            )
     elif method_clean == "regression":
         if drift_terms is None and not external_drift_grids:
             if dem_grid is not None:
                 valid_terms = list(DEFAULT_REGRESSION_DRIFT_TERMS)
             else:
+                logger.warning(
+                    "DEM grid is missing for Regression Kriging default drift terms; "
+                    "falling back to coordinate regression ['linear_xy']."
+                )
                 valid_terms = ["linear_xy"]
-        elif "linear_xy" in valid_terms and "quadratic_xy" in valid_terms:
-            valid_terms = [t for t in valid_terms if t != "linear_xy"]
-            logger.warning(
-                "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
-                "which contains the linear terms [x, y]."
-            )
+        valid_terms, pruned = prune_redundant_drift_terms(valid_terms)
+        if pruned:
+            logger.warning(FALLBACK_QUADRATIC_NOTICE)
+    elif method_clean == "universal":
+        valid_terms, pruned = prune_redundant_drift_terms(valid_terms)
+        if pruned:
+            logger.warning(FALLBACK_QUADRATIC_NOTICE)
 
     # Raster drift covariates (SIA 1/sin(alpha), DEM elevation z_dem, surface curvature_dem)
     external_drift_grids = build_drift_grids(
@@ -1202,15 +1208,11 @@ class DriftBasis:
         geometry: GridGeometry | None = None,
         drift_grids: dict[str, np.ndarray] | None = None,
     ):
-        self.drift_terms = parse_drift_terms(drift_terms)[0] if drift_terms else []
+        raw_terms = parse_drift_terms(drift_terms)[0] if drift_terms else []
+        self.drift_terms, pruned = prune_redundant_drift_terms(raw_terms)
+        if pruned:
+            logger.warning(FALLBACK_QUADRATIC_NOTICE)
         self.primitives: set[str] = set(self.drift_terms)
-        if "linear_xy" in self.primitives and "quadratic_xy" in self.primitives:
-            logger.warning(
-                "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
-                "which contains the linear terms [x, y]."
-            )
-            self.drift_terms = [t for t in self.drift_terms if t != "linear_xy"]
-            self.primitives.remove("linear_xy")
 
         self.column_names: list[str] = []
         self.evaluators: list[Any] = []

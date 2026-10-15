@@ -26,8 +26,14 @@ Interactive terminal parameter setup for the Unprobed Glacier Survey Planner in 
   - Users who explicitly desire coordinate-only regression can pass `drift_terms: ["linear_xy"]` (spatial coordinates $x, y$).
   - If both `"linear_xy"` and `"quadratic_xy"` are provided in `drift_terms`, `"linear_xy"` is dropped with a warning (falling back to `"quadratic_xy"`).
 - **[Warning and fallback for `drift_terms: ["linear_xy", "quadratic_xy"]`] (`src/pysole/drift.py`, `src/pysole/interpolation.py`)**:
-  - In Universal Kriging without `drift_analyzer` (`drift_analyzer: false`), specifying both `"linear_xy"` and `"quadratic_xy"` in `drift_terms` now emits a warning notice that `drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] which contains the linear terms [x, y].`
-  - `"linear_xy"` is automatically dropped from the resolved plan and execution falls back cleanly to `["quadratic_xy"]` (along with any other specified drift terms), avoiding redundant linear term definitions.
+  - In Universal Kriging without `drift_analyzer` (`drift_analyzer: false`) and in Regression Kriging, specifying both `"linear_xy"` and `"quadratic_xy"` in `drift_terms` emits a warning notice that `drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] which contains the linear terms [x, y].`
+  - Centralized single-model deduplication into canonical helper `prune_redundant_drift_terms()` and shared constant `FALLBACK_QUADRATIC_NOTICE` in `src/pysole/drift.py`, eliminating duplicate logic across `resolve_drift_plan()`, `kriging_interpolation()`, and `DriftBasis.__init__()` while ensuring candidate suite generation (`build_drift_suite()`) remains completely decoupled.
+- **[Explicit warning on missing DEM for Regression Kriging] (`src/pysole/interpolation.py`)**:
+  - When `method: "regression"` is run with `drift_terms: null` (defaulting to all primitives) and `dem_grid` is not provided, an explicit warning is logged (`DEM grid is missing for Regression Kriging default drift terms; falling back to coordinate regression ['linear_xy'].`) before falling back to coordinate regression.
+- **[WGS84 coordinate export & Survey Planner streamlining] (`src/pysole/survey_planner.py`, `src/pysole/config.py`)**:
+  - `SurveyPlanner` now caches its `pyproj.Transformer` instance across track exports, avoiding per-track re-instantiations in `export_geojson()` and `export_gpx()`.
+  - Missing CRS metadata warning is logged once per survey planning execution rather than repeatedly per transect line.
+  - Added `flush=True` to terminal prompt print statements in `_prompt_survey_parameter()` and streamlined interactive argument handling in `main_cli()`.
 
 ## [0.5.1] - 2026-10-14
 
