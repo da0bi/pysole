@@ -1001,6 +1001,13 @@ def kriging_interpolation(
             logger.warning("Kriging method 'ordinary' ignores drift_terms and external drift grids.")
         valid_terms = []
         external_drift_grids = {}
+    elif method_clean == "universal":
+        if "linear_xy" in valid_terms and "quadratic_xy" in valid_terms:
+            valid_terms = [t for t in valid_terms if t != "linear_xy"]
+            logger.warning(
+                "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
+                "which contains the linear terms [x, y]."
+            )
 
     # Raster drift covariates (SIA 1/sin(alpha), DEM elevation z_dem, surface curvature_dem)
     external_drift_grids = build_drift_grids(
@@ -1185,6 +1192,13 @@ class DriftBasis:
     ):
         self.drift_terms = parse_drift_terms(drift_terms)[0] if drift_terms else []
         self.primitives: set[str] = set(self.drift_terms)
+        if "linear_xy" in self.primitives and "quadratic_xy" in self.primitives:
+            logger.warning(
+                "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
+                "which contains the linear terms [x, y]."
+            )
+            self.drift_terms = [t for t in self.drift_terms if t != "linear_xy"]
+            self.primitives.remove("linear_xy")
 
         self.column_names: list[str] = []
         self.evaluators: list[Any] = []

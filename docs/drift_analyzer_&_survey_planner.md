@@ -38,7 +38,7 @@ In `PySole`, candidate spatial covariates $f_k(\mathbf{x})$ include:
 | `method` | `drift_analyzer` | Meaning of `drift_terms` |
 | :--- | :--- | :--- |
 | `ordinary` | any | **`ordinary` overrides `drift_analyzer` and `drift_terms`**: both are ignored (the terms are not even validated); one warning is logged if either is set. The analyzer never runs for `ordinary`. |
-| `universal` | `false` | The list is **ONE multi-drift model** (all terms together). `null` or `[]` is an error ("specify drift_terms or use method ordinary"). |
+| `universal` | `false` | The list is **ONE multi-drift model** (all terms together). `null` or `[]` is an error ("specify drift_terms or use method ordinary"). If both `linear_xy` and `quadratic_xy` are specified, `linear_xy` is dropped with a warning (fallback to `["quadratic_xy"]` which contains the linear terms [x, y]). |
 | `universal` | `true` | `null`: the **default suite** (24 candidates). A list: the **suite** of all combinations of the listed terms. The winner decides the final model: the Ordinary candidate gives `ordinary`, any drift model gives `universal` with its terms. |
 | `regression` | `false` | The terms are the **Random Forest covariates** (`null`: x and y); works for every primitive. |
 | `regression` | `true` | The analyzer is skipped with a warning (it ranks Universal Kriging drift models). |

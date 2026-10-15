@@ -15,6 +15,8 @@ rejected (use ``None``).
 * ``ordinary`` overrides ``drift_analyzer`` and ``drift_terms``: both are ignored (the terms are not even
   validated) and a single warning is issued if either was set.
 * ``universal`` without analyzer: ``drift_terms`` is ONE multi-drift model and must be given.
+  If both ``linear_xy`` and ``quadratic_xy`` are specified, ``linear_xy`` is dropped with a warning (fallback to
+  ``['quadratic_xy']`` which contains the linear terms [x, y]).
 * ``universal`` with analyzer: ``drift_terms`` ``None`` evaluates the default suite (Ordinary + all drift
   models), a list evaluates all non-empty subsets of the listed primitives (never ``linear_xy`` together with
   ``quadratic_xy``) plus Ordinary if ``[]`` is nested. A suite of exactly one candidate overrides the analyzer
@@ -305,7 +307,15 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
                 "drift_analyzer - specify drift_terms or use method 'ordinary'."
             )
         terms, _ = parse_drift_terms(drift_terms)
-        return DriftPlan(method="universal", terms=terms, notices=slow_universal)
+        notices = list(slow_universal)
+        if "linear_xy" in terms and "quadratic_xy" in terms:
+            terms = [t for t in terms if t != "linear_xy"]
+            notices.append((
+                "warning",
+                "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
+                "which contains the linear terms [x, y].",
+            ))
+        return DriftPlan(method="universal", terms=terms, notices=notices)
 
     suite = build_drift_suite(drift_terms)
     if len(suite) == 1:

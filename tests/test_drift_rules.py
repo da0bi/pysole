@@ -174,6 +174,27 @@ class TestRuleTable(unittest.TestCase):
         plan = resolve_drift_plan("universal", False, ["z_dem", "sia", "linear_xy"])
         self.assertEqual((plan.method, plan.analyze, plan.terms, plan.notices), ("universal", False, ["sia", "z_dem", "linear_xy"], []))
 
+    def test_universal_without_analyzer_linear_and_quadratic_falls_back_with_warning(self):
+        plan = resolve_drift_plan("universal", False, ["linear_xy", "quadratic_xy"])
+        self.assertEqual(plan.method, "universal")
+        self.assertFalse(plan.analyze)
+        self.assertEqual(plan.terms, ["quadratic_xy"])
+        self.assertEqual(len(plan.notices), 1)
+        level, msg = plan.notices[0]
+        self.assertEqual(level, "warning")
+        self.assertEqual(
+            msg,
+            "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
+            "which contains the linear terms [x, y].",
+        )
+
+        # Order invariance and multi-term combination
+        plan_multi = resolve_drift_plan("universal", False, ["quadratic_xy", "sia", "linear_xy"])
+        self.assertEqual(plan_multi.terms, ["sia", "quadratic_xy"])
+        self.assertEqual(len(plan_multi.notices), 1)
+        self.assertEqual(plan_multi.notices[0][0], "warning")
+        self.assertIn("falling back to ['quadratic_xy']", plan_multi.notices[0][1])
+
     def test_universal_without_analyzer_needs_terms(self):
         with self.assertRaisesRegex(ConfigError, "specify drift_terms or use method 'ordinary'"):
             resolve_drift_plan("universal", False, None)
@@ -526,6 +547,16 @@ class TestKrigingPassUsesPlan(unittest.TestCase):
         self.assertEqual(kriging.call_args.kwargs["drift_terms"], ["sia", "z_dem"])
         self.assertEqual(set(kriging.call_args.kwargs["external_drift_grid"]), {"sia", "z_dem"})
 
+    def test_solver_logs_warning_for_linear_and_quadratic_terms(self):
+        with self.assertLogs("pysole", level="WARNING") as cm:
+            analyzer, kriging = self.run_pass(
+                post_kriging_method="universal",
+                post_drift_terms=["linear_xy", "quadratic_xy"],
+            )
+        analyzer.assert_not_called()
+        self.assertEqual(kriging.call_args.kwargs["drift_terms"], ["quadratic_xy"])
+        self.assertTrue(any("drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy']" in m for m in cm.output))
+
     def test_calculate_bedrock_method_override_is_validated(self):
         solver = Solver(dem=self.dem, bounds=BOUNDS, survey_data_type="depth",
                         output_dir=os.path.join(self._tmp.name, "out"))
@@ -592,6 +623,12 @@ class TestLowLevelEngineRules(unittest.TestCase):
         slope = np.full((12, 12), 0.2) + 0.01 * np.arange(12)[None, :]
         res = self.krige(method="universal", drift_terms=["sia"], opt_slope_grid=slope)
         self.assertTrue(np.all(np.isfinite(res.bedrock_grid)))
+
+    def test_universal_linear_and_quadratic_falls_back_with_warning(self):
+        with self.assertLogs("pysole", level="WARNING") as cm:
+            res = self.krige(method="universal", drift_terms=["linear_xy", "quadratic_xy"])
+        self.assertTrue(any("drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy']" in m for m in cm.output))
+        self.assertEqual(res.bedrock_grid.shape, self.geom.shape)
 
 
 class TestNoLegacyNamesInSource(unittest.TestCase):

@@ -20,6 +20,11 @@ Interactive terminal parameter setup for the Unprobed Glacier Survey Planner in 
   - In non-interactive environments (CI, background scripts, piped streams) or when `interactive=False` / `--batch` is specified, prompts are bypassed and defaults are applied automatically without blocking.
   - Automated dispatch via `run_from_config()` or `Solver.run_pipeline()` when `inputs.survey_data_path` is `null`/omitted seamlessly inherits interactive terminal prompting.
 
+### Changed
+- **[Warning and fallback for `drift_terms: ["linear_xy", "quadratic_xy"]`] (`src/pysole/drift.py`, `src/pysole/interpolation.py`)**:
+  - In Universal Kriging without `drift_analyzer` (`drift_analyzer: false`), specifying both `"linear_xy"` and `"quadratic_xy"` in `drift_terms` now emits a warning notice that `drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] which contains the linear terms [x, y].`
+  - `"linear_xy"` is automatically dropped from the resolved plan and execution falls back cleanly to `["quadratic_xy"]` (along with any other specified drift terms), avoiding redundant linear term definitions.
+
 ## [0.5.1] - 2026-10-14
 
 Progress display for the Drift Analyzer and a CI fix.
