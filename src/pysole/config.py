@@ -624,7 +624,7 @@ def load_config(
     log_file = resolve_path("pysole.log", output_dir=output_dir, survey_data_path=survey_data_path, config_path=cfg_file)
 
     eff_log_level = log_level or os.environ.get("PYSOLE_LOG_LEVEL") or inputs.get("log_level", "INFO")
-    setup_logging(log_file=log_file, log_level=eff_log_level)
+    setup_logging(log_file=log_file, log_level=eff_log_level, log_init_msg=False)
     warn_unknown_config_keys(unknown_keys)  # after logging setup, so the warning reaches the log file
     return config
 
@@ -772,6 +772,9 @@ def main_cli() -> None:
     try:
         if args.subcommand == "plan-survey":
             from .survey_planner import SurveyPlanner
+            from .logging import print_welcome_banner
+            if not plan_args.batch:
+                print_welcome_banner()
             planner = SurveyPlanner(dem=plan_args.dem, outline=plan_args.outline)
             is_interactive = not plan_args.batch
             tau_0_pa = plan_args.tau * 1000.0 if plan_args.tau is not None else None

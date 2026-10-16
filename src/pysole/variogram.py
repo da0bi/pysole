@@ -19,7 +19,7 @@ from .smoothing import (
     fft_gaussian_smooth_precomputed,
 )
 from .raster import GridGeometry
-from .logging import logger, get_progress_bar
+from .logging import logger, get_progress_bar, log_section_header
 
 
 def compute_cutoff_wavelength(kc: float) -> float:
@@ -684,6 +684,26 @@ def optimize_bss_variance(
 
     effective_n_cores = (os.cpu_count() or 1) if (n_cores == -1 or n_cores is None) else max(1, int(n_cores))
 
+    # Memory guard: large grids require significant transient buffer allocations during
+    # 2D inverse FFT and slope computation. Cap worker concurrency so peak memory
+    # stays bounded within standard workstation RAM budgets.
+    grid_cells = dem.size
+    if grid_cells > 8_000_000:
+        max_safe_workers = 2
+    elif grid_cells > 4_000_000:
+        max_safe_workers = 4
+    elif grid_cells > 1_000_000:
+        max_safe_workers = 8
+    else:
+        max_safe_workers = effective_n_cores
+
+    eval_workers = min(effective_n_cores, max_safe_workers)
+    if eval_workers < effective_n_cores:
+        logger.info(
+            f"   [BSS Memory Guard] Capping concurrent FFT optimization workers to {eval_workers} "
+            f"(from {effective_n_cores} requested) for large grid ({grid_cells:,} cells) to maintain safe memory footprint."
+        )
+
     M_rows, N_cols = dem.shape
     L_max = max(abs(dx) * N_cols, abs(dy) * M_rows)
     cellsize_min = min(abs(dx), abs(dy))
@@ -839,6 +859,15 @@ def optimize_bss_variance(
 
         return (kc_val, kc_key, smoothed_dem, smoothed_slope, var_result, mean_product)
 
+    if interactive:
+        if "1" in stage_name or "pre" in stage_name.lower():
+            stage_desc = "STAGE 1: PRE-MIGRATION"
+        elif "2" in stage_name or "post" in stage_name.lower():
+            stage_desc = "STAGE 2: POST-MIGRATION"
+        else:
+            stage_desc = stage_name.upper()
+        log_section_header(f"INTERACTIVE BSS VARIOGRAM OPTIMIZATION ({stage_desc})")
+
     go_on = True
     while go_on:
         if interactive:
@@ -946,15 +975,13 @@ def optimize_bss_variance(
         if range_fix is None:
             range_fix = 1000.0
 
-        # Step 2: Evaluate all kc_values in streaming batches of n_cores threads. Each result is reduced
-        # immediately into the running optimum, so peak memory stays O(n_cores) instead of O(n_steps)
-        # (every evaluation owns a full-size smoothed DEM + slope grid). Per-kc grids are only retained
-        # when interactive re-use of the cache is requested.
-        keep_all_grids = bool(interactive)
-
+        # Step 2: Evaluate all kc_values in streaming batches of eval_workers threads. Each result is reduced
+        # immediately into the running optimum, so peak memory stays O(eval_workers) instead of O(n_steps)
+        # (every evaluation owns a full-size smoothed DEM + slope grid). Non-optimal trial grids are immediately
+        # discarded to guarantee strict O(1) grid retention across both interactive and batch runs.
         def _stream_kc_results():
-            batch = max(1, effective_n_cores)
-            with ThreadPoolExecutor(max_workers=effective_n_cores) as executor:
+            batch = max(1, eval_workers)
+            with ThreadPoolExecutor(max_workers=eval_workers) as executor:
                 for i0 in range(0, len(valid_kc_list), batch):
                     yield from executor.map(_eval_single_kc, valid_kc_list[i0:i0 + batch])
 
@@ -969,9 +996,6 @@ def optimize_bss_variance(
                 continue
 
             kc_val, kc_key, smoothed_dem, smoothed_slope, var_result, mean_product = res
-            if keep_all_grids:
-                all_smoothed_dems[kc_key] = smoothed_dem
-                all_smoothed_slopes[kc_key] = smoothed_slope
 
             if len(var_result["val"]) > 0:
                 if mean_product != 0 and not np.isnan(mean_product):
@@ -1037,11 +1061,10 @@ def optimize_bss_variance(
         logger.warning(f"BSS optimization search found no valid minimum variance. Defaulting k_c to {fallback_kc:.4f} rad/m.")
         best_kc = fallback_kc
 
-    # Prune non-optimal smoothed DEM cache in non-interactive mode to minimize memory footprint
-    if not interactive:
-        best_key = round(float(best_kc), 6)
-        all_smoothed_dems = {best_key: best_dem_grid} if best_dem_grid is not None else {}
-        all_smoothed_slopes = {best_key: best_slope_grid} if best_slope_grid is not None else {}
+    # Retain strictly the single optimal smoothed DEM and slope in the returned result (O(1) grids)
+    best_key = round(float(best_kc), 6) if best_kc is not None else 0.0
+    all_smoothed_dems = {best_key: best_dem_grid} if best_dem_grid is not None else {}
+    all_smoothed_slopes = {best_key: best_slope_grid} if best_slope_grid is not None else {}
 
     if best_kc is not None and (np.isclose(best_kc, kc_max_val, rtol=1e-3) or np.isclose(best_kc, kc_min_val, rtol=1e-3)):
         logger.warning(

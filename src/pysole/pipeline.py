@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from .config import load_config, resolve_output_dir, configured_output_dir
-from .logging import logger, setup_logging
+from .logging import logger, setup_logging, print_welcome_banner
 from .raster import BedrockMap
 
 
@@ -107,6 +107,7 @@ def run_from_config(
     is_batch: bool = False,
     drift_analyzer: bool | None = None,
     survey_profile_column: str | None = None,
+    show_banner: bool = True,
 ) -> BedrockMap:
     """
     Executes the complete PySole glaciological processing pipeline from a configuration file.
@@ -124,6 +125,8 @@ def run_from_config(
         the configuration); it only takes effect with method 'universal'. None keeps the configured values.
     survey_profile_column : str, optional
         Survey profile column name for spatial cross-validation.
+    show_banner : bool, default True
+        If True and not in batch mode, prints the centered PySole welcome banner to stdout.
 
     Returns
     -------
@@ -137,6 +140,9 @@ def run_from_config(
     >>> print(bedrock.shape, bedrock.bounds)
     >>> bedrock.save("wuk_final_bedrock.tif")
     """
+    if show_banner and not is_batch:
+        print_welcome_banner()
+
     from .solver import Solver
 
     config_file = Path(config_path)
@@ -156,14 +162,18 @@ def run_from_config(
     )
     log_file = output_dir / "pysole.log"
 
-    setup_logging(log_file=log_file, log_level=log_lvl)
+    setup_logging(log_file=log_file, log_level=log_lvl, log_init_msg=False)
 
     try:
         survey_data_path = inputs_cfg.get("survey_data_path")
         if survey_data_path is None:
+            logger.info("=" * 80)
+            logger.info(f"        STARTING PYSOLE UNPROBED GLACIER SURVEY PLANNER ({config_file.resolve()})")
+            logger.info("=" * 80)
+            logger.info(f"Initialized PySole log file at: {log_file.resolve()}")
             logger.info("   [INFO] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
 
-            solver = Solver.from_config(config_file, log_level=log_level, drift_analyzer=drift_analyzer)
+            solver = Solver.from_config(cfg, config_file=config_file, log_level=log_level, drift_analyzer=drift_analyzer)
             if is_batch:
                 solver.show_progress = False
                 solver.is_batch_mode = True
@@ -184,8 +194,9 @@ def run_from_config(
         logger.info("=" * 80)
         logger.info(f"        STARTING NEW PYSOLE BEDROCK TOPOGRAPHY CALCULATION ({config_file.resolve()})")
         logger.info("=" * 80)
+        logger.info(f"Initialized PySole log file at: {log_file.resolve()}")
 
-        solver = Solver.from_config(config_file, log_level=log_level, drift_analyzer=drift_analyzer)
+        solver = Solver.from_config(cfg, config_file=config_file, log_level=log_level, drift_analyzer=drift_analyzer)
         if is_batch:
             solver.show_progress = False
             solver.is_batch_mode = True
@@ -200,7 +211,11 @@ def run_from_config(
         interactive_mig = not is_batch and sys.stdin.isatty() and bool(mig_cfg.get("interactive_migration", True))
         interactive_opt = not is_batch and sys.stdin.isatty() and bool(opt_cfg.get("interactive_optimization", True))
 
-        solver.migrate_eikonal(velocity=mig_cfg.get("velocity", 0.16), interactive=interactive_mig)
+        solver.migrate_eikonal(
+            velocity=mig_cfg.get("velocity", 0.16),
+            interactive=interactive_mig,
+            interactive_optimization=interactive_opt,
+        )
         solver.optimize_bss(interactive=interactive_opt)
         solver.calculate_bedrock(interactive=interactive_opt)
         final_raster = solver.finalize_bedrock(

@@ -33,7 +33,7 @@ from .drift import (
 )
 from .smoothing import compute_gradients, precompute_fft_grid, fft_gaussian_smooth_precomputed, compute_surface_curvature
 from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir, resolve_plots_dir, configured_output_dir, sanitize_config, warn_unknown_config_keys, validate_memory_fraction
-from .logging import logger
+from .logging import logger, log_section_header
 from .drift_analyzer import FAILED_AICC, CandidateDriftResult, DriftAnalyzer
 from .survey_planner import SurveyPlanner
 import sys
@@ -989,6 +989,7 @@ class Solver:
         config_path: str | Path | os.PathLike | dict[str, Any] = "pysole.json",
         log_level: str | None = None,
         drift_analyzer: bool | None = None,
+        config_file: str | Path | os.PathLike | None = None,
     ) -> "Solver":
         """Instantiates and configures a Solver pipeline from a JSON configuration file.
 
@@ -1004,6 +1005,8 @@ class Solver:
         drift_analyzer : bool, optional
             If True, enables the drift analyzer of both Kriging stages (the ``--drift-analyzer`` command-line
             flag); it needs method 'universal'. None keeps the configured values.
+        config_file : str, Path, or os.PathLike, optional
+            Explicit filesystem path to configuration file when config_path is a preloaded dictionary.
 
         Returns
         -------
@@ -1020,6 +1023,8 @@ class Solver:
         """
         from .config import load_config
         cfg = load_config(config_path, log_level=log_level, drift_analyzer=drift_analyzer)
+        resolved_cfg_file = config_file or (config_path if not isinstance(config_path, dict) else None)
+        cfg_path_str = str(resolved_cfg_file) if resolved_cfg_file is not None else None
         inputs = cfg.get("inputs", {})
         
         dem_path = inputs.get("dem_path")
@@ -1094,14 +1099,20 @@ class Solver:
             output_dir=configured_output_dir(cfg),
             survey_data_path=inputs.get("survey_data_path"),
             survey_profile_column=inputs.get("survey_profile_column"),
-            config_path=config_path if not isinstance(config_path, dict) else None,
+            config_path=cfg_path_str,
             show_progress=show_progress_val,
+            config=cfg,
         )
         solver.config = cfg
-        solver.config_path = str(config_path)
+        solver.config_path = cfg_path_str
         return solver
 
-    def get_sample_points(self, stage: str, target_type: str = "P") -> np.ndarray:
+    def get_sample_points(
+        self,
+        stage: str,
+        target_type: str = "P",
+        interactive: bool | None = None,
+    ) -> np.ndarray:
         """Retrieves or builds cached observation points for Kriging interpolation.
 
         Guarantees that surface slope interpolation and multiplication for the basal
@@ -1117,6 +1128,9 @@ class Solver:
               - 'P' : Basal shear stress product (T * sin(alpha) or D * sin(alpha)).
               - 'T' : Direct signal traveltime [ns].
               - 'D' : Direct ice thickness [m].
+        interactive : bool or None, optional
+            Whether to run BSS optimization interactively if slopes have not yet been evaluated.
+            If None, inferred from configuration and terminal mode.
 
         Returns
         -------
@@ -1149,9 +1163,10 @@ class Solver:
         if pts is None:
             raise ValueError(f"No survey/migrated points available to create sample points for stage '{stage_key}'.")
 
-        if self.opt_slope is None:
+        if target_upper == "P" and self.opt_slope is None:
             prefix = "01_" if stage_key == "pre_migration" else "03_"
-            self.optimize_bss(prefix=prefix)
+            is_inter = bool(interactive) and not self.is_batch_mode and sys.stdin.isatty()
+            self.optimize_bss(interactive=is_inter, prefix=prefix)
 
         val_col = 3 if pts.shape[1] >= 4 else 2
         has_prof = (pts.shape[1] >= 5)
@@ -1260,6 +1275,7 @@ class Solver:
         zero_boundary: bool,
         pass_name: str = "Pass 1: Pre-Migration",
         return_variance: bool = True,
+        interactive_optimization: bool | None = None,
     ) -> KrigingResult:
         """Executes a unified Kriging interpolation pass for direct or BSS product targets.
 
@@ -1286,6 +1302,8 @@ class Solver:
             Descriptive pass label for logging.
         return_variance : bool, default True
             If True, computes formal Kriging estimation variance.
+        interactive_optimization : bool or None, optional
+            Whether to run BSS optimization interactively if slopes have not yet been evaluated.
 
         Returns
         -------
@@ -1296,7 +1314,7 @@ class Solver:
         is_pre = "Pass 1" in pass_name
         stage_key = "pre_migration" if is_pre else "post_migration"
 
-        sample_pts = self.get_sample_points(stage_key, target_upper)
+        sample_pts = self.get_sample_points(stage_key, target_upper, interactive=interactive_optimization)
 
         # The plan was validated (and its notices logged) when the Solver was built; it is re-resolved here
         # silently because ``calculate_bedrock(method=...)`` may replace the method of the stage.
@@ -1393,6 +1411,7 @@ class Solver:
         travel_times: str | Path | os.PathLike | np.ndarray | None = None,
         velocity: float | None = None,
         interactive: bool = False,
+        interactive_optimization: bool | None = None,
         plotit: bool = False,
     ) -> np.ndarray:
         """Migrates zero-offset radar or seismic traveltimes into 3D space via the Eikonal equation.
@@ -1412,6 +1431,9 @@ class Solver:
             Effective electromagnetic wave propagation velocity [m/ns] (default 0.16 m/ns in cold ice).
         interactive : bool, default False
             If True, enables interactive command-line prompts to inspect and adjust velocity.
+        interactive_optimization : bool or None, optional
+            If True, enables interactive prompts during Stage 1 BSS variogram optimization if required
+            for pre-migration slope filtering. If None, uses configuration setting.
         plotit : bool, default False
             If True, generates visual diagnostic figures of displacement vectors.
 
@@ -1470,6 +1492,9 @@ class Solver:
             self._warn_traveltime_exports_unavailable("survey_data_type is 'depth'")
             return self.migrated_points
 
+        if interactive:
+            log_section_header("INTERACTIVE 3D EIKONAL RAY MIGRATION")
+
         v_eff = float(velocity) if velocity is not None else 0.16
         if velocity is None and interactive:
             try:
@@ -1489,6 +1514,11 @@ class Solver:
             self._warn_traveltime_exports_unavailable("'perform_migration' is False")
             return self.migrated_points
 
+        if interactive_optimization is None:
+            effective_opt_interactive = bool(interactive)
+        else:
+            effective_opt_interactive = bool(interactive_optimization) and not self.is_batch_mode and sys.stdin.isatty()
+
         need_tt_unc = self.outputs_config_obj.save_traveltime_uncertainty
         krig1_res = self._execute_kriging_pass(
             target_type=self.pre_interpolation_target,
@@ -1498,6 +1528,7 @@ class Solver:
             zero_boundary=self.pre_zero_boundary,
             pass_name="Pass 1: Pre-Migration",
             return_variance=need_tt_unc,
+            interactive_optimization=effective_opt_interactive,
         )
         tt_grid = np.maximum(krig1_res.bedrock_grid, 0.0)
         if self.outline_mask is not None:
@@ -1659,8 +1690,12 @@ class Solver:
         self.opt_kc = opt_res.optimal_kc
         self.opt_slope = opt_res.optimal_slope_grid
         self.opt_variogram_params = opt_res.opt_variogram_params
-        if opt_res.all_smoothed_dems:
-            self._smoothed_dem_cache.update(opt_res.all_smoothed_dems)
+        # Retain strictly the optimal smoothed DEM in the solver cache to minimize memory footprint
+        best_key = round(float(self.opt_kc), 6)
+        if opt_res.optimal_dem_grid is not None:
+            self._smoothed_dem_cache = {best_key: opt_res.optimal_dem_grid}
+        else:
+            self._smoothed_dem_cache.clear()
         return self.opt_kc
 
     def calculate_bedrock(
@@ -1921,6 +1956,9 @@ class Solver:
         bedrock_map : BedrockMap
             Final continuous bedrock elevation map [m] wrapped with spatial georeferencing metadata.
         """
+        if interactive:
+            log_section_header("INTERACTIVE BEDROCK FINALIZATION")
+
         should_plot = interactive or (self.plots_dir is not None)
 
         if self.kriged_thickness is None:

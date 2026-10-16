@@ -143,5 +143,79 @@ class TestActivityIndicator(unittest.TestCase):
         self.assertEqual(list(namespace["tqdm"]([1, 2, 3], total=3, desc="x", unit="u", ascii=" #", disable=True)), [1, 2, 3])
 
 
+class TestTerminalUI(unittest.TestCase):
+    """Test suite for Terminal UI enhancements: banner centering, section headers, and progress bar spacing."""
+
+    def test_welcome_banner_content(self):
+        banner = pysole_logging.get_welcome_banner(version="0.5.2", term_width=80)
+        self.assertIn("/ ___/____  / /__", banner)
+        self.assertIn("The soul of the sole", banner)
+        self.assertIn("v0.5.2", banner)
+        self.assertIn("Released under the MIT License.", banner)
+
+    def test_welcome_banner_dynamic_version(self):
+        banner_auto = pysole_logging.get_welcome_banner(term_width=80)
+        from pysole import __version__
+        self.assertIn(f"v{__version__}", banner_auto)
+
+    def test_welcome_banner_centering(self):
+        for width in [80, 100, 120]:
+            banner = pysole_logging.get_welcome_banner(version="0.5.1", term_width=width)
+            lines = [l for l in banner.splitlines() if l.strip()]
+            tagline = [l for l in lines if "The soul of the sole" in l][0]
+            left_space = len(tagline) - len(tagline.lstrip())
+            expected_left = (width - len("The soul of the sole")) // 2
+            self.assertEqual(left_space, expected_left)
+
+    def test_print_welcome_banner(self):
+        import io
+        buf = io.StringIO()
+        pysole_logging.print_welcome_banner(version="0.5.1", file=buf)
+        out = buf.getvalue()
+        self.assertIn("The soul of the sole", out)
+        self.assertIn("Released under the MIT License.", out)
+
+    def test_progress_bar_spacing_enabled(self):
+        import io
+        import sys
+        buf = io.StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            pbar = pysole_logging.PySoleProgressBar(range(2), disable=False, file=buf)
+            for _ in pbar:
+                pass
+        finally:
+            sys.stdout = old_stdout
+        out = buf.getvalue()
+        self.assertTrue(out.startswith("\n"))
+        self.assertTrue(out.endswith("\n"))
+
+    def test_progress_bar_spacing_disabled(self):
+        import io
+        buf = io.StringIO()
+        pbar = pysole_logging.PySoleProgressBar(range(2), disable=True, file=buf)
+        for _ in pbar:
+            pass
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_log_section_header(self):
+        import io
+        import sys
+        buf = io.StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            with self.assertLogs("pysole", level="INFO") as cm:
+                pysole_logging.log_section_header("TEST HEADLINE TITLE", width=80)
+        finally:
+            sys.stdout = old_stdout
+
+        out = buf.getvalue()
+        self.assertEqual(out, "\n\n")
+        self.assertTrue(any("=" * 80 in m for m in cm.output))
+        self.assertTrue(any("TEST HEADLINE TITLE" in m for m in cm.output))
+
+
 if __name__ == "__main__":
     unittest.main()

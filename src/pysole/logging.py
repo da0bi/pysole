@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
+import shutil
 from pathlib import Path
 import sys
 try:
@@ -28,11 +29,24 @@ except ImportError:
 # Global PySole logger
 logger = logging.getLogger("pysole")
 
+_current_log_path: Path | None = None
+_current_log_level: int | None = None
+_current_console_output: bool | None = None
+
+
+def reset_logging_state() -> None:
+    """Resets cached logging configuration state (primarily for test fixtures)."""
+    global _current_log_path, _current_log_level, _current_console_output
+    _current_log_path = None
+    _current_log_level = None
+    _current_console_output = None
+
 
 def setup_logging(
     log_file: str | Path | None = "pysole.log",
     log_level: str | int = "INFO",
     console_output: bool = True,
+    log_init_msg: bool = True,
 ) -> logging.Logger:
     """Configures the centralized PySole package logger with file and console handlers.
 
@@ -45,16 +59,31 @@ def setup_logging(
         Logging level threshold ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL').
     console_output : bool, default True
         If True, log messages are also formatted and directed to stdout.
+    log_init_msg : bool, default True
+        If True, logs an informative notice upon file handler initialization.
 
     Returns
     -------
     configured_logger : logging.Logger
         Configured logger instance named 'pysole'.
     """
+    global _current_log_path, _current_log_level, _current_console_output
+
     if isinstance(log_level, str):
         numeric_level = getattr(logging, log_level.upper(), logging.INFO)
     else:
         numeric_level = log_level
+
+    target_log_path = Path(log_file).expanduser().resolve() if log_file else None
+
+    # Idempotent check: if logger already configured with identical target file, level, and console mode, return
+    if (
+        logger.handlers
+        and _current_log_path == target_log_path
+        and _current_log_level == numeric_level
+        and _current_console_output == console_output
+    ):
+        return logger
 
     logger.setLevel(numeric_level)
 
@@ -76,19 +105,148 @@ def setup_logging(
         logger.addHandler(console_handler)
 
     # File Handler
-    if log_file:
+    if target_log_path:
         try:
-            log_path = Path(log_file).expanduser().resolve()
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+            target_log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(target_log_path, mode="a", encoding="utf-8")
             file_handler.setLevel(numeric_level)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
-            logger.info(f"Initialized PySole log file at: {log_path}")
+            _current_log_path = target_log_path
+            _current_log_level = numeric_level
+            _current_console_output = console_output
+            if log_init_msg:
+                logger.info(f"Initialized PySole log file at: {target_log_path}")
         except Exception as e:
             logger.warning(f"Could not initialize log file '{log_file}': {e}")
+    else:
+        _current_log_path = None
+        _current_log_level = numeric_level
+        _current_console_output = console_output
 
     return logger
+
+
+def get_welcome_banner(version: str | None = None, term_width: int | None = None) -> str:
+    """Renders the PySole ASCII art welcome banner, dynamically centered for the terminal.
+
+    Parameters
+    ----------
+    version : str, optional
+        Version string override. If None, dynamically resolved from `pysole.__version__`.
+    term_width : int, optional
+        Terminal column width for centering. If None, resolved via `shutil.get_terminal_size()`.
+
+    Returns
+    -------
+    banner : str
+        Centered multi-line banner string.
+    """
+    if version is None:
+        try:
+            from . import __version__
+            version = __version__
+        except Exception:
+            version = "0.5.2"
+
+    version_str = version if str(version).startswith("v") else f"v{version}"
+
+    if term_width is None:
+        term_width = shutil.get_terminal_size(fallback=(80, 24)).columns
+
+    term_width = max(term_width, 40)
+
+    ascii_art = [
+        r"    ____       _____       __     ",
+        r"   / __ \__  _/ ___/____  / /__   ",
+        r"  / /_/ / / / /\__ \/ __ \/ / _ \ ",
+        r" / ____/ /_/ /___/ / /_/ / /  __/ ",
+        r"/_/    \__, //____/\____/_/\___/  ",
+        r"      /____/                      ",
+    ]
+
+    block_width = max(len(line) for line in ascii_art)
+    art_margin = max(0, (term_width - block_width) // 2)
+    art_indent = " " * art_margin
+
+    lines = [""]
+    for art_line in ascii_art:
+        lines.append(f"{art_indent}{art_line}".rstrip())
+
+    lines.append("")
+    lines.append("The soul of the sole".center(term_width).rstrip())
+    lines.append("")
+    lines.append(version_str.center(term_width).rstrip())
+    lines.append("")
+    lines.append("Released under the MIT License.".center(term_width).rstrip())
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def print_welcome_banner(version: str | None = None, file=None) -> None:
+    """Prints the dynamically centered PySole welcome banner to stdout (or specified stream).
+
+    Parameters
+    ----------
+    version : str, optional
+        Version string override.
+    file : TextIO, optional
+        Target text stream (defaults to sys.stdout).
+    """
+    out = file if file is not None else sys.stdout
+    out.write(get_welcome_banner(version=version) + "\n")
+    out.flush()
+
+
+def log_section_header(title: str, line_char: str = "=", width: int = 80) -> None:
+    """Logs a prominent section headline bounded by decorative divider lines.
+
+    Parameters
+    ----------
+    title : str
+        Headline title to display.
+    line_char : str, default '='
+        Divider character.
+    width : int, default 80
+        Total line width for the divider and centering.
+    """
+    divider = line_char * width
+    centered = title.center(width)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    logger.info(divider)
+    logger.info(centered)
+    logger.info(divider)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
+_BaseBar = tqdm if isinstance(tqdm, type) else object
+
+
+class PySoleProgressBar(_BaseBar):
+    """Wrapped tqdm progress bar providing single empty line isolation before and after execution."""
+
+    def __init__(self, *args, **kwargs):
+        self._is_disabled = kwargs.get("disable", False)
+        self._target_file = kwargs.get("file", sys.stdout)
+        kwargs.setdefault("file", self._target_file)
+        if not self._is_disabled:
+            self._target_file.write("\n")
+            self._target_file.flush()
+        if isinstance(tqdm, type):
+            super().__init__(*args, **kwargs)
+        self._post_nl_done = False
+
+    def close(self):
+        if isinstance(tqdm, type):
+            super().close()
+        if not getattr(self, "_is_disabled", False) and not getattr(self, "_post_nl_done", False):
+            self._post_nl_done = True
+            out = getattr(self, "_target_file", sys.stdout)
+            out.write("\n")
+            out.flush()
 
 
 def get_progress_bar(
@@ -115,11 +273,14 @@ def get_progress_bar(
 
     Returns
     -------
-    progress_bar : tqdm.std.tqdm or DummyBar
+    progress_bar : PySoleProgressBar or DummyBar
         Configured progress bar instance.
     """
+    if not isinstance(tqdm, type):
+        return tqdm(iterable=iterable, total=total, desc=desc, unit=unit, disable=disable)
+
     bar_format = "{desc} {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} {unit} [{elapsed}<{remaining}, {rate_fmt}]"
-    return tqdm(
+    return PySoleProgressBar(
         iterable=iterable,
         total=total,
         desc=desc,
@@ -187,4 +348,17 @@ def activity_indicator(desc: str, disable: bool = False, delay: float = 1.0, int
         if shown:
             shown[0].set_description_str(line())
             shown[0].close()
+
+
+__all__ = [
+    "logger",
+    "setup_logging",
+    "reset_logging_state",
+    "get_welcome_banner",
+    "print_welcome_banner",
+    "log_section_header",
+    "PySoleProgressBar",
+    "get_progress_bar",
+    "activity_indicator",
+]
 

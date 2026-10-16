@@ -16,7 +16,7 @@ from scipy.spatial import cKDTree
 from .drift import DRIFT_PRIMITIVES, ORDINARY_NAME, format_drift_name
 from .interpolation import DriftBasis
 from .kriging_core import KrigingSystem, LeaveBlockOut, max_pairwise_distance, resolve_variogram_params
-from .logging import activity_indicator, get_progress_bar, logger
+from .logging import activity_indicator, get_progress_bar, logger, log_section_header
 from .memory import plan_cv_memory
 from .raster import GridGeometry
 from .variogram import resolve_native_variogram_model
@@ -659,6 +659,7 @@ class DriftAnalyzer:
 
         # Interactive Terminal Ranking & Selection Table
         if show_prompts and eval_results:
+            log_section_header("INTERACTIVE DRIFT MODEL SELECTION")
             print(format_ranking_table(eval_results, f"DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS ({self.mode.upper()})"))
             print(f"[DriftAnalyzer] Recommended model: #1 '{eval_results[0].name}'")
             chosen = self._prompt_model_selection(eval_results)

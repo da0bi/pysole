@@ -18,10 +18,18 @@ from .drift_analyzer import DriftAnalyzer
 from .survey_planner import SurveyPlanner
 from .config import load_config, main_cli, OutputsConfig, ConfigError
 from .pipeline import run_from_config, PipelineExporter
-from .logging import logger, setup_logging
+from .logging import (
+    logger,
+    setup_logging,
+    reset_logging_state,
+    get_welcome_banner,
+    print_welcome_banner,
+    log_section_header,
+    get_progress_bar,
+)
 from . import plotting
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 __all__ = [
     "Solver",
@@ -57,5 +65,10 @@ __all__ = [
     "main_cli",
     "logger",
     "setup_logging",
+    "reset_logging_state",
+    "get_welcome_banner",
+    "print_welcome_banner",
+    "log_section_header",
+    "get_progress_bar",
     "plotting",
 ]

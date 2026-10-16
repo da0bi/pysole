@@ -1227,6 +1227,202 @@ class TestAuditRegressions(unittest.TestCase):
             self.assertTrue(solver_cfg.post_drift_analyzer)
             self.assertFalse(hasattr(solver_cfg, "drift_analyzer"))
 
+    def test_bss_optimization_memory_guard_and_interactive_grid_pruning(self):
+        """Verifies that BSS optimization limits workers for large grids and retains strictly O(1) grids in interactive mode."""
+        from pysole.variogram import optimize_bss_variance
+
+        n = 50
+        geom = GridGeometry.create((n, n), dx=10.0, dy=10.0, bounds=(0, 0, n * 10.0, n * 10.0))
+        xx, yy = geom.meshgrid
+        dem = 1000.0 + 0.1 * xx + 0.1 * yy
+        rng = np.random.default_rng(42)
+        px, py = rng.uniform(50, n * 10.0 - 50, 30), rng.uniform(50, n * 10.0 - 50, 30)
+        pts = np.column_stack((px, py, 1000.0 + 0.1 * px + 0.1 * py, rng.uniform(20, 80, 30)))
+
+        # 1. Interactive execution retains strictly O(1) optimal grids (length 1)
+        # input sequence: kc_max (default=""), kc_min (default=""), n_steps (default=""),
+        # accept range (default="y"), continue process (default="n")
+        with patch("builtins.input", side_effect=["", "", "", "y", "n"]):
+            res_inter = optimize_bss_variance(
+                dem, pts, geom, kc_max=0.3, kc_min=0.01, n_steps=5, n_cores=1, interactive=True, show_progress=False
+            )
+        self.assertEqual(len(res_inter.all_smoothed_dems), 1)
+        self.assertEqual(len(res_inter.all_smoothed_slopes), 1)
+        best_k = round(float(res_inter.optimal_kc), 6)
+        self.assertIn(best_k, res_inter.all_smoothed_dems)
+        self.assertIn(best_k, res_inter.all_smoothed_slopes)
+
+        # 2. Solver._smoothed_dem_cache holds strictly the single optimal DEM grid
+        from pysole.solver import Solver
+        solver = Solver(dem=dem, dx=10.0, dy=10.0, show_progress=False)
+        solver.survey_points = pts
+        solver.migrated_points = pts
+        solver.optimize_bss(kc_max=0.3, kc_min=0.01, n_steps=5, interactive=False)
+        self.assertEqual(len(solver._smoothed_dem_cache), 1)
+        self.assertIn(round(float(solver.opt_kc), 6), solver._smoothed_dem_cache)
+
+        # 3. Memory guard worker scaling for large grids (mocked FFT to avoid 9M element array computation)
+        large_dem_mock = np.empty((3000, 3000), dtype=np.float32)  # 9M cells
+        geom_large = GridGeometry.create(large_dem_mock.shape, dx=10.0, dy=10.0)
+        from unittest.mock import MagicMock
+        with patch("pysole.variogram.precompute_fft_grid") as mock_pre:
+            mock_pre.return_value = (MagicMock(), np.zeros((10, 10)), 1.0)
+            with patch("pysole.variogram.compute_slope_rad") as mock_slope:
+                mock_slope.return_value = np.zeros((10, 10))
+                with self.assertLogs("pysole", level="INFO") as cm:
+                    try:
+                        optimize_bss_variance(
+                            large_dem_mock, pts, geom_large, kc_max=0.3, kc_min=0.01, n_steps=1, n_cores=16, show_progress=False
+                        )
+                    except Exception:
+                        pass
+        guard_logs = [log for log in cm.output if "[BSS Memory Guard]" in log]
+        self.assertTrue(len(guard_logs) > 0)
+        self.assertIn("Capping concurrent FFT optimization workers to 2", guard_logs[0])
+
+    def test_single_log_initialization_message(self):
+        """Verifies that 'Initialized PySole log file at:' is logged exactly once, after the banner."""
+        import json
+        from pysole.logging import reset_logging_state
+
+        reset_logging_state()
+        cfg_path = self.output_dir / "pysole_test_log.json"
+        dem_path = self.output_dir / "dem.tif"
+        survey_path = self.output_dir / "survey.csv"
+        out_dir = self.output_dir / "out"
+
+        dem = np.full((20, 20), 1000.0)
+        BedrockMap(dem, bounds=(0, 0, 200, 200), crs="EPSG:32633").save(dem_path)
+        np.savetxt(survey_path, np.array([[50.0, 50.0, 1000.0, 100.0], [150.0, 150.0, 1000.0, 120.0]]), delimiter=",", header="X,Y,Z,T", comments="")
+
+        cfg = {
+            "inputs": {
+                "dem_path": str(dem_path),
+                "survey_data_path": str(survey_path),
+                "survey_data_type": "depth",
+                "show_progress": False,
+            },
+            "outputs": {
+                "output_dir": str(out_dir),
+            },
+            "spatial_parameters": {"dx": 10.0, "dy": 10.0},
+            "kriging_parameters": {
+                "post_migration": {"method": "ordinary"}
+            },
+            "optimization_parameters": {"interactive_optimization": False},
+            "migration_parameters": {"perform_migration": False},
+        }
+        with open(cfg_path, "w") as f:
+            json.dump(cfg, f)
+
+        run_from_config(cfg_path, is_batch=True)
+
+        log_file = out_dir / "pysole.log"
+        self.assertTrue(log_file.exists())
+        with open(log_file, "r") as f:
+            log_lines = f.readlines()
+
+        init_lines = [l for l in log_lines if "Initialized PySole log file at:" in l]
+        self.assertEqual(len(init_lines), 1, f"Expected exactly 1 log init line in file, got: {init_lines}")
+
+        banner_idx = -1
+        init_idx = -1
+        for i, l in enumerate(log_lines):
+            if "STARTING NEW PYSOLE BEDROCK TOPOGRAPHY CALCULATION" in l:
+                banner_idx = i
+            elif "Initialized PySole log file at:" in l:
+                init_idx = i
+
+        self.assertGreater(init_idx, banner_idx, "Log file initialization should appear after the STARTING banner")
+
+    def test_stage1_interactive_bss_optimization(self):
+        """Verifies that Stage 1 BSS optimization prompts interactively when configured."""
+        from pysole.solver import Solver
+        n = 20
+        dem = np.full((n, n), 1000.0)
+        rng = np.random.default_rng(42)
+        px = rng.uniform(20.0, 180.0, 30)
+        py = rng.uniform(20.0, 180.0, 30)
+        pts = np.column_stack((px, py, np.full(30, 1000.0), rng.uniform(50.0, 150.0, 30)))
+
+        solver = Solver(
+            dem=dem,
+            dx=10.0,
+            dy=10.0,
+            show_progress=False,
+            pre_interpolation_target="P",
+            config={
+                "optimization_parameters": {"interactive_optimization": True},
+            },
+        )
+        solver.survey_points = pts
+
+        # When migrate_eikonal is called with interactive_optimization=True,
+        # Stage 1 optimization prompts the user via input()
+        with patch("sys.stdin.isatty", return_value=True):
+            with patch("builtins.input", side_effect=["", "", "", "y", "n"]) as mock_input:
+                solver.migrate_eikonal(
+                    travel_times=pts,
+                    velocity=0.16,
+                    interactive=False,
+                    interactive_optimization=True,
+                )
+                self.assertTrue(mock_input.called, "Expected interactive input() to be called during Stage 1 BSS optimization")
+
+    def test_dynamic_vector_scale_factor(self):
+        """Verifies _compute_vector_scale_factor behavior across domain scales and displacement magnitudes."""
+        from pysole.plotting import _compute_vector_scale_factor
+
+        x_coords = np.linspace(0, 30000, 300)
+        y_coords = np.linspace(0, 32000, 320)
+        # 30 km domain, ~25m displacement -> target ~1120m -> raw factor ~45 -> rounds to 50x
+        dxi = np.full(50, 15.0)
+        dyi = np.full(50, 20.0)
+        scale = _compute_vector_scale_factor(dxi, dyi, x_coords, y_coords)
+        self.assertEqual(scale, 50.0)
+
+        # Small local domain (2 km), substantial displacement (80m) -> no amplification needed (scale 1.0)
+        x_small = np.linspace(0, 2000, 100)
+        y_small = np.linspace(0, 2000, 100)
+        dxi_lg = np.full(20, 60.0)
+        dyi_lg = np.full(20, 50.0)
+        scale_small = _compute_vector_scale_factor(dxi_lg, dyi_lg, x_small, y_small)
+        self.assertEqual(scale_small, 1.0)
+
+        # Zero displacement -> returns 1.0
+        scale_zero = _compute_vector_scale_factor(np.zeros(10), np.zeros(10), x_coords, y_coords)
+        self.assertEqual(scale_zero, 1.0)
+
+    def test_plot_migration_displacement_vectors_dynamic_scaling(self):
+        """Verifies that plot_migration_displacement_vectors generates cleanly with dynamic scaling."""
+        from pysole.plotting import plot_migration_displacement_vectors
+
+        tt_grid = np.random.uniform(50, 500, (40, 40))
+        x_coords = np.linspace(10000, 40000, 40)
+        y_coords = np.linspace(20000, 50000, 40)
+
+        n_pts = 1000
+        survey_pts = np.random.uniform(15000, 35000, (n_pts, 4))
+        dxi = np.random.uniform(-30, 30, n_pts)
+        dyi = np.random.uniform(-30, 30, n_pts)
+        mig_pts = np.column_stack((survey_pts[:, 0] + dxi, survey_pts[:, 1] + dyi, survey_pts[:, 2], np.random.uniform(20, 100, n_pts)))
+
+        plot_migration_displacement_vectors(
+            travel_time_grid=tt_grid,
+            survey_points=survey_pts,
+            migrated_points=mig_pts,
+            dxi=dxi,
+            dyi=dyi,
+            x_coords=x_coords,
+            y_coords=y_coords,
+            plots_dir=self.output_dir,
+            interactive=False,
+        )
+
+        expected_fig = self.output_dir / "02_01_eikonal_migration_displacement_vectors.png"
+        self.assertTrue(expected_fig.exists())
+        self.assertGreater(expected_fig.stat().st_size, 1000)
+
 
 if __name__ == "__main__":
     unittest.main()

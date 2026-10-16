@@ -282,6 +282,70 @@ def plot_bss_kc_optimization_variograms(
         warnings.warn(f"Plotting skipped: {e}", UserWarning)
 
 
+def _compute_vector_scale_factor(
+    dxi: np.ndarray,
+    dyi: np.ndarray,
+    x_coords: np.ndarray,
+    y_coords: np.ndarray,
+    target_rel_len: float = 0.035,
+) -> float:
+    """
+    Compute a clean, human-readable amplification scale factor for displacement quiver vectors.
+
+    Ensures that in regional domains where displacements (10-50 m) are very small relative to the
+    extent (e.g., 30 km), displacement vectors render as visible arrows rather than tiny dots.
+
+    Parameters
+    ----------
+    dxi : np.ndarray
+        Horizontal displacement along X [m].
+    dyi : np.ndarray
+        Horizontal displacement along Y [m].
+    x_coords : np.ndarray
+        Grid X coordinates [m].
+    y_coords : np.ndarray
+        Grid Y coordinates [m].
+    target_rel_len : float, default 0.035
+        Target visual arrow length as a fraction of the maximum domain dimension.
+
+    Returns
+    -------
+    scale_factor : float
+        Clean scalar multiplier (1.0, 2.0, 5.0, 10.0, 20.0, 50.0, ...).
+    """
+    domain_span = max(
+        float(np.nanmax(x_coords) - np.nanmin(x_coords)),
+        float(np.nanmax(y_coords) - np.nanmin(y_coords)),
+    )
+    d_mag = np.hypot(dxi, dyi)
+    finite_mag = d_mag[np.isfinite(d_mag) & (d_mag > 1e-6)]
+    if len(finite_mag) == 0 or domain_span <= 0:
+        return 1.0
+
+    char_d = float(np.percentile(finite_mag, 90))
+    if char_d <= 0:
+        char_d = float(np.nanmean(finite_mag))
+    if char_d <= 0:
+        return 1.0
+
+    target_len = target_rel_len * domain_span
+    raw_factor = target_len / char_d
+    if raw_factor <= 1.2:
+        return 1.0
+
+    exponent = 10.0 ** np.floor(np.log10(raw_factor))
+    fraction = raw_factor / exponent
+    if fraction < 1.5:
+        factor = 1.0 * exponent
+    elif fraction < 3.5:
+        factor = 2.0 * exponent
+    elif fraction < 7.5:
+        factor = 5.0 * exponent
+    else:
+        factor = 10.0 * exponent
+    return max(1.0, float(factor))
+
+
 def plot_migration_displacement_vectors(
     travel_time_grid: np.ndarray,
     survey_points: np.ndarray,
@@ -345,13 +409,14 @@ def plot_migration_displacement_vectors(
         if np.isfinite(min_tt) and np.isfinite(max_tt) and max_tt > min_tt:
             cnt1 = ax1.contour(
                 travel_time_grid,
+                levels=8,
                 extent=plot_extent,
                 origin="lower",
                 colors="white",
                 linewidths=0.5,
                 alpha=0.7,
             )
-            ax1.clabel(cnt1, inline=True, fmt="%d ns", fontsize=8)
+            ax1.clabel(cnt1, inline=True, fmt="%d ns", fontsize=6.0, inline_spacing=3)
 
         divider1 = make_axes_locatable(ax1)
         cax1 = divider1.append_axes("right", size="5%", pad=0.1)
@@ -368,13 +433,14 @@ def plot_migration_displacement_vectors(
                 linestyles="solid",
             )
 
-        # Downsample arrows for clean plot
+        # Downsample arrows for clean plot and dynamically amplify for visibility
         step = max(len(survey_points) // 80, 1)
+        scale_factor = _compute_vector_scale_factor(dxi[::step], dyi[::step], x_coords, y_coords)
         ax1.quiver(
             survey_points[::step, 0],
             survey_points[::step, 1],
-            dxi[::step],
-            dyi[::step],
+            dxi[::step] * scale_factor,
+            dyi[::step] * scale_factor,
             color="white",
             angles="xy",
             scale_units="xy",
@@ -382,7 +448,8 @@ def plot_migration_displacement_vectors(
             width=0.003,
             zorder=4,
         )
-        ax1.set_title("Calculated Traveltime Field and 3D Migration Horizontal Displacement Vectors")
+        vec_label = f" (displacement vectors \u00d7{int(scale_factor) if scale_factor == int(scale_factor) else scale_factor:g})" if scale_factor > 1.0 else ""
+        ax1.set_title(f"Calculated Traveltime Field and 3D Migration Horizontal Displacement Vectors{vec_label}", fontsize=9.5)
         ax1.set_xlabel("X [m]")
         ax1.set_ylabel("Y [m]")
 
@@ -391,16 +458,29 @@ def plot_migration_displacement_vectors(
         y_mig = migrated_points[:, 1]
         d_mig = migrated_points[:, 3]
 
+        n_pts = len(survey_points)
+        s_mig = float(np.clip(180.0 / np.sqrt(n_pts), 1.5, 14.0))
+        s_pre = float(np.clip(100.0 / np.sqrt(n_pts), 0.8, 8.0))
+
         ax2.scatter(
             survey_points[:, 0],
             survey_points[:, 1],
             c="black",
-            s=1.5,
+            s=s_pre,
             alpha=0.7,
             label="Pre-migrated Points",
             zorder=2,
         )
-        sc = ax2.scatter(x_mig, y_mig, c=d_mig, s=15, cmap="jet", label="Migrated Points", zorder=3)
+        sc = ax2.scatter(
+            x_mig,
+            y_mig,
+            c=d_mig,
+            s=s_mig,
+            alpha=0.85,
+            cmap="jet",
+            label="Migrated Points",
+            zorder=3,
+        )
 
         divider2 = make_axes_locatable(ax2)
         cax2 = divider2.append_axes("right", size="5%", pad=0.1)
@@ -420,7 +500,7 @@ def plot_migration_displacement_vectors(
         ax1.set_aspect("equal")
         ax2.set_aspect("equal")
 
-        ax2.set_title("Migrated Survey Point Depths [m]")
+        ax2.set_title("Migrated Survey Point Depths [m]", fontsize=9.5)
         ax2.set_xlabel("X [m]")
         ax2.set_ylabel("Y [m]")
         ax2.legend(loc="upper right", fontsize=8)

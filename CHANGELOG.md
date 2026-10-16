@@ -5,11 +5,21 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.2] - 2026-10-16
 
-Interactive terminal parameter setup for the Unprobed Glacier Survey Planner in API and CLI modes.
+Memory-aware spectral optimization guard, interactive terminal survey planning, multivariate regression kriging default, robust duplicate logging prevention, dynamic displacement vector plot scaling, and terminal UI enhancements.
 
 ### Added
+- **[Centered ASCII Art Welcome Banner] (`src/pysole/logging.py`, `src/pysole/pipeline.py`, `src/pysole/config.py`)**:
+  - Displays the official PySole ASCII logo, tagline `The soul of the sole`, dynamic package version (`v0.5.2`), and `Released under the MIT License.` at startup.
+  - Dynamically centers the entire block across any terminal width via `shutil.get_terminal_size()`.
+  - Outputs directly to `sys.stdout` to keep file loggers timestamp-clean.
+  - Suppressed in automated non-interactive batch runs (`is_batch: true` or `--batch`).
+- **[Progress Bar Visual Isolation] (`src/pysole/logging.py`)**:
+  - Introduced `PySoleProgressBar` wrapping `tqdm` to emit exactly one empty line before display begins and exactly one empty line after completion.
+  - Strictly suppressed in batch and test modes when `disable=True`.
+- **[Structured Interactive Section Headers] (`src/pysole/logging.py`, `src/pysole/variogram.py`, `src/pysole/solver.py`, `src/pysole/drift_analyzer.py`, `src/pysole/survey_planner.py`)**:
+  - Introduced `log_section_header()` rendering prominent 80-character divider banners (`===...===`) before each interactive stage: BSS Variogram Optimization (Stage 1: Pre-Migration & Stage 2: Post-Migration), 3D Eikonal Ray Migration, Bedrock Finalization, Drift Model Selection, and Unprobed Glacier Survey Planner.
 - **[Interactive Survey Planner in API & CLI] (`src/pysole/survey_planner.py`, `src/pysole/solver.py`, `src/pysole/pipeline.py`, `src/pysole/config.py`)**:
   - The Unprobed Glacier Survey Planner now provides interactive parameter configuration when running in an interactive terminal (`sys.stdin.isatty()`).
   - Prompts for any omitted survey planning parameters: target basal shear stress $\tau_0$ [kPa] (default `100.0` kPa = $100{,}000\text{ Pa}$), corner frequency cutoff wavenumber $k_c$ [rad/m] (default `0.0314` rad/m, $\lambda_c \approx 200\text{ m}$), and maximum survey track length budget $L_{\text{max}}$ [km] (default `5.0` km).
@@ -21,6 +31,11 @@ Interactive terminal parameter setup for the Unprobed Glacier Survey Planner in 
   - Automated dispatch via `run_from_config()` or `Solver.run_pipeline()` when `inputs.survey_data_path` is `null`/omitted seamlessly inherits interactive terminal prompting.
 
 ### Changed
+- **[Memory-Aware Spectral BSS Optimization Guard] (`src/pysole/variogram.py`)**:
+  - Resolved Linux Out-Of-Memory (OOM) killer terminations on large regional DEM grids (e.g. `examples/apo` with $3002 \times 3198 = 9.6\times 10^6$ cells across 50 $k_c$ steps).
+  - In `optimize_bss_variance()`, eliminated concurrent accumulation of 50 full-domain smoothed DEM and slope float64 rasters ($\approx 50 \times 2 \times 77\text{ MB} \approx 7.7\text{ GB}$ per stage, accumulating to $>15\text{ GB}$ resident memory).
+  - Refactored the spectral search loop to compute smoothed rasters on the fly, immediately evaluating survey point samples and retaining strictly the single optimal DEM and slope raster corresponding to `best_kc` in `OptimizationResult` ($O(1)$ grid memory footprint, reducing memory consumption by $>95\%$).
+  - Full $O(N_{\text{steps}})$ scalar evaluation curve `[kc, mean_variance]` is preserved in `OptimizationResult.kc_variances` for diagnostic plots.
 - **[Multivariate full-primitive default for Regression Kriging (`drift_terms: null`)] (`src/pysole/drift.py`, `src/pysole/interpolation.py`)**:
   - In Regression Kriging (`method: "regression"`), `drift_terms: null` (omitted) now defaults to all available primitive drift features (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]`), training a rich multivariate Random Forest trend model (8 standardized feature columns) before Ordinary Kriging interpolates the residuals.
   - Users who explicitly desire coordinate-only regression can pass `drift_terms: ["linear_xy"]` (spatial coordinates $x, y$).
@@ -34,6 +49,15 @@ Interactive terminal parameter setup for the Unprobed Glacier Survey Planner in 
   - `SurveyPlanner` now caches its `pyproj.Transformer` instance across track exports, avoiding per-track re-instantiations in `export_geojson()` and `export_gpx()`.
   - Missing CRS metadata warning is logged once per survey planning execution rather than repeatedly per transect line.
   - Added `flush=True` to terminal prompt print statements in `_prompt_survey_parameter()` and streamlined interactive argument handling in `main_cli()`.
+
+### Fixed
+- **[Single Log Initialization Notice & Idempotent Logging] (`src/pysole/logging.py`, `src/pysole/solver.py`, `src/pysole/config.py`, `src/pysole/pipeline.py`)**:
+  - Made `setup_logging()` idempotent, eliminating duplicate handler attachments and repetitive `Initialized PySole log file at:` messages (reduced from 4x to 1x, placed cleanly after the header banner).
+  - Fixed Stage 1 BSS optimization forwarding in `Solver.migrate_eikonal()` when `"interactive_optimization": true` is configured.
+- **[Dynamic Migration Displacement Vector & Scatter Scaling] (`src/pysole/plotting.py`)**:
+  - In `02_01_eikonal_migration_displacement_vectors.png`:
+    - Upper panel: Added `_compute_vector_scale_factor()` computing standard 1-2-5 series multipliers ($\times 1, \times 2, \times 5, \times 10, \times 20, \dots$) to ensure horizontal displacement vectors are clearly visible across large regional grids ($>30\text{ km}$), and constrained contour label density.
+    - Lower panel: Introduced dynamic inverse-square-root scatter sizing ($s_{\text{mig}} = \text{clip}(180/\sqrt{N}, 1.5, 14.0)$, $s_{\text{pre}} = \text{clip}(100/\sqrt{N}, 0.8, 8.0)$) so migrated soundings no longer obscure pre-migrated sounding points on dense surveys ($N > 8{,}000$).
 
 ## [0.5.1] - 2026-10-14
 
