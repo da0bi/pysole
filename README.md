@@ -54,12 +54,12 @@
 
   where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. The surface DEM is smoothed by low-pass filtering in the frequency domain from which the surface slope field is then derived. The <i>Fast Fourier Transform</i> (FFT) Gaussian low-pass filter is defined by the spatial cutoff wavenumber <i>k</i><sub>c</sub> in radians per meter [rad/m], or optionally, by the more intuitive cutoff wavelength $\lambda_c$ in meters [m] - see [here](#wavenumber-to-wavelength-conversion) for details. The spatial variance of <i>τ</i><sub>b</sub> is then quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across wavenumber, or wavelength, cutoffs and refine the variogram parameters. This surface slope optimization is a cornerstone of `PySole`'s workflow. The resulting optimal surface slope field directly informs subsequent processing stages, including pre- and post-migration interpolation strategies, 3D ray-based migration, and surface curvature estimation. To accelerate the optimization process, both the FFT low-pass filtering and the corresponding product variogram evaluations are executed via multi-threaded CPU parallelization.
 * **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration - introduced by Binder et al. ([2009](https://www.cambridge.org/core/journals/annals-of-glaciology/article/determination-of-total-ice-volume-and-icethickness-distribution-of-two-glaciers-in-the-hohe-tauern-region-eastern-alps-from-gpr-data/9CEE8439239FE7E9199513292C5D3D2F)) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage. The optimally smoothed surface slope field is applied during the 3D migration to ensure numerically stable ray displacement vectors.
-* **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging - see [here](#dual-kriging-vector-engine) for details. Two interpolation strategies are recommended as a **robust starting baseline**: <i>Ordinary Kriging</i> is initially recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift). <i>Universal Kriging</i> using the Shallow Ice Approximation (`"sia"`) physical drift model is intially recommended for direct interpolation of signal traveltimes or (migrated) depths - see [here](#workflow-and-methodology) for details. Corresponding Kriging estimation uncertainty fields are calculated alongside all predicted grids - see [here](#kriging-uncertainty-derivation) for details.
+* **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging - see [here](#dual-kriging-vector-engine) for details. Two interpolation strategies are recommended as a **robust starting baseline**: <i>Ordinary Kriging</i> is initially recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift). <i>Universal Kriging</i> using the Shallow Ice Approximation (`"sia"`) physical drift model is intially recommended for direct interpolation of signal traveltimes or (migrated) depths - see [here](#workflow-and-methodology) for details. When enabled (`calculate_uncertainty: true`), corresponding Kriging estimation uncertainty fields are calculated alongside predicted grids - see [here](#kriging-uncertainty-derivation) for details.
 * **Boundary Conditions:** Perimeter and rock outcrop margin boundary conditions (zero traveltime <i>T</i> = 0 s and zero thickness <i>D</i> = 0 m) are enforced by default (and can optionally be toggled off). Interior rock outcrops, or vector polygon holes, are natively parsed - see [here](#parsing-rock-outcrops) for details.
 * **Interactive Drift Analyzer:** A fully automated diagnostic engine to identify the optimal Universal Kriging drift model for each individual survey dataset. Evaluates and ranks the available `PySole` drift models by a suite of statistical metrics - see [here](docs/drift_analyzer_&_survey_planner.md) for details.
 * **ML Hole Filling & Geomorphological Margin Blending:** Employs the parallelized [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
 * **Final DEMs Spatial Smoothing:** As a post-processing step, spatial smoothing options are available for the calculated DEMs - see [here](#dem-spatial-smoothing) for details.
-* **Survey Planner:** While Kriging uncertainty fields clearly reveal target regions for additional surveys, the `Survey Planner` automatically generates a physically-informed survey layout for future campaigns on unprobed objects. Longitudinal flowline and transverse cross-profile survey tracks are computed based on a SIA thickness model. Exports tracks to field-ready GPX and GeoJSON vector formats along with the SIA modeled thickness map - see [`here`](docs/drift_analyzer_&_survey_planner.md) for details.
+* **Survey Planner:** While Kriging uncertainty fields clearly reveal target regions for additional surveys, the `Survey Planner` automatically generates a physically-informed survey layout for future campaigns on unprobed objects. Longitudinal flowline and transverse cross-profile survey tracks are computed based on a SIA thickness model. Exports tracks to field-ready GPX and GeoJSON vector formats along with the SIA modeled thickness map - see [`here`](docs/drift_analyzer_&_survey_planner.md#survey_planner) for details.
 
 ---
 
@@ -116,7 +116,7 @@ Reconstructs continuous thickness <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevat
 
 - **Direct `"D"` Baseline**: Directly interpolates (migrated) survey point depths <i>D</i><sub>i</sub> using <b>Universal Kriging</b> with the physically-informed <b>SIA drift model</b> ([`["sia"]`](#universal-kriging-drift-models)) by default.
 
-Alongside depth predictions, the Kriging estimation variance is converted to standard error in meters ($\sigma_{\text{depth}} = \sqrt{\sigma^2}$) to map spatial depth uncertainty across the entire domain - see [here](#kriging-uncertainty-derivation) for details.
+When uncertainty evaluation is enabled (`calculate_uncertainty: true`), the Kriging estimation variance is converted to standard error in meters ($\sigma_{\text{depth}} = \sqrt{\sigma^2}$) to map spatial depth uncertainty across the entire domain - see [here](#kriging-uncertainty-derivation) for details.
 
 ---
 
@@ -154,7 +154,7 @@ pip install -e .
 <a id="json-configuration"></a>
 ## JSON Configuration File
 
-All execution options can be fully defined in a single JSON configuration file, which by default is named `pysole.json`. Whenever an optional parameter key or entire section is omitted from the JSON file, `PySole` automatically populates it with its default value and continues without error. This is, however, not true for the `survey_data_path` key - if this is left empty, or totally omitted, the `Survey Planner` is automatically started - see [here](docs/drift_analyzer_&_survey_planner.md) for details. Unknown keys in the configuration file never stop a `PySole` run - they are reported in a single warning and ignored.
+All execution options can be fully defined in a single JSON configuration file, which by default is named `pysole.json`. Whenever an optional parameter key or entire section is omitted from the JSON file, `PySole` automatically populates it with its default value and continues without error. This is, however, not true for the `survey_data_path` key - if this is left empty, or totally omitted, the `Survey Planner` is automatically started - see [here](docs/drift_analyzer_&_survey_planner.md#survey_planner) for details. Unknown keys in the configuration file never stop a `PySole` run - they are reported in a single warning and ignored.
 
 ```json
 {
@@ -202,7 +202,8 @@ All execution options can be fully defined in a single JSON configuration file, 
             "drift_analyzer": false,
             "drift_terms": null,
             "variogram_model": "spherical",
-            "include_zero_boundary_condition": true
+            "include_zero_boundary_condition": true,
+            "calculate_uncertainty": false
         },
         "post_migration": {
             "interpolation_target": "P",
@@ -210,7 +211,8 @@ All execution options can be fully defined in a single JSON configuration file, 
             "drift_analyzer": false,
             "drift_terms": null,
             "variogram_model": "spherical",
-            "include_zero_boundary_condition": true
+            "include_zero_boundary_condition": true,
+            "calculate_uncertainty": false
         }
     },
     "finalization_parameters": {
@@ -226,9 +228,9 @@ All execution options can be fully defined in a single JSON configuration file, 
     "outputs": {
         "output_dir": null,
         "output_format": "tif",
-        "output_prefix": "final",
+        "output_prefix": "",
         "plots_dir": "figures",
-        "save_bedrock_elevation_map": true,
+        "save_bedrock_grid": true,
         "save_traveltime_grid": false,
         "save_traveltime_uncertainty": false,
         "save_migrated_points": false,
@@ -249,7 +251,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | :--- | :--- | :--- | :--- | :--- |
 | **`inputs`** | `dem_path` | `str` | `null` | **(Required)** File path to the surface Digital Elevation Model (`.asc`, `.tif`, `.csv`, `.npy`). |
 | | `outline_path` | `str` | `null` | File path to creeping body / glacier boundary polygon (`.shp`, `.geojson`, `.gpkg`, `.csv`). If `null`, domain is derived from non-NaN DEM pixels. |
-| | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[(profile_id), X, Y, value]`. If `null`, `PySole` automatically starts the interactive `Survey Planner` and saves the results to the file paths defined in the `outputs` section.  See [`here`](docs/drift_analyzer_&_survey_planner.md) for full details. |
+| | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[(profile_id), X, Y, value]`. If `null`, `PySole` automatically starts the interactive `Survey Planner` and saves the results to the file paths defined in the `outputs` section.  See [`here`](docs/drift_analyzer_&_survey_planner.md#survey_planner) for full details. |
 | | `survey_data_type` | `str` | `"one_way_traveltime"` | Observation data type: `"one_way_traveltime"`, `"two_way_traveltime"`, or `"depth"` (skips 3D migration). |
 | | `survey_profile_column` | `str` | `null` | Optional column name in the imported survey dataset CSV (`inputs.survey_data_path`) specifying survey line / profile IDs for the Drift Analyzer's <i>Leave-One-Profile-Out</i> (LOPO) cross-validation. |
 | | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (`900.0` kg/m³ for temperate glacier ice by default). Used to calculate basal shear stress $\tau_{\text{b}}$. |
@@ -283,6 +285,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `pre_migration.drift_terms` | `list[str]` / `null` | `null` | `null` or a flat list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"linear_xy"`, `"quadratic_xy"`. Without analyzer: ONE (multi-)drift model, e.g. `["sia", "z_dem"]` (if both `"linear_xy"` and `"quadratic_xy"` are given, `"linear_xy"` is dropped with a warning, falling back to `["quadratic_xy"]`); with analyzer: the suite of all combinations of the listed terms (one nested `[]` adds the Ordinary candidate); for `"regression"`: the Random Forest covariates (default `null`: all primitives `["sia", "z_dem", "curvature_dem", "quadratic_xy"]`; coordinates only: `["linear_xy"]`). An empty list `[]` at the top level is rejected - use `null`. If omitted with the method omitted, `pre_migration.interpolation_target`: `"T"` uses `["sia"]` (the default suite with the analyzer); `"universal"` without any terms is an error. All single and multi drift models are described [here](#universal-kriging-drift-models). |
 | | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). Note: `"linear"` is only supported under `engine: "pykrige"`. For `engine: "native"`, `"linear"` automatically falls back to `"spherical"`. |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 s) along the perimeter and rock outcrop margin outline(s). |
+| | `pre_migration.calculate_uncertainty` | `bool` | `false` | If `true`, computes the Kriging estimation variance during pre-migration Kriging. Defaults to `false` to save computational time. |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth, <i>D</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"D"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
 | | `post_migration.method` | `str` | *by target* | Kriging approach: `"ordinary"` (constant mean, the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (external drift, the default for `post_migration.interpolation_target`: `"D"`) or `"regression"` (Random Forest on the drift terms plus Kriging of the residuals; only through PyKrige). `"ordinary"` overrides `post_migration.drift_analyzer` and `post_migration.drift_terms`: both are ignored and one warning is logged. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
@@ -290,6 +293,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `post_migration.drift_terms` | `list[str]` / `null` | `null` | `null` or a flat list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"linear_xy"`, `"quadratic_xy"`. Without analyzer: ONE (multi-)drift model, e.g. `["sia", "z_dem"]` (if both `"linear_xy"` and `"quadratic_xy"` are given, `"linear_xy"` is dropped with a warning, falling back to `["quadratic_xy"]`); with analyzer: the suite of all combinations of the listed terms (one nested `[]` adds the Ordinary candidate); for `"regression"`: the Random Forest covariates (default `null`: all primitives `["sia", "z_dem", "curvature_dem", "quadratic_xy"]`; coordinates only: `["linear_xy"]`). An empty list `[]` at the top level is rejected - use `null`. If omitted with the method omitted, `post_migration.interpolation_target`: `"D"` uses `["sia"]` (the default suite with the analyzer); `"universal"` without any terms is an error. All single and multi drift models are described [here](#universal-kriging-drift-models). |
 | | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). Note: `"linear"` is only supported under `engine: "pykrige"`. For `engine: "native"`, `"linear"` automatically falls back to `"spherical"`. |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
+| | `post_migration.calculate_uncertainty` | `bool` | `false` | If `true`, computes the Kriging estimation variance during post-migration Kriging. Defaults to `false` to save computational time. |
 | **`finalization_parameters`** | `random_forest_gap_filling` | `bool` | `false` | If `true`, applies Random Forest machine learning gap filling across unmeasured interior regions. |
 | | `apply_margin_blend` | `bool` | `false` | If `true`, applies geomorphological margin blending to seamlessly transition calculated bedrock elevation to surrounding surface DEM terrain. |
 | | `min_gap_dist` | `float` | `50.0` | Minimum gap distance in meters inside which bedrock is smoothly tapered and blended into surface DEM terrain. |
@@ -300,16 +304,16 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `smoothing_kc_cutoff` | `float` | `null` | Corner frequency cutoff wavenumber (<i>k</i><sub>c,smooth</sub>) for `"fft_lowpass"`. If `null`, defaults to <i>k</i><sub>c,opt</sub> from the surface slope smoothing optimization. <i>Lower</i> values produce smoother bedrock terrain. |
 | **`outputs`** | `output_dir` | `str` | `null` | General workspace directory for all output files. `"."` defines `output_dir` as the parent directory of the `pysole.json` configuration file. If `null` (default), automatically creates a `pysole` folder inside the parent directory of `survey_data_path`. All relative output paths are resolved relative to `output_dir`. Absolute output paths override `output_dir`. |
 | | `output_format` | `str` / `list[str]` | `"tif"` | Desired export format(s): `"tif"`, `"asc"`, `"csv"`, `"npy"`, a list of formats (e.g. `["tif", "asc", "csv"]`), or `"all"` to export all four formats. |
-| | `output_prefix` | `str` | `"final"` | Filename prefix or absolute filepath prefix used to construct export filenames. Absolute filepath prefix overrides `output_dir` and diagnostic figures are written beside it in a `figures/` subfolder. |
+| | `output_prefix` | `str` | `""` | Optional filename prefix or absolute filepath prefix prepended to export filenames. When empty (default `""`), exports use clean standard names (e.g. `bedrock.<ext>`, `thickness.<ext>`) and diagnostic figures follow `##_<name>.png`. When specified, exports become `<output_prefix>_<name>.<ext>` and figures follow `##_<output_prefix>_<name>.png`. Absolute filepath prefix overrides `output_dir` and diagnostic figures are written beside it in a `figures/` subfolder. |
 | | `plots_dir` | `str` | `"figures"` | Diagnostic figures are always saved - `plots_dir` controls *where*. `null` is equivalent to `"figures"`. A relative path is resolved inside `output_dir`, or absolute `output_prefix`. `PySole` data products and figures always share the same location, except an absolute `plots_dir` is defined. |
-| | `save_bedrock_elevation_map` | `bool` | `true` | If `true` (default), exports the predicted bedrock elevation raster grid <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) to `<output_prefix>_bedrock.<ext>`. |
+| | `save_bedrock_grid` | `bool` | `true` | If `true` (default), exports the predicted bedrock elevation raster grid <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) to `<output_prefix>_bedrock.<ext>`. |
 | | `save_traveltime_grid` | `bool` | `false` | If `true`, exports the pre-migration interpolated traveltime raster grid, <i>T</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_traveltime.<ext>`. |
-| | `save_traveltime_uncertainty` | `bool` | `false` | If `true`, exports the Kriging traveltime uncertainty raster grid, <i>σ<sub>T</sub></i>(<i>x</i>,<i>y</i>), in traveltime units and masked by the creeping body outline to `<output_prefix>_traveltime_uncertainty.<ext>`. Unavailable (with a warning) if migration is skipped or the survey data are depths. |
+| | `save_traveltime_uncertainty` | `bool` | `false` | If `true`, exports the Kriging traveltime uncertainty raster grid, <i>σ<sub>T</sub></i>(<i>x</i>,<i>y</i>), in traveltime units and masked by the creeping body outline to `<output_prefix>_traveltime_uncertainty.<ext>`. Requires `pre_migration.calculate_uncertainty: true`. Unavailable (with a warning) if migration is skipped or the survey data are depths. |
 | | `save_migrated_points` | `bool` | `false` | If `true`, exports the 3D ray-migrated survey points to `<output_prefix>_migrated_points.csv` (`x, y, z_surface, depth_migrated`). If migration is skipped, it is automatically set to `false` and a log message is printed. |
 | | `save_thickness_grid` | `bool` | `false` | If `true`, exports the final thickness raster grid, <i>D</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness.<ext>`. |
-| | `save_thickness_uncertainty` | `bool` | `false` | If `true`, exports the Kriging thickness uncertainty raster grid, <i>σ<sub>D</sub></i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness_uncertainty.<ext>`. Skipped with a warning if the [memory guard](#memory-guard-and-uncertainty) had to skip the variance. |
+| | `save_thickness_uncertainty` | `bool` | `false` | If `true`, exports the Kriging thickness uncertainty raster grid, <i>σ<sub>D</sub></i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness_uncertainty.<ext>`. Requires `post_migration.calculate_uncertainty: true`. Skipped with a warning if `calculate_uncertainty` is `false` or if the [memory guard](#memory-guard-and-uncertainty) had to skip the variance. |
 | | `save_basal_shear_stress` | `bool` | `false` | If `true`, exports the final basal shear stress raster grid, <i>τ</i><sub>b</sub>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_basal_shear_stress.<ext>`. |
-| | `save_basal_shear_stress_uncertainty` | `bool` | `false` | If `true`, exports the basal shear stress Kriging uncertainty raster grid, <i>σ</i><sub><i>τ</i><sub>b</sub></sub>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_basal_shear_stress_uncertainty.<ext>`. Skipped with a warning if the [memory guard](#memory-guard-and-uncertainty) had to skip the variance. |
+| | `save_basal_shear_stress_uncertainty` | `bool` | `false` | If `true`, exports the basal shear stress Kriging uncertainty raster grid, <i>σ</i><sub><i>τ</i><sub>b</sub></sub>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_basal_shear_stress_uncertainty.<ext>`. Requires `post_migration.calculate_uncertainty: true`. Skipped with a warning if `calculate_uncertainty` is `false` or if the [memory guard](#memory-guard-and-uncertainty) had to skip the variance. |
 
 ---
 
@@ -442,7 +446,9 @@ where:
   - <i>F</i><sub>grid</sub> = [<i>f</i><sub>1</sub>(<i>x</i>,<i>y</i>), ..., <i>f</i><sub><i>L</i></sub>(<i>x</i>,<i>y</i>)]<sup>T</sup>: the drift function vector evaluated at target node (<i>x</i>, <i>y</i>) (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
 
 ##### Thread-Safe Uncertainty Evaluation & Level-3 BLAS Engine
-When Kriging estimation variance (&sigma;<sub>Kriging</sub><sup>2</sup>) is requested, per-grid node variance is evaluated using the exact same target node vector <i>k</i><sub>grid</sub>:
+Kriging estimation variance is optional via `kriging_parameters.pre_migration.calculate_uncertainty` and `kriging_parameters.post_migration.calculate_uncertainty` (both default to `false` to initially save computational time). Dual Kriging point prediction only requires an $O(N \cdot m)$ vector dot product $\mathbf{w}_z \cdot \mathbf{k}_{\text{grid}}$, executing in milliseconds. Evaluating spatial estimation variance, however, requires solving a full $(N+L) \times m$ matrix system $\mathbf{K}^{-1} \mathbf{K}_{\text{rhs}}$, which scales quadratically with sample size as $O(N^2 \cdot m)$ and incurs orders of magnitude higher floating-point operations and memory bandwidth.
+
+When Kriging estimation variance (&sigma;<sub>Kriging</sub><sup>2</sup>) is requested (`calculate_uncertainty: true`), per-grid node variance is evaluated using the exact same target node vector <i>k</i><sub>grid</sub>:
 
 <p align="center">
 $$\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{grid}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{grid}}$$
@@ -576,7 +582,9 @@ The Kriging parameters `method` and `drift_analyzer` decide what the `drift_term
 
 <a id="kriging-uncertainty-derivation"></a>
 #### 7. Kriging Uncertainty Derivation
-Kriging spatial interpolation natively evaluates the 2D estimation variance field $\sigma^2(x,y)$ alongside point predictions. Taking the square root converts the variance field into the **Kriging Standard Error $\sigma(x,y)$**, serving as a quantitative measure of interpolation uncertainty across unmeasured regions.
+Evaluating Kriging uncertainty requires substantially more computational effort and memory throughput than point prediction alone. In the Dual Kriging framework, point prediction $\hat{z}(x,y) = \mathbf{w}_z^T \mathbf{k}_{\text{grid}}$ requires only a single $O(N \cdot m)$ vector-matrix dot product between the solved 1D dual weight vector and the target node vectors (~$10\text{ MFLOPs}$ per chunk). By contrast, evaluating the Kriging estimation variance $\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{grid}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{grid}}$ requires solving a dense $(N+L) \times m$ matrix system $\mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}$, which scales quadratically with the number of observations as $O(N^2 \cdot m)$ operations (~$90\text{ GFLOPs}$ per chunk for $N > 5{,}000$ points) and streams hundreds of megabytes of intermediate matrix data across the CPU memory bus per chunk. For this reason, uncertainty evaluation is optional (disabled by default via `calculate_uncertainty: false` to save computational time) and can be enabled when uncertainty rasters or diagnostic variance plots are specifically required.
+
+When enabled (`calculate_uncertainty: true`), Kriging spatial interpolation natively evaluates the 2D estimation variance field $\sigma^2(x,y)$ alongside point predictions. Taking the square root converts the variance field into the **Kriging Standard Error $\sigma(x,y)$**, serving as a quantitative measure of interpolation uncertainty across unmeasured regions.
 
 The exact calculation of the estimation variance depends on the selected `interpolation_target`:
 
@@ -604,9 +612,9 @@ Under Gaussian linear estimation theory, $\pm 1.00 \, \sigma(x,y)$ represents th
 
 <a id="memory-guard-and-uncertainty"></a>
 #### 8. Memory Guard and Kriging Uncertainty
-The Kriging uncertainty is **always computed** and **always shown** in the diagnostic figures for the post-migration products; the `save_*_uncertainty` options only control whether the rasters are exported. The traveltime uncertainty $\sigma_{\text{T}}$ is exported on request but never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
+Computing Kriging uncertainty is optional and controlled by `kriging_parameters.pre_migration.calculate_uncertainty` and `kriging_parameters.post_migration.calculate_uncertainty` (both default to `false` to save computational time). When `calculate_uncertainty: true` is enabled, post-migration uncertainty standard error ($\sigma_{\text{D}}$) is evaluated and displayed in the diagnostic figures; the `save_*_uncertainty` options control whether the uncertainty raster grids are exported to disk. If `calculate_uncertainty: false` (or if skipped by the memory guard), diagnostic uncertainty panels display *"Uncertainty not available (see log)"* and raster export is skipped with a warning. The traveltime uncertainty $\sigma_{\text{T}}$ is exported on request when pre-migration uncertainty is enabled, but is never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
 
-The native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM. Control group (*cgroup*) limits are respected, thus runs safely inside Docker, Kubernetes, and HPC clusters without exceeding assigned container memory quotas. If the estimate does not fit:
+When uncertainty computation is requested, the native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM. Control group (*cgroup*) limits are respected, thus runs safely inside Docker, Kubernetes, and HPC clusters without exceeding assigned container memory quotas. If the estimate does not fit:
 
 1. the number of worker threads is reduced first (this does not change the results),
 2. only if even a single thread with variance does not fit, the variance is skipped. The uncertainty panels then show *"Uncertainty not available"* and uncertainty rasters are not exported (a warning is logged),
@@ -720,7 +728,7 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   ```
   *Computes a synthetic SIA thickness model and proposes optimal GPR/seismic survey tracks within a length budget. If parameters are omitted, PySole interactively prompts with defaults in the terminal (or applies defaults in batch mode).*
 
-  *See [here](docs/drift_analyzer_&_survey_planner.md) for full details and CLI options.*
+  *See [here](docs/drift_analyzer_&_survey_planner.md#survey_planner) for full details and CLI options.*
 
 * **Show the Installed Version:**
   ```bash

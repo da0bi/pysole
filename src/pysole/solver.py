@@ -70,12 +70,14 @@ class Solver:
         pre_zero_boundary: bool = True,
         pre_interpolation_target: str = "P",
         pre_drift_analyzer: bool = False,
+        pre_calculate_uncertainty: bool = False,
         post_kriging_method: str | None = None,
         post_drift_terms: list | None = None,
         post_variogram_model: str = "spherical",
         post_zero_boundary: bool = True,
         post_interpolation_target: str = "P",
         post_drift_analyzer: bool = False,
+        post_calculate_uncertainty: bool = False,
         perform_migration: bool = True,
         survey_data_type: str = "one_way_traveltime",
         plots_dir: str | Path | None = None,
@@ -128,6 +130,8 @@ class Solver:
             or 'T' (direct traveltime in ns).
         pre_drift_analyzer : bool, default False
             If True, ranks the drift candidates of the first pass with the Drift Analyzer (needs 'universal').
+        pre_calculate_uncertainty : bool, default False
+            If True, calculates estimation variance during Pass 1 pre-migration Kriging.
         post_kriging_method : str, optional
             Second-pass post-migration Kriging method: 'ordinary', 'universal' or 'regression'. If omitted:
             'universal' for the direct target 'D', otherwise 'ordinary'.
@@ -142,6 +146,8 @@ class Solver:
             or 'D' (direct migrated ice thickness in m).
         post_drift_analyzer : bool, default False
             If True, ranks the drift candidates of the second pass with the Drift Analyzer (needs 'universal').
+        post_calculate_uncertainty : bool, default False
+            If True, calculates estimation variance during Pass 2 post-migration Kriging.
         perform_migration : bool, default True
             If True, performs 3D Eikonal normal ray migration on radar traveltimes. If False, skips migration.
         survey_data_type : str, default 'one_way_traveltime'
@@ -232,9 +238,11 @@ class Solver:
         # Migration & Kriging options (Pre-migration & Post-migration)
         self.pre_variogram_model = pre_variogram_model
         self.pre_zero_boundary = bool(pre_zero_boundary)
+        self.pre_calculate_uncertainty = bool(pre_calculate_uncertainty)
 
         self.post_variogram_model = post_variogram_model
         self.post_zero_boundary = bool(post_zero_boundary)
+        self.post_calculate_uncertainty = bool(post_calculate_uncertainty)
 
         self.perform_migration = perform_migration
         self.survey_data_type = survey_data_type
@@ -585,20 +593,69 @@ class Solver:
         logger.info(summary_text)
         return summary_text
 
+    @property
+    def figure_prefix(self) -> str:
+        """Returns clean alphanumeric prefix stem for diagnostic figures (e.g. 'apo' or '')."""
+        raw = (self.outputs_config_obj.output_prefix or "").strip()
+        if not raw:
+            return ""
+        stem = Path(raw).name
+        # Strip common extensions if entered by user
+        for ext in [".tif", ".tiff", ".asc", ".csv", ".npy", ".geotiff"]:
+            if stem.lower().endswith(ext):
+                stem = stem[:-len(ext)]
+        return stem
+
+    def _get_output_filepath(self, suffix: str, ext: str = "") -> str:
+        """Constructs an output filepath incorporating optional prefix and clean suffix.
+
+        Parameters
+        ----------
+        suffix : str
+            Dataset identifier (e.g. 'bedrock', 'thickness', 'migrated_points').
+        ext : str, optional
+            File extension (e.g. '.csv'). If omitted, no extension is appended (suitable for raster save).
+
+        Returns
+        -------
+        filepath : str
+            Resolved filesystem path for output export.
+        """
+        raw_prefix = (self.outputs_config_obj.output_prefix or "").strip()
+        ext_clean = f".{ext.lstrip('.')}" if ext else ""
+        if not raw_prefix:
+            return self.resolve_path(f"{suffix}{ext_clean}")
+
+        prefix_path = Path(raw_prefix)
+        for e in [".tif", ".tiff", ".asc", ".csv", ".npy", ".geotiff"]:
+            if prefix_path.suffix.lower() == e:
+                prefix_path = prefix_path.with_suffix("")
+                break
+
+        parent = prefix_path.parent
+        stem = prefix_path.name
+        filename = f"{stem}_{suffix}{ext_clean}"
+        target = parent / filename if str(parent) != "." else filename
+        return self.resolve_path(str(target))
+
     def _get_resolved_output_prefix(self) -> str:
-        """Resolves the absolute file path prefix for exporting raster and tabular outputs.
+        """Resolves the base file path prefix for exporting raster and tabular outputs.
 
         Returns
         -------
         resolved_prefix : str
-            Full filesystem path prefix without extension.
+            Base filesystem path prefix without extension.
         """
-        raw_prefix = self.outputs_config_obj.output_prefix or "final"
-        prefix_path = Path(raw_prefix)
+        raw_prefix = (self.outputs_config_obj.output_prefix or "").strip()
+        if not raw_prefix:
+            eff_dir = Path(self.resolve_path(".") or ".").resolve()
+            return str(eff_dir) + os.sep
 
-        # Strip extension if user accidentally provided one (e.g. "final.tif")
-        if prefix_path.suffix.lower() in [".tif", ".tiff", ".asc", ".csv", ".npy", ".geotiff"]:
-            prefix_path = prefix_path.with_suffix("")
+        prefix_path = Path(raw_prefix)
+        for ext in [".tif", ".tiff", ".asc", ".csv", ".npy", ".geotiff"]:
+            if prefix_path.suffix.lower() == ext:
+                prefix_path = prefix_path.with_suffix("")
+                break
 
         return self.resolve_path(str(prefix_path))
 
@@ -621,8 +678,7 @@ class Solver:
         """
         if grid is None:
             return None
-        base_prefix = self._get_resolved_output_prefix()
-        filepath = f"{base_prefix}_{suffix}"
+        filepath = self._get_output_filepath(suffix)
         fmt = self.outputs_config_obj.output_format
         raster = BedrockMap(grid=grid, bounds=self.bounds, crs=self.meta.get("crs"), transform=self.meta.get("transform"), name=name)
         saved = raster.save(filepath, formats=fmt)
@@ -650,8 +706,7 @@ class Solver:
         """
         if points is None:
             return None
-        base_prefix = self._get_resolved_output_prefix()
-        filepath = f"{base_prefix}_{suffix}.csv"
+        filepath = self._get_output_filepath(suffix, ext=".csv")
         saved = save_points_csv(points, filepath)
         logger.info(f"   Saved optional migrated survey points to: {saved}")
         return saved
@@ -675,8 +730,8 @@ class Solver:
         if grid is not None and np.any(np.isfinite(grid)):
             return True
         logger.warning(
-            f"   [Export Skipped] The {name} raster is not exported: the Kriging variance is unavailable "
-            "(skipped by the memory guard or not provided by the interpolation method; see the log)."
+            f"   [Export Skipped] The {name} raster is not exported: Kriging uncertainty was not calculated "
+            "(kriging_parameters.*.calculate_uncertainty=false, skipped by the memory guard, or not supported by method)."
         )
         return False
 
@@ -702,7 +757,7 @@ class Solver:
                 res = self._export_optional_raster(self._traveltime_grid, suffix="traveltime", name="traveltime")
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
-            if cfg_out.save_traveltime_uncertainty and self._traveltime_grid is not None:
+            if cfg_out.save_traveltime_uncertainty:
                 if self._uncertainty_exportable(self._traveltime_std, "traveltime uncertainty"):
                     res = self._export_optional_raster(self._traveltime_std, suffix="traveltime_uncertainty", name="traveltime uncertainty")
                     if res:
@@ -717,7 +772,7 @@ class Solver:
                 res = self._export_optional_raster(self.final_thickness, suffix="thickness", name="thickness")
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
-            if cfg_out.save_thickness_uncertainty and self.kriged_std is not None:
+            if cfg_out.save_thickness_uncertainty:
                 if self._uncertainty_exportable(self.kriged_std, "thickness uncertainty"):
                     res = self._export_optional_raster(self.kriged_std, suffix="thickness_uncertainty", name="thickness uncertainty")
                     if res:
@@ -726,12 +781,12 @@ class Solver:
                 res = self._export_optional_raster(self.final_bss, suffix="basal_shear_stress", name="basal shear stress")
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
-            if cfg_out.save_basal_shear_stress_uncertainty and self.bss_std is not None:
+            if cfg_out.save_basal_shear_stress_uncertainty:
                 if self._uncertainty_exportable(self.bss_std, "basal shear stress uncertainty"):
                     res = self._export_optional_raster(self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty")
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
-            if getattr(cfg_out, "save_bedrock_elevation_map", True) and self.final_grid is not None:
+            if getattr(cfg_out, "save_bedrock_grid", True) and self.final_grid is not None:
                 res = self._export_optional_raster(self.final_grid, suffix="bedrock", name="bedrock elevation")
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
@@ -1051,6 +1106,7 @@ class Solver:
         pre_var_model = pre_krig_cfg.get("variogram_model", "spherical")
         pre_zero_boundary = pre_krig_cfg.get("include_zero_boundary_condition", True)
         pre_drift_analyzer = pre_krig_cfg.get("drift_analyzer", False)
+        pre_calculate_uncertainty = pre_krig_cfg.get("calculate_uncertainty", False)
 
         post_target = post_krig_cfg.get("interpolation_target", "P")
         post_method = post_krig_cfg.get("method")
@@ -1058,6 +1114,7 @@ class Solver:
         post_var_model = post_krig_cfg.get("variogram_model", "spherical")
         post_zero_boundary = post_krig_cfg.get("include_zero_boundary_condition", True)
         post_drift_analyzer = post_krig_cfg.get("drift_analyzer", False)
+        post_calculate_uncertainty = post_krig_cfg.get("calculate_uncertainty", False)
 
         opt_cfg = cfg.get("optimization_parameters", {})
         n_cores = inputs.get("n_cores", -1)
@@ -1082,12 +1139,14 @@ class Solver:
             pre_zero_boundary=pre_zero_boundary,
             pre_interpolation_target=pre_target,
             pre_drift_analyzer=pre_drift_analyzer,
+            pre_calculate_uncertainty=pre_calculate_uncertainty,
             post_kriging_method=post_method,
             post_drift_terms=post_drifts,
             post_variogram_model=post_var_model,
             post_zero_boundary=post_zero_boundary,
             post_interpolation_target=post_target,
             post_drift_analyzer=post_drift_analyzer,
+            post_calculate_uncertainty=post_calculate_uncertainty,
             perform_migration=migration_cfg.get("perform_migration", True),
             survey_data_type=survey_dtype,
             plots_dir=outputs.get("plots_dir", None),
@@ -1519,7 +1578,6 @@ class Solver:
         else:
             effective_opt_interactive = bool(interactive_optimization) and not self.is_batch_mode and sys.stdin.isatty()
 
-        need_tt_unc = self.outputs_config_obj.save_traveltime_uncertainty
         krig1_res = self._execute_kriging_pass(
             target_type=self.pre_interpolation_target,
             points=pts,
@@ -1527,7 +1585,7 @@ class Solver:
             var_model=self.pre_variogram_model,
             zero_boundary=self.pre_zero_boundary,
             pass_name="Pass 1: Pre-Migration",
-            return_variance=need_tt_unc,
+            return_variance=self.pre_calculate_uncertainty,
             interactive_optimization=effective_opt_interactive,
         )
         tt_grid = np.maximum(krig1_res.bedrock_grid, 0.0)
@@ -1539,6 +1597,8 @@ class Solver:
             self._traveltime_std = np.sqrt(np.maximum(krig1_res.variance_grid, 0.0))
             if self.outline_mask is not None:
                 self._traveltime_std[~self.outline_mask] = np.nan
+        else:
+            self._traveltime_std = None
 
         cached_dem_grads = self._get_dem_gradients()
 
@@ -1554,6 +1614,7 @@ class Solver:
             interactive=interactive,
             dem_grads=cached_dem_grads,
             show_progress=self.show_progress,
+            output_prefix=self.figure_prefix,
         )
         self.migrated_points = mig_res.migrated_points
 
@@ -1577,6 +1638,7 @@ class Solver:
                                 interactive=interactive,
                                 dem_grads=cached_dem_grads,
                                 show_progress=self.show_progress,
+                                output_prefix=self.figure_prefix,
                             )
                             self.migrated_points = mig_res2.migrated_points
                     else:
@@ -1685,6 +1747,7 @@ class Solver:
             n_cores=self.n_cores,
             nrbins=nrbins,
             show_progress=self.show_progress,
+            output_prefix=self.figure_prefix,
         )
 
         self.opt_kc = opt_res.optimal_kc
@@ -1703,6 +1766,7 @@ class Solver:
         method: str | None = None,
         variogram_model: str | None = None,
         interactive: bool = False,
+        calculate_uncertainty: bool | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Interpolates post-migration bedrock elevation and estimation uncertainty via Dual Kriging.
 
@@ -1722,6 +1786,9 @@ class Solver:
             If None, uses post_variogram_model.
         interactive : bool, default False
             If True, generates interactive diagnostic plots.
+        calculate_uncertainty : bool or None, optional
+            If True, calculates Kriging estimation variance during Pass 2. If None, uses
+            post_calculate_uncertainty configuration setting.
 
         Returns
         -------
@@ -1751,6 +1818,7 @@ class Solver:
         else:
             var_model = self.post_variogram_model
 
+        eff_calc_unc = self.post_calculate_uncertainty if calculate_uncertainty is None else bool(calculate_uncertainty)
         krig_res = self._execute_kriging_pass(
             target_type=self.post_interpolation_target,
             points=pts,
@@ -1758,7 +1826,7 @@ class Solver:
             var_model=var_model,
             zero_boundary=self.post_zero_boundary,
             pass_name="Pass 2: Post-Migration",
-            return_variance=True,  # uncertainty is always computed; the memory guard may skip it if RAM is short
+            return_variance=eff_calc_unc,
         )
         grid_raw = krig_res.bedrock_grid
         prod_var = krig_res.variance_grid
@@ -1802,6 +1870,7 @@ class Solver:
                 plot_extent=plot_extent,
                 plots_dir=self.plots_dir,
                 interactive=interactive,
+                output_prefix=self.figure_prefix,
             )
 
         return self.kriged_bedrock, self.kriged_variance
@@ -2011,18 +2080,6 @@ class Solver:
 
         plot_extent = self.plot_extent
 
-        if should_plot:
-            from .plotting import plot_calculated_bedrock_map
-            plot_calculated_bedrock_map(
-                bedrock_grid=current_bedrock,
-                outline_mask=self.outline_mask,
-                plot_extent=plot_extent,
-                smooth_bedrock=smooth_bedrock,
-                smoothing_sigma=smoothing_sigma,
-                plots_dir=self.plots_dir,
-                interactive=interactive,
-            )
-
         if apply_margin_blend is None:
             if interactive:
                 try:
@@ -2055,13 +2112,14 @@ class Solver:
         else:
             self.blended_bedrock = current_bedrock.copy()
 
-        if should_plot and apply_margin_blend:
+        if should_plot:
             from .plotting import plot_final_blended_bedrock_map
             plot_final_blended_bedrock_map(
                 blended_bedrock=self.blended_bedrock,
                 plot_extent=plot_extent,
                 plots_dir=self.plots_dir,
                 interactive=interactive,
+                output_prefix=self.figure_prefix,
             )
 
         self.final_thickness = np.maximum(self.dem_grid - self.blended_bedrock, 0.0)
@@ -2122,6 +2180,7 @@ class Solver:
                 mean_unc=mean_unc,
                 plots_dir=self.plots_dir,
                 interactive=interactive,
+                output_prefix=self.figure_prefix,
             )
             plot_final_ice_thickness_histogram(
                 final_thickness=self.final_thickness,
@@ -2129,6 +2188,7 @@ class Solver:
                 mean_thick=mean_thick,
                 plots_dir=self.plots_dir,
                 interactive=interactive,
+                output_prefix=self.figure_prefix,
             )
             plot_final_basal_shear_stress_and_uncertainty(
                 final_bss=self.final_bss,
@@ -2139,6 +2199,7 @@ class Solver:
                 mean_bss_unc=mean_bss_unc,
                 plots_dir=self.plots_dir,
                 interactive=interactive,
+                output_prefix=self.figure_prefix,
             )
             plot_final_basal_shear_stress_histogram(
                 final_bss=self.final_bss,
@@ -2146,6 +2207,7 @@ class Solver:
                 mean_bss=mean_bss,
                 plots_dir=self.plots_dir,
                 interactive=interactive,
+                output_prefix=self.figure_prefix,
             )
 
         self.final_grid = self.blended_bedrock
@@ -2250,16 +2312,17 @@ class Solver:
         cfg = getattr(self, "config", None) or {}
         outputs = cfg.get("outputs", {})
 
-        prefix = output_prefix or outputs.get("output_prefix", "final")
+        prefix = output_prefix if output_prefix is not None else outputs.get("output_prefix", "")
+        raw_prefix = (prefix or "").strip()
         explicit_out_dir = output_dir or self.output_dir or outputs.get("output_dir")
         if explicit_out_dir:
             out_d = str(resolve_output_dir(explicit_out_dir, config_path=self.config_path))
-        elif Path(prefix).expanduser().is_absolute():
-            out_d = str(Path(prefix).expanduser().parent)
+        elif raw_prefix and Path(raw_prefix).expanduser().is_absolute():
+            out_d = str(Path(raw_prefix).expanduser().parent)
         else:
             out_d = str(resolve_output_dir(None, config_path=self.config_path))
         raw_plots = plots_dir if plots_dir is not None else self._raw_plots_dir
-        plots_d = resolve_plots_dir(raw_plots, output_prefix=prefix, output_dir=out_d, config_path=self.config_path)
+        plots_d = resolve_plots_dir(raw_plots, output_prefix=raw_prefix or None, output_dir=out_d, config_path=self.config_path)
         fmt = output_format or outputs.get("output_format", "tif")
         if isinstance(fmt, list):
             fmt = fmt[0]

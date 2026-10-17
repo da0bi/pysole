@@ -133,6 +133,7 @@ def plot_unfiltered_product_variogram(
     prefix: str = "01_",
     stage_name: str = "stage1",
     interactive: bool = False,
+    output_prefix: str = "",
 ) -> None:
     """
     Plot the experimental isotropic variogram and fitted theoretical model for the product field.
@@ -165,6 +166,8 @@ def plot_unfiltered_product_variogram(
         Stage name identifier included in the plot filename.
     interactive : bool, default=False
         If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
 
     Returns
     -------
@@ -185,7 +188,12 @@ def plot_unfiltered_product_variogram(
         plt.legend()
         plt.tight_layout()
 
-        _save_figure(plt, plots_dir, f"{prefix}01_bss_{stage_name}_unfiltered_product_variogram.png")
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        if stage_name in ("stage2", "post_migration", "post") or str(prefix).startswith("03"):
+            fig_name = f"04_{pfx_str}post_migration_variogram.png"
+        else:
+            fig_name = f"01_{pfx_str}pre_migration_variogram.png"
+        _save_figure(plt, plots_dir, fig_name)
 
         if interactive:
             _safe_interactive_pause(plt, 0.1)
@@ -203,6 +211,7 @@ def plot_bss_kc_optimization_variograms(
     prefix: str = "01_",
     stage_name: str = "stage1",
     interactive: bool = False,
+    output_prefix: str = "",
 ) -> None:
     """
     Plot normalized product variograms and variance curve across candidate corner frequencies kc.
@@ -232,6 +241,8 @@ def plot_bss_kc_optimization_variograms(
         Stage name identifier included in the plot filename.
     interactive : bool, default=False
         If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
 
     Returns
     -------
@@ -272,7 +283,12 @@ def plot_bss_kc_optimization_variograms(
 
         plt.tight_layout()
 
-        _save_figure(plt, plots_dir, f"{prefix}02_bss_{stage_name}_kc_optimization_variograms.png")
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        if stage_name in ("stage2", "post_migration", "post") or str(prefix).startswith("03"):
+            fig_name = f"05_{pfx_str}post_migration_kc_variogram_optimization.png"
+        else:
+            fig_name = f"02_{pfx_str}pre_migration_kc_variogram_optimization.png"
+        _save_figure(plt, plots_dir, fig_name)
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -357,6 +373,7 @@ def plot_migration_displacement_vectors(
     outline_mask: np.ndarray | None = None,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
+    output_prefix: str = "",
 ) -> None:
     """
     Plot 3D ray-tracing migration displacement vectors and migrated sounding depths.
@@ -507,7 +524,8 @@ def plot_migration_displacement_vectors(
 
         plt.tight_layout()
 
-        _save_figure(plt, plots_dir, "02_01_eikonal_migration_displacement_vectors.png")
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        _save_figure(plt, plots_dir, f"03_{pfx_str}3d_migration.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -578,6 +596,7 @@ def plot_kriging_bedrock_and_uncertainty(
     kriged_variance: np.ndarray | None = None,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
+    output_prefix: str = "",
 ) -> None:
     """
     Plot 2-panel figure showing Kriging-interpolated bedrock elevation and standard uncertainty.
@@ -650,7 +669,8 @@ def plot_kriging_bedrock_and_uncertainty(
 
         plt.tight_layout()
 
-        _save_figure(plt, plots_dir, "04_01_kriging_bedrock_elevation_and_uncertainty.png")
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        _save_figure(plt, plots_dir, f"06_{pfx_str}bedrock_elevation_and_uncertainty.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -765,6 +785,7 @@ def plot_final_blended_bedrock_map(
     plot_extent: list[float],
     plots_dir: str | Path | None = None,
     interactive: bool = False,
+    output_prefix: str = "",
 ) -> None:
     """
     Plot final geomorphologically blended bedrock elevation raster.
@@ -783,6 +804,8 @@ def plot_final_blended_bedrock_map(
         Target directory to save the output figure PNG. If None, figure is not saved.
     interactive : bool, default=False
         If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
 
     Returns
     -------
@@ -800,7 +823,8 @@ def plot_final_blended_bedrock_map(
         plt.ylabel("Y [m]")
         plt.tight_layout()
 
-        _save_figure(plt, plots_dir, "06_01_final_blended_bedrock_map.png")
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        _save_figure(plt, plots_dir, f"07_{pfx_str}final_embedded_bedrock.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -819,6 +843,7 @@ def plot_final_ice_thickness_and_uncertainty(
     mean_unc: float,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
+    output_prefix: str = "",
 ) -> None:
     """
     Plot 2-panel figure showing final ice thickness map and Kriging standard uncertainty.
@@ -907,7 +932,8 @@ def plot_final_ice_thickness_and_uncertainty(
 
         plt.tight_layout()
 
-        _save_figure(plt, plots_dir, "07_01_final_ice_thickness_map.png")
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        _save_figure(plt, plots_dir, f"08_{pfx_str}final_ice_thickness_and_uncertainty.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -923,6 +949,7 @@ def plot_final_ice_thickness_histogram(
     mean_thick: float,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
+    output_prefix: str = "",
 ) -> None:
     """
     Plot statistical frequency histogram of the final ice thickness distribution.
@@ -993,7 +1020,8 @@ def plot_final_ice_thickness_histogram(
         plt.legend(loc="upper left")
         plt.tight_layout()
 
-        _save_figure(plt, plots_dir, "07_02_final_ice_thickness_histogram.png")
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        _save_figure(plt, plots_dir, f"09_{pfx_str}final_ice_thickness_histogram.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -1012,6 +1040,7 @@ def plot_final_basal_shear_stress_and_uncertainty(
     mean_bss_unc: float,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
+    output_prefix: str = "",
 ) -> None:
     """
     Plot 2-panel figure showing Basal Shear Stress distribution and propagated Kriging uncertainty.
@@ -1103,7 +1132,8 @@ def plot_final_basal_shear_stress_and_uncertainty(
 
         plt.tight_layout()
 
-        _save_figure(plt, plots_dir, "08_01_final_basal_shear_stress_map.png")
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        _save_figure(plt, plots_dir, f"10_{pfx_str}final_basal_shear_stress_and_uncertainty.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -1119,6 +1149,7 @@ def plot_final_basal_shear_stress_histogram(
     mean_bss: float,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
+    output_prefix: str = "",
 ) -> None:
     """
     Plot statistical frequency histogram of the final Basal Shear Stress distribution.
@@ -1189,7 +1220,8 @@ def plot_final_basal_shear_stress_histogram(
         plt.legend(loc="upper left")
         plt.tight_layout()
 
-        _save_figure(plt, plots_dir, "08_02_final_basal_shear_stress_histogram.png")
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        _save_figure(plt, plots_dir, f"11_{pfx_str}final_basal_shear_stress_histogram.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)

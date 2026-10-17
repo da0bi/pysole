@@ -58,7 +58,7 @@ class ReviewTestCase(unittest.TestCase):
 class TestSlopeHandling(ReviewTestCase):
     def test_bss_uses_unfloored_slope(self):
         """F1: the basal shear stress uses sin(alpha_opt) without the slope floor (as in v0.4.4)."""
-        solver = self.make_solver()
+        solver = self.make_solver(post_calculate_uncertainty=True)
         solver.opt_slope = np.full((12, 12), 0.02)  # ~1.1 deg, far below the 5 deg slope floor
         solver.calculate_bedrock()
         solver.finalize_bedrock()

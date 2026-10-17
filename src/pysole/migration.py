@@ -87,6 +87,7 @@ class EikonalMigrator:
         plots_dir: str | Path | None = None,
         interactive: bool = False,
         show_progress: bool = True,
+        output_prefix: str = "",
     ) -> MigrationResult:
         """
         Executes 3D Eikonal ray migration for a continuous traveltime field and scattered picks.
@@ -106,6 +107,8 @@ class EikonalMigrator:
             If True, displays interactive Matplotlib figures during migration.
         show_progress : bool, default True
             If True, displays a progress bar during point relocation.
+        output_prefix : str, default ""
+            Output prefix for diagnostic figures.
 
         Returns
         -------
@@ -123,6 +126,7 @@ class EikonalMigrator:
             interactive=interactive,
             dem_grads=self.dem_grads,
             show_progress=show_progress,
+            output_prefix=output_prefix,
         )
 
     def migrate_points(self, points: np.ndarray, velocity: float = 0.16) -> np.ndarray:
@@ -161,6 +165,7 @@ def migrate_eikonal_points(
     interactive: bool = False,
     dem_grads: dict[str, np.ndarray] | None = None,
     show_progress: bool = True,
+    output_prefix: str = "",
 ) -> MigrationResult:
     """
     Relocates scattered radar soundings into 3D space using 3D Eikonal ray normal migration.
@@ -330,6 +335,7 @@ def migrate_eikonal_points(
             outline_mask=outline_mask,
             plots_dir=plots_dir,
             interactive=interactive,
+            output_prefix=output_prefix,
         )
 
     return MigrationResult(

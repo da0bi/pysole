@@ -79,9 +79,13 @@ class TestConfigWorkflowWuk(unittest.TestCase):
 
         cfg_outputs = pysole.config.DEFAULT_CONFIG["outputs"]
         self.assertIsNone(cfg_outputs["output_dir"])
-        self.assertEqual(cfg_outputs["output_prefix"], "final")
+        self.assertEqual(cfg_outputs["output_prefix"], "")
         self.assertEqual(cfg_outputs["output_format"], "tif")
         self.assertEqual(cfg_outputs["plots_dir"], "figures")
+
+        cfg_krig = pysole.config.DEFAULT_CONFIG["kriging_parameters"]
+        self.assertFalse(cfg_krig["pre_migration"]["calculate_uncertainty"])
+        self.assertFalse(cfg_krig["post_migration"]["calculate_uncertainty"])
 
     def test_output_dir_resolution(self):
         dem = np.ones((10, 10))

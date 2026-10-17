@@ -430,7 +430,7 @@ class SurveyPlanner:
         kc: float | None = None,
         tau_0: float | None = None,
         max_length_km: float | None = None,
-        output_prefix: str = "final",
+        output_prefix: str = "",
         output_dir: str | Path | None = None,
         plots_dir: str | Path | None = None,
         output_format: str = "tif",
@@ -454,7 +454,7 @@ class SurveyPlanner:
         max_length_km : float, optional
             Maximum total line length budget in kilometers [km]. If None, prompts
             interactively (default: 5.0 km).
-        output_prefix : str, default "final"
+        output_prefix : str, default ""
             File prefix for generated raster and vector outputs.
         output_dir : str or Path, optional
             Base directory for output data files.
@@ -498,14 +498,15 @@ class SurveyPlanner:
                 max_length_km = _prompt_survey_parameter("Maximum survey track length budget", DEFAULT_SURVEY_MAX_KM, "km")
             else:
                 max_length_km = DEFAULT_SURVEY_MAX_KM
-        prefix_path = Path(output_prefix).expanduser()
+        raw_prefix = (output_prefix or "").strip()
+        prefix_path = Path(raw_prefix).expanduser() if raw_prefix else None
         if output_dir:
             out_dir = Path(output_dir)
-        elif prefix_path.is_absolute():
+        elif prefix_path and prefix_path.is_absolute():
             out_dir = prefix_path.parent
         else:
             out_dir = Path.cwd()
-        fig_dir = Path(resolve_plots_dir(plots_dir, output_prefix=output_prefix, output_dir=out_dir))
+        fig_dir = Path(resolve_plots_dir(plots_dir, output_prefix=raw_prefix or None, output_dir=out_dir))
         out_dir.mkdir(parents=True, exist_ok=True)
         fig_dir.mkdir(parents=True, exist_ok=True)
 
@@ -516,8 +517,11 @@ class SurveyPlanner:
 
         d_sia = self.compute_synthetic_sia_depth(kc=kc, tau_0=tau_0)
 
-        # Export synthetic SIA raster map: <output_prefix>_sia_modelled_depth.<ext>
-        raster_filename = f"{output_prefix}_sia_modelled_depth.{output_format}"
+        file_prefix = prefix_path.name if prefix_path else ""
+        pfx_part = f"{file_prefix}_" if file_prefix else ""
+
+        # Export synthetic SIA raster map: [<prefix>_]sia_modelled_depth.<ext>
+        raster_filename = f"{pfx_part}sia_modelled_depth.{output_format}"
         raster_path = out_dir / raster_filename
         bedrock_map = BedrockMap(
             grid=d_sia,
@@ -532,16 +536,16 @@ class SurveyPlanner:
         logger.info(f"3. Recommending survey profile tracks for max budget L_max = {max_length_km:.1f} km...")
         tracks = self.generate_survey_tracks(d_sia, max_length_km=max_length_km)
 
-        # Export vector files: <output_prefix>_survey_plan.gpx / geojson
-        geojson_path = out_dir / f"{output_prefix}_survey_plan.geojson"
-        gpx_path = out_dir / f"{output_prefix}_survey_plan.gpx"
+        # Export vector files: [<prefix>_]survey_plan.gpx / geojson
+        geojson_path = out_dir / f"{pfx_part}survey_plan.geojson"
+        gpx_path = out_dir / f"{pfx_part}survey_plan.gpx"
         saved_geojson = self.export_geojson(tracks, geojson_path)
         saved_gpx = self.export_gpx(tracks, gpx_path)
         logger.info(f"4. Saved planned survey tracks to: {saved_geojson} & {saved_gpx}")
 
-        # Render & save plot: <plots_dir>/<output_prefix_name>_survey_plan_map.png
-        file_prefix = Path(output_prefix).name
-        plot_path = fig_dir / f"{file_prefix}_survey_plan_map.png"
+        # Render & save plot: <plots_dir>/[<prefix>_]survey_plan_map.png
+        plot_filename = f"{pfx_part}survey_plan_map.png"
+        plot_path = fig_dir / plot_filename
         _, ax = plt.subplots(figsize=(10, 8))
         im = ax.imshow(
             d_sia,
@@ -560,7 +564,7 @@ class SurveyPlanner:
         ax.set_xlabel("X [m]")
         ax.set_ylabel("Y [m]")
         ax.legend(loc="upper right")
-        _save_figure(plt, fig_dir, f"{file_prefix}_survey_plan_map.png")
+        _save_figure(plt, fig_dir, plot_filename)
         plt.close()
 
         return {

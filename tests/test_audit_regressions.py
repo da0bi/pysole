@@ -601,7 +601,7 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertTrue(np.all(np.isnan(v_fast)))  # NaN, never a misleading 0 uncertainty
 
     def test_solver_variance_flag_wiring(self):
-        """21. Uncertainty is always requested in pass 2; pass 1 only as instructed; max_memory_fraction is forwarded."""
+        """21. Uncertainty calculation in pass 1 and pass 2 is controlled by calculate_uncertainty flags; max_memory_fraction is forwarded."""
         from pysole.interpolation import KrigingResult
 
         solver = self._make_small_solver()
@@ -625,13 +625,25 @@ class TestAuditRegressions(unittest.TestCase):
             self.assertFalse(mock_krig.call_args.kwargs["return_variance"])
             self.assertEqual(mock_krig.call_args.kwargs["max_memory_fraction"], 0.2)
 
+        # Pass 2 defaults to False
         with patch.object(solver, "_execute_kriging_pass", wraps=solver._execute_kriging_pass) as mock_exec:
             solver.calculate_bedrock()
-        self.assertIs(mock_exec.call_args.kwargs["return_variance"], True)  # pass 2 always evaluates sigma
+        self.assertIs(mock_exec.call_args.kwargs["return_variance"], False)
+
+        # Explicit calculate_uncertainty=True
+        with patch.object(solver, "_execute_kriging_pass", wraps=solver._execute_kriging_pass) as mock_exec:
+            solver.calculate_bedrock(calculate_uncertainty=True)
+        self.assertIs(mock_exec.call_args.kwargs["return_variance"], True)
+
+        # Configured post_calculate_uncertainty=True
+        solver.post_calculate_uncertainty = True
+        with patch.object(solver, "_execute_kriging_pass", wraps=solver._execute_kriging_pass) as mock_exec:
+            solver.calculate_bedrock()
+        self.assertIs(mock_exec.call_args.kwargs["return_variance"], True)
 
     def test_memory_guard_skips_variance_end_to_end(self):
         """24. A RAM shortage yields NaN uncertainty with a warning, and the NaN raster is never exported."""
-        solver = self._make_small_solver(output_dir=str(self.output_dir / "guard_e2e"))
+        solver = self._make_small_solver(output_dir=str(self.output_dir / "guard_e2e"), post_calculate_uncertainty=True)
         solver.config = {"outputs": {"save_thickness_uncertainty": True}}
         with patch("pysole.memory.available_memory_bytes", return_value=1000):  # 1 kB: nothing fits
             with self.assertLogs("pysole", level="WARNING") as cm:
@@ -644,14 +656,29 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertFalse(any("uncertainty" in f for f in saved), saved)
         self.assertTrue(any("[Export Skipped]" in m for m in cm.output), cm.output)
 
-    def test_variance_always_computed_and_figures_saved(self):
-        """25. The Kriging variance is always evaluated (finite inside the outline) and the figures are saved."""
-        solver = self._make_small_solver(output_dir=str(self.output_dir / "always_sigma"))
-        solver.config = {}
-        _, variance = solver.calculate_bedrock()
-        self.assertTrue(np.all(np.isfinite(variance[solver.outline_mask])))
-        self.assertTrue(np.all(np.isfinite(solver.kriged_std[solver.outline_mask])))
-        self.assertGreater(len(os.listdir(solver.plots_dir)), 0)
+    def test_variance_computation_and_figures_saved(self):
+        """25. Kriging variance is evaluated when calculate_uncertainty=True and skipped when False."""
+        # (a) When calculate_uncertainty=True, finite variance and kriged_std inside outline
+        solver_unc = self._make_small_solver(
+            output_dir=str(self.output_dir / "with_sigma"),
+            post_calculate_uncertainty=True,
+        )
+        solver_unc.config = {}
+        _, variance = solver_unc.calculate_bedrock()
+        self.assertTrue(np.all(np.isfinite(variance[solver_unc.outline_mask])))
+        self.assertTrue(np.all(np.isfinite(solver_unc.kriged_std[solver_unc.outline_mask])))
+        self.assertGreater(len(os.listdir(solver_unc.plots_dir)), 0)
+
+        # (b) When calculate_uncertainty=False (default), variance is all NaN and figures are saved
+        solver_fast = self._make_small_solver(
+            output_dir=str(self.output_dir / "no_sigma"),
+            post_calculate_uncertainty=False,
+        )
+        solver_fast.config = {}
+        _, variance_fast = solver_fast.calculate_bedrock()
+        self.assertTrue(np.all(np.isnan(variance_fast)))
+        self.assertTrue(np.all(np.isnan(solver_fast.kriged_std)))
+        self.assertGreater(len(os.listdir(solver_fast.plots_dir)), 0)
 
     def test_uncertainty_placeholder_panel_renders(self):
         """26. An all-NaN uncertainty grid renders a placeholder panel without errors or warnings."""
@@ -749,7 +776,7 @@ class TestAuditRegressions(unittest.TestCase):
                 tag = f"once_{survey_type}_{flag}"
                 out = self.output_dir / tag / "out"
                 cfg_file, _ = self._write_pipeline_config(
-                    tag, {"output_dir": str(out), "output_prefix": "r", "save_bedrock_elevation_map": flag,
+                    tag, {"output_dir": str(out), "output_prefix": "r", "save_bedrock_grid": flag,
                           "save_migrated_points": True, "save_traveltime_grid": True},
                     survey_data_type=survey_type,
                 )
@@ -970,9 +997,9 @@ class TestAuditRegressions(unittest.TestCase):
                 coerce_bool(bad, "x", True)
         self.assertTrue(issubclass(ConfigError, ValueError))
 
-        out = OutputsConfig.from_dict({"save_thickness_grid": "true", "save_bedrock_elevation_map": "False"})
+        out = OutputsConfig.from_dict({"save_thickness_grid": "true", "save_bedrock_grid": "False"})
         self.assertIs(out.save_thickness_grid, True)
-        self.assertIs(out.save_bedrock_elevation_map, False)
+        self.assertIs(out.save_bedrock_grid, False)
         with self.assertRaises(ConfigError):
             OutputsConfig.from_dict({"save_thickness_grid": "maybe"})
 
@@ -1129,7 +1156,7 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertEqual(problems, [])
 
     def test_save_traveltime_uncertainty_export(self):
-        """40. save_traveltime_uncertainty auto-enables Pass 1 variance evaluation and exports traveltime uncertainty raster in traveltime units."""
+        """40. pre_calculate_uncertainty enables Pass 1 variance evaluation and save_traveltime_uncertainty exports it."""
         import tempfile
         from pysole.solver import Solver
 
@@ -1148,6 +1175,7 @@ class TestAuditRegressions(unittest.TestCase):
                 dy=10.0,
                 bounds=geom.bounds,
                 output_dir=tmpdir,
+                pre_calculate_uncertainty=True,
                 config={"outputs": {"save_traveltime_uncertainty": True}},
             )
             solver.pre_kriging_points = pts
@@ -1419,9 +1447,63 @@ class TestAuditRegressions(unittest.TestCase):
             interactive=False,
         )
 
-        expected_fig = self.output_dir / "02_01_eikonal_migration_displacement_vectors.png"
+        expected_fig = self.output_dir / "03_3d_migration.png"
         self.assertTrue(expected_fig.exists())
         self.assertGreater(expected_fig.stat().st_size, 1000)
+
+    def test_standardized_figure_naming_convention(self):
+        """Verifies standardized 11 diagnostic figures naming with empty and custom prefix,
+        and confirms unblended calculated bedrock figure is skipped."""
+        expected_suffixes = [
+            "01_pre_migration_variogram.png",
+            "02_pre_migration_kc_variogram_optimization.png",
+            "03_3d_migration.png",
+            "04_post_migration_variogram.png",
+            "05_post_migration_kc_variogram_optimization.png",
+            "06_bedrock_elevation_and_uncertainty.png",
+            "07_final_embedded_bedrock.png",
+            "08_final_ice_thickness_and_uncertainty.png",
+            "09_final_ice_thickness_histogram.png",
+            "10_final_basal_shear_stress_and_uncertainty.png",
+            "11_final_basal_shear_stress_histogram.png",
+        ]
+
+        # Case 1: Empty prefix (default)
+        cfg_file_empty, work_empty = self._write_pipeline_config(
+            "fig_naming_empty",
+            {"output_prefix": "", "output_dir": str(work_empty if 'work_empty' in locals() else self.output_dir / "fig_naming_empty")},
+            survey_data_type="one_way_traveltime",
+        )
+        run_from_config(config_path=cfg_file_empty, is_batch=True)
+        plots_empty = work_empty / "figures"
+        self.assertTrue(plots_empty.exists())
+        created_empty = sorted(f.name for f in plots_empty.glob("*.png"))
+
+        for expected in expected_suffixes:
+            self.assertIn(expected, created_empty, f"Missing expected figure: {expected}")
+        self.assertFalse(any("calculated_bedrock" in name for name in created_empty))
+        self.assertEqual(len(created_empty), 11)
+
+        # Case 2: Custom prefix
+        prefix = "apo"
+        work_custom = self.output_dir / "fig_naming_custom"
+        cfg_file_custom, work_custom = self._write_pipeline_config(
+            "fig_naming_custom",
+            {"output_prefix": prefix, "output_dir": str(work_custom)},
+            survey_data_type="one_way_traveltime",
+        )
+        run_from_config(config_path=cfg_file_custom, is_batch=True)
+        plots_custom = work_custom / "figures"
+        self.assertTrue(plots_custom.exists())
+        created_custom = sorted(f.name for f in plots_custom.glob("*.png"))
+
+        expected_custom = [
+            f"{s[:3]}{prefix}_{s[3:]}" for s in expected_suffixes
+        ]
+        for expected in expected_custom:
+            self.assertIn(expected, created_custom, f"Missing expected custom figure: {expected}")
+        self.assertFalse(any("calculated_bedrock" in name for name in created_custom))
+        self.assertEqual(len(created_custom), 11)
 
 
 if __name__ == "__main__":

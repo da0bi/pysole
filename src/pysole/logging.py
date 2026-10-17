@@ -157,11 +157,11 @@ def get_welcome_banner(version: str | None = None, term_width: int | None = None
     term_width = max(term_width, 40)
 
     ascii_art = [
-        r"    ____       _____       __     ",
-        r"   / __ \__  _/ ___/____  / /__   ",
+        r"    ____        _____       __    ",
+        r"   / __ \__  _ / ___/____  / /__  ",
         r"  / /_/ / / / /\__ \/ __ \/ / _ \ ",
         r" / ____/ /_/ /___/ / /_/ / /  __/ ",
-        r"/_/    \__, //____/\____/_/\___/  ",
+        r"/_/    \__, /_____/\____/_/\___/  ",
         r"      /____/                      ",
     ]
 
@@ -361,4 +361,3 @@ __all__ = [
     "get_progress_bar",
     "activity_indicator",
 ]
-

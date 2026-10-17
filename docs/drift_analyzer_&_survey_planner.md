@@ -344,6 +344,7 @@ The `DriftAnalyzer` applies one domain-specific rule:
 
 ---
 
+<a id="survey_planner"></a>
 ## 2. Survey Planner (`SurveyPlanner`)
 
 When a user provides a surface DEM (`dem_path`) and glacier outline (`outline_path`), but **no survey dataset** (`survey_data_path = null`), `PySole` automatically dispatches the **Survey Planner**.
@@ -554,5 +555,3 @@ Computes the shallow-ice-approximation (SIA) thickness model and proposes survey
   - `--format`: Export raster format (`tif` or `asc`, default `tif`).
 
 - **Output Path Resolution:** Outputs are kept together: files go to `--out-dir` (current directory if omitted); an absolute `--prefix` places all files beside it; figures are saved in `figures/` next to the data files unless `--plots-dir` is an absolute path.
-
-

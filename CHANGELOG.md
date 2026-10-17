@@ -5,6 +5,50 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **[Decoupled Kriging Uncertainty Calculation] (`src/pysole/config.py`, `src/pysole/solver.py`, `pysole.json`, `README.md`)**:
+  - Introduced `"calculate_uncertainty": true | false` (default: `false`) in both `kriging_parameters.pre_migration` and `kriging_parameters.post_migration`.
+  - Replaced hardcoded `return_variance=True` in Pass 2 post-migration Dual Kriging with `post_calculate_uncertainty`, eliminating $O(N^2 \cdot m)$ dense matrix solves and RAM streaming overhead when uncertainty is not requested (yielding a **~25× speedup** on large regional grids such as Apo Glacier).
+  - Replaced coupled `return_variance=save_traveltime_uncertainty` in Pass 1 pre-migration Dual Kriging with `pre_calculate_uncertainty`.
+  - Added `calculate_uncertainty` parameter to `Solver.__init__`, `Solver.from_config()`, and `Solver.calculate_bedrock()`.
+- **[Standardized Diagnostic Figure Naming] (`src/pysole/plotting.py`, `src/pysole/solver.py`, `src/pysole/variogram.py`, `src/pysole/migration.py`)**:
+  - Standardized all 11 diagnostic figures to the uniform numbering and naming format `'#numberofcalculation'_['output_prefix'_]<name>.png`:
+    - `01_[<prefix>_]pre_migration_variogram.png`
+    - `02_[<prefix>_]pre_migration_kc_variogram_optimization.png`
+    - `03_[<prefix>_]3d_migration.png`
+    - `04_[<prefix>_]post_migration_variogram.png`
+    - `05_[<prefix>_]post_migration_kc_variogram_optimization.png`
+    - `06_[<prefix>_]bedrock_elevation_and_uncertainty.png`
+    - `07_[<prefix>_]final_embedded_bedrock.png`
+    - `08_[<prefix>_]final_ice_thickness_and_uncertainty.png`
+    - `09_[<prefix>_]final_ice_thickness_histogram.png`
+    - `10_[<prefix>_]final_basal_shear_stress_and_uncertainty.png`
+    - `11_[<prefix>_]final_basal_shear_stress_histogram.png`
+  - Propagated `output_prefix` cleanly across `EikonalMigrator.migrate()`, `BSSOptimizer.optimize()`, `optimize_bss_variance()`, and all plotting functions in `Solver`.
+
+### Changed
+- **[Renamed Output Parameter `save_bedrock_grid`] (`src/pysole/config.py`, `src/pysole/solver.py`, `pysole.json`, `README.md`, benchmarks)**:
+  - Renamed `outputs.save_bedrock_elevation_map` to `outputs.save_bedrock_grid` (default: `true`), aligning with `save_traveltime_grid` and `save_thickness_grid`.
+  - Updated `OutputsConfig` dataclass, `DEFAULT_CONFIG["outputs"]`, `Solver.export_outputs("finalization")`, template configs (`pysole.json`, `examples/apo/pysole_apo.json`, `examples/gok/pysole_gok.json`, `examples/wuk/pysole_wuk.json`), documentation, and tests. Retained zero legacy compatibility aliases.
+- **[Default Empty `output_prefix`] (`src/pysole/config.py`, `pysole.json`, `README.md`, `src/pysole/solver.py`, `src/pysole/survey_planner.py`)**:
+  - Changed default `outputs.output_prefix` from `"final"` to empty string `""` in `DEFAULT_CONFIG`, `OutputsConfig`, `pysole.json`, `README.md`, and CLI argument parsers.
+  - When `output_prefix` is empty, output filenames omit leading and dangling underscores (`bedrock.tif`, `thickness.tif`, `migrated_points.csv`, and figures `01_pre_migration_variogram.png`, etc.).
+  - When a custom prefix is specified (e.g. `"apo"`), output filenames cleanly prepend the prefix (`apo_bedrock.tif`, `01_apo_pre_migration_variogram.png`, etc.).
+- **[Removed Intermediate Calculated Bedrock Plot] (`src/pysole/solver.py`)**:
+  - Removed generation of the intermediate unblended bedrock map (`05_01_calculated_bedrock_map.png`) during pipeline execution; `plot_final_blended_bedrock_map` (`07_[<prefix>_]final_embedded_bedrock.png`) is always produced whenever diagnostic plotting is enabled.
+- **[Output Exporter Decoupling & Clean Logging] (`src/pysole/solver.py`)**:
+  - Decoupled `outputs` section parameters (`save_traveltime_uncertainty`, `save_thickness_uncertainty`, `save_basal_shear_stress_uncertainty`) to strictly control disk writing of computed grids without triggering implicit Kriging variance evaluation.
+  - When an uncertainty export is requested in `outputs` while `calculate_uncertainty` is `false` (or skipped by the memory guard), PySole cleanly logs `[Export Skipped] The {name} raster is not exported: Kriging uncertainty was not calculated (kriging_parameters.*.calculate_uncertainty=false, skipped by the memory guard, or not supported by method).`
+  - Zero backward compatibility retained for removed legacy couplings.
+
+### Fixed
+- **[Relative Output Directory Resolution for Migrated Points] (`src/pysole/solver.py`)**:
+  - Fixed path resolution in `Solver._export_optional_points_csv()` so that relative output paths (such as `"output_dir": "."`) and custom output prefixes resolve properly against `output_dir` (e.g. `./migrated_points.csv` or `./<prefix>_migrated_points.csv`) rather than falling back to CWD or omitting export files.
+- **[Survey Planner Documentation Anchor Link] (`docs/drift_analyzer_&_survey_planner.md`)**:
+  - Updated markdown anchor targeting for the Survey Planner documentation to `<a id="survey_planner"></a>`.
+
 ## [0.5.2] - 2026-10-16
 
 Memory-aware spectral optimization guard, interactive terminal survey planning, multivariate regression kriging default, robust duplicate logging prevention, dynamic displacement vector plot scaling, and terminal UI enhancements.

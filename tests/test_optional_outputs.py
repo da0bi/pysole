@@ -61,10 +61,19 @@ class TestOptionalOutputs(unittest.TestCase):
                 "perform_migration": True,
                 "velocity": 0.16,
             },
+            "kriging_parameters": {
+                "pre_migration": {
+                    "calculate_uncertainty": True,
+                },
+                "post_migration": {
+                    "calculate_uncertainty": True,
+                },
+            },
             "outputs": {
                 "output_format": "tif",
                 "output_prefix": output_stem + ".tif",  # Test automatic extension stripping
                 "save_traveltime_grid": True,
+                "save_traveltime_uncertainty": True,
                 "save_migrated_points": True,
                 "save_thickness_grid": True,
                 "save_thickness_uncertainty": True,
@@ -78,6 +87,7 @@ class TestOptionalOutputs(unittest.TestCase):
         # Check that bedrock and optional output files were created on disk
         self.assertTrue(os.path.exists(f"{output_stem}_bedrock.tif"))
         self.assertTrue(os.path.exists(f"{output_stem}_traveltime.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_traveltime_uncertainty.tif"))
         self.assertTrue(os.path.exists(f"{output_stem}_migrated_points.csv"))
         self.assertTrue(os.path.exists(f"{output_stem}_thickness.tif"))
         self.assertTrue(os.path.exists(f"{output_stem}_thickness_uncertainty.tif"))
@@ -95,6 +105,59 @@ class TestOptionalOutputs(unittest.TestCase):
         # Check basal shear stress is in kPa (~10 - 200 kPa range)
         valid_bss = solver.basal_shear_stress_grid[~np.isnan(solver.basal_shear_stress_grid)]
         self.assertTrue(np.all(valid_bss >= 0.0))
+
+    def test_optional_uncertainty_exports_skipped_when_calculation_disabled(self):
+        output_stem = os.path.join(self.temp_dir, "output_no_unc_calc")
+        cfg = {
+            "inputs": {
+                "dem_path": self.dem_path,
+                "survey_data_path": self.pts_path,
+                "survey_data_type": "one_way_traveltime",
+                "show_progress": False,
+            },
+            "migration_parameters": {
+                "perform_migration": True,
+                "velocity": 0.16,
+            },
+            "kriging_parameters": {
+                "pre_migration": {
+                    "calculate_uncertainty": False,
+                },
+                "post_migration": {
+                    "calculate_uncertainty": False,
+                },
+            },
+            "outputs": {
+                "output_format": "tif",
+                "output_prefix": output_stem,
+                "save_traveltime_grid": True,
+                "save_traveltime_uncertainty": True,
+                "save_thickness_grid": True,
+                "save_thickness_uncertainty": True,
+                "save_basal_shear_stress": True,
+                "save_basal_shear_stress_uncertainty": True,
+            }
+        }
+        solver = Solver.from_config(cfg)
+        with self.assertLogs("pysole", level="WARNING") as cm:
+            solver.run_pipeline()
+
+        # Regular grids are created
+        self.assertTrue(os.path.exists(f"{output_stem}_bedrock.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_traveltime.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_thickness.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_basal_shear_stress.tif"))
+
+        # Uncertainty files are NOT created because calculation was disabled
+        self.assertFalse(os.path.exists(f"{output_stem}_traveltime_uncertainty.tif"))
+        self.assertFalse(os.path.exists(f"{output_stem}_thickness_uncertainty.tif"))
+        self.assertFalse(os.path.exists(f"{output_stem}_basal_shear_stress_uncertainty.tif"))
+
+        # Notice/warning logged for skipped exports
+        export_skipped_logs = [m for m in cm.output if "[Export Skipped]" in m]
+        self.assertTrue(any("traveltime uncertainty" in m for m in export_skipped_logs))
+        self.assertTrue(any("thickness uncertainty" in m for m in export_skipped_logs))
+        self.assertTrue(any("basal shear stress uncertainty" in m for m in export_skipped_logs))
 
     def test_migration_skipped_disables_migrated_points_export(self):
         output_stem = os.path.join(self.temp_dir, "output_nomig")
@@ -122,6 +185,51 @@ class TestOptionalOutputs(unittest.TestCase):
         self.assertTrue(os.path.exists(f"{output_stem}_bedrock.tif"))
         self.assertTrue(os.path.exists(f"{output_stem}_thickness.tif"))
         self.assertFalse(os.path.exists(f"{output_stem}_migrated_points.csv"))
+
+    def test_save_bedrock_grid_flag(self):
+        output_stem_disabled = os.path.join(self.temp_dir, "output_nobed")
+        cfg_disabled = {
+            "inputs": {
+                "dem_path": self.dem_path,
+                "survey_data_path": self.pts_path,
+                "survey_data_type": "depth",
+                "show_progress": False,
+            },
+            "migration_parameters": {
+                "perform_migration": False,
+            },
+            "outputs": {
+                "output_format": "tif",
+                "output_prefix": output_stem_disabled,
+                "save_bedrock_grid": False,
+                "save_thickness_grid": True,
+            }
+        }
+        solver_disabled = Solver.from_config(cfg_disabled)
+        solver_disabled.run_pipeline()
+        self.assertFalse(os.path.exists(f"{output_stem_disabled}_bedrock.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem_disabled}_thickness.tif"))
+
+        output_stem_enabled = os.path.join(self.temp_dir, "output_withbed")
+        cfg_enabled = {
+            "inputs": {
+                "dem_path": self.dem_path,
+                "survey_data_path": self.pts_path,
+                "survey_data_type": "depth",
+                "show_progress": False,
+            },
+            "migration_parameters": {
+                "perform_migration": False,
+            },
+            "outputs": {
+                "output_format": "tif",
+                "output_prefix": output_stem_enabled,
+                "save_bedrock_grid": True,
+            }
+        }
+        solver_enabled = Solver.from_config(cfg_enabled)
+        solver_enabled.run_pipeline()
+        self.assertTrue(os.path.exists(f"{output_stem_enabled}_bedrock.tif"))
 
 
 if __name__ == "__main__":

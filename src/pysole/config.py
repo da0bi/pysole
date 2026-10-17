@@ -181,7 +181,7 @@ class OutputsConfig:
     """Structured configuration parameters for PySole output exports."""
     output_dir: str | None = None
     output_format: str | list[str] = "tif"
-    output_prefix: str = "final"
+    output_prefix: str = ""
     plots_dir: str = "figures"
     save_traveltime_grid: bool = False
     save_traveltime_uncertainty: bool = False
@@ -190,7 +190,7 @@ class OutputsConfig:
     save_thickness_uncertainty: bool = False
     save_basal_shear_stress: bool = False
     save_basal_shear_stress_uncertainty: bool = False
-    save_bedrock_elevation_map: bool = True
+    save_bedrock_grid: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "OutputsConfig":
@@ -218,7 +218,7 @@ class OutputsConfig:
             "save_thickness_uncertainty": self.save_thickness_uncertainty,
             "save_basal_shear_stress": self.save_basal_shear_stress,
             "save_basal_shear_stress_uncertainty": self.save_basal_shear_stress_uncertainty,
-            "save_bedrock_elevation_map": self.save_bedrock_elevation_map,
+            "save_bedrock_grid": self.save_bedrock_grid,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -278,6 +278,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "drift_terms": None,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": True,
+            "calculate_uncertainty": False,
         },
         "post_migration": {
             "interpolation_target": "P",
@@ -286,6 +287,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "drift_terms": None,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": True,
+            "calculate_uncertainty": False,
         },
     },
     "finalization_parameters": {
@@ -301,7 +303,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "outputs": {
         "output_dir": None,
         "output_format": "tif",
-        "output_prefix": "final",
+        "output_prefix": "",
         "plots_dir": "figures",
         "save_traveltime_grid": False,
         "save_traveltime_uncertainty": False,
@@ -310,7 +312,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "save_thickness_uncertainty": False,
         "save_basal_shear_stress": False,
         "save_basal_shear_stress_uncertainty": False,
-        "save_bedrock_elevation_map": True,
+        "save_bedrock_grid": True,
     },
 }
 
@@ -750,7 +752,7 @@ def main_cli() -> None:
     plan_parser.add_argument("--tau", type=float, default=None, help="Target basal shear stress tau_0 in kPa (default: 100.0 kPa).")
     plan_parser.add_argument("--max-km", type=float, default=None, help="Maximum total survey length budget in km (default: 5.0 km).")
     plan_parser.add_argument("--batch", action="store_true", help="Non-interactive batch mode (accept defaults for omitted parameters without prompting).")
-    plan_parser.add_argument("--prefix", default="final", help="Output prefix.")
+    plan_parser.add_argument("--prefix", default="", help="Output prefix.")
     plan_parser.add_argument("--out-dir", default=None, help="Output directory.")
     plan_parser.add_argument("--plots-dir", default=None, help="Plots output directory.")
     plan_parser.add_argument("--format", default="tif", help="Output raster format (tif, asc).")

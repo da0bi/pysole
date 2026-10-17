@@ -43,7 +43,8 @@
             "drift_analyzer": false,
             "drift_terms": null,
             "variogram_model": "spherical",
-            "include_zero_boundary_condition": true
+            "include_zero_boundary_condition": true,
+            "calculate_uncertainty": false
         },
         "post_migration": {
             "interpolation_target": "P",
@@ -51,7 +52,8 @@
             "drift_analyzer": false,
             "drift_terms": null,
             "variogram_model": "spherical",
-            "include_zero_boundary_condition": true
+            "include_zero_boundary_condition": true,
+            "calculate_uncertainty": false
         }
     },
     "finalization_parameters": {
@@ -67,9 +69,9 @@
     "outputs": {
         "output_dir": ".",
         "output_format": "tif",
-        "output_prefix": "apo_final",
+        "output_prefix": "apo",
         "plots_dir": "figures",
-        "save_bedrock_elevation_map": true,
+        "save_bedrock_grid": true,
         "save_traveltime_grid": false,
         "save_traveltime_uncertainty": false,
         "save_migrated_points": true,

@@ -18,6 +18,8 @@ figures/
 examples/**/figures/
 examples/**/*.tif
 examples/**/*.tiff
+examples/**/*_migrated_points.csv
+examples/**/pysole/*.csv
 # Default PySole output workspace created when running from the repo root / examples
 /pysole/
 examples/**/pysole/

@@ -160,6 +160,7 @@ class BSSOptimizer:
         n_cores: int = -1,
         nrbins: int | None = None,
         show_progress: bool = True,
+        output_prefix: str = "",
     ) -> OptimizationResult:
         """
         Executes BSS slope filter optimization across the corner frequency spectrum.
@@ -217,6 +218,7 @@ class BSSOptimizer:
             n_cores=n_cores,
             nrbins=nrbins,
             show_progress=show_progress,
+            output_prefix=output_prefix,
         )
 
 
@@ -619,6 +621,7 @@ def optimize_bss_variance(
     n_cores: int = -1,
     nrbins: int | None = None,
     show_progress: bool = True,
+    output_prefix: str = "",
 ) -> OptimizationResult:
     """
     Optimizes surface slope spectral smoothing degree by minimizing BSS product field variance.
@@ -929,6 +932,7 @@ def optimize_bss_variance(
                             prefix=prefix,
                             stage_name=stage_name,
                             interactive=interactive,
+                            output_prefix=output_prefix,
                         )
                         if interactive:
                             while True:
@@ -957,6 +961,7 @@ def optimize_bss_variance(
                                                         prefix=prefix,
                                                         stage_name=stage_name,
                                                         interactive=interactive,
+                                                        output_prefix=output_prefix,
                                                     )
                                         except Exception as e:
                                             logger.warning(f"Invalid nrbins value: {e}")
@@ -1041,6 +1046,7 @@ def optimize_bss_variance(
                 prefix=prefix,
                 stage_name=stage_name,
                 interactive=interactive,
+                output_prefix=output_prefix,
             )
 
         if interactive:
