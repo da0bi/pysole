@@ -11,6 +11,8 @@ import pysole
 
 
 class TestSolverWuk(unittest.TestCase):
+    _shared_migrated_pts = None
+
     def setUp(self):
         self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../examples/wuk/input_data"))
         self.wuk_dem = os.path.join(self.data_dir, "dgm_unt_wuk.tif")
@@ -22,6 +24,12 @@ class TestSolverWuk(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.output_dir = os.path.join(self._tmp.name, "out")
 
+    def _get_shared_migrated_points(self):
+        if TestSolverWuk._shared_migrated_pts is None:
+            m = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline, perform_migration=True, output_dir=self.output_dir)
+            TestSolverWuk._shared_migrated_pts = m.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16).copy()
+        return TestSolverWuk._shared_migrated_pts.copy()
+
     def test_full_solver_workflow_wuk(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = pathlib.Path(tmp_dir)
@@ -32,6 +40,7 @@ class TestSolverWuk(unittest.TestCase):
             self.assertEqual(model.dy, 5.0)
 
             mig_pts = model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
+            TestSolverWuk._shared_migrated_pts = mig_pts.copy()
             self.assertGreater(mig_pts.shape[0], 900)
 
             opt_kc = model.optimize_bss(kc_max=0.3, kc_min=0.01, n_steps=5)
@@ -62,7 +71,7 @@ class TestSolverWuk(unittest.TestCase):
             perform_migration=True,
             output_dir=self.output_dir,
         )
-        model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
+        model.migrated_points = self._get_shared_migrated_points()
         model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)
         model.calculate_bedrock()
 
@@ -79,16 +88,17 @@ class TestSolverWuk(unittest.TestCase):
             perform_migration=True,
             output_dir=self.output_dir,
         )
-        model.migrate_eikonal(travel_times=self.wuk_survey, velocity=0.16)
+        model.migrated_points = self._get_shared_migrated_points()
         model.optimize_bss(kc_min=0.01, kc_max=0.3, n_steps=5)
         bedrock_map = model.finalize_bedrock(interactive=False, random_forest_gap_filling=False, apply_margin_blend=False)
 
         self.assertIsInstance(bedrock_map, pysole.BedrockMap)
         self.assertTrue(np.all(np.isfinite(model.kriged_bedrock)))
 
-    def test_bedrock_dem_smoothing_wuk(self):
-        dem, meta = pysole.load_dem(self.wuk_dem)
-        model = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline, output_dir=self.output_dir)
+    def test_bedrock_dem_smoothing(self):
+        dem = np.full((30, 30), 2000.0, dtype=np.float64)
+        dem[10:20, 10:20] += 50.0
+        model = pysole.Solver(dem=dem, dx=10.0, dy=10.0, bounds=(0, 0, 300, 300), output_dir=self.output_dir)
 
         g_smoothed = model.smooth_bedrock_dem(dem, method="gaussian", sigma=1.5)
         self.assertEqual(g_smoothed.shape, dem.shape)

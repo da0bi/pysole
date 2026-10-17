@@ -21,18 +21,18 @@
     "migration_parameters": {
         "perform_migration": true,
         "velocity": 0.168,
-        "interactive_migration": true
+        "interactive_migration": false
     },
     "optimization_parameters": {
         "fft_filter_metric": "wavenumber",
-        "kc_max": null,
-        "kc_min": null,
+        "kc_max": 0.008,
+        "kc_min": 0.003,
         "lambda_min": null,
         "lambda_max": null,
-        "n_steps": null,
+        "n_steps": 20,
         "nrbins": 15,
         "slope_floor_deg": 5.0,
-        "interactive_optimization": true
+        "interactive_optimization": false
     },
     "kriging_parameters": {
         "engine": "native",

@@ -459,10 +459,17 @@ class TestSolverUsesFittedVariogram(unittest.TestCase):
             self.assertIs(mock_analyzer.call_args.kwargs["show_progress"], value)
 
     def test_recommend_drift_model_on_real_analyzer(self):
+        # Test single-computation caching via get_sample_points
+        pts1 = self.solver.get_sample_points("post_migration", "P")
+        pts2 = self.solver.get_sample_points("post_migration", "P")
+        self.assertIs(pts1, pts2)
+
         self.solver.opt_variogram_params = {"range": 120.0, "sill": 4.0, "nugget": 0.05}
         results = self.solver.recommend_drift_model(stage="post_migration", interactive=False)
         self.assertEqual(len(results), 24)
         self.assertEqual(results[0].delta_rmse_pct, 0.0)
+        best = [r for r in results if not r.is_penalized]
+        self.assertEqual(min(r.delta_aicc for r in best), 0.0)
 
 
 if __name__ == "__main__":

@@ -178,5 +178,55 @@ class TestJsonExamplesMatchCode(unittest.TestCase):
         self.assertEqual(missing, [])
 
 
+@unittest.skipUnless(README.exists() and GUIDE.exists(), "not running from a source checkout")
+class TestDocumentationIntegrity(unittest.TestCase):
+    def test_docs_have_no_absolute_or_dead_links(self):
+        """README / CHANGELOG / docs links are relative and resolve to existing files."""
+        root = ROOT
+        md_files = [root / "README.md", root / "CHANGELOG.md", *sorted((root / "docs").glob("*.md"))]
+        dead = []
+        for md in md_files:
+            text = md.read_text(encoding="utf-8")
+            self.assertNotIn("file://", text, md.name)
+            for m in re.finditer(r"\]\(([^)\s]+)\)", text):
+                url = m.group(1)
+                if url.startswith(("http", "mailto:", "#")):
+                    continue
+                rel = url.split("#")[0]
+                if rel and not (md.parent / rel).exists():
+                    dead.append(f"{md.name}: {url}")
+        self.assertEqual(dead, [])
+
+    def test_documented_drift_term_names_are_valid(self):
+        """Drift names written in README / living docs are accepted by the code (no removed legacy aliases)."""
+        root = ROOT
+        living = [
+            root / "README.md",
+            *(root / "docs" / n for n in (
+                "pysole_interpolation_practice_guide.md",
+                "gok_thickness_analysis_report.md",
+                "drift_analyzer_&_survey_planner.md",
+                "kriging_performance_report.md",
+                "release_guide.md",
+            )),
+        ]
+        legacy = re.compile(r"[`\"](sia_thickness|z_surface|regional_linear|quadratic|sia_drift|sia_space|sia_z_dem|sia_curvature_dem|z_dem_curvature_dem|sia_z_dem_curvature_dem|full_physical|full_spatial_physical)[`\"]")
+        lists = re.compile(r'\[((?:\s*"[A-Za-z_]+"\s*,?)+)\]')
+        problems = []
+        for md in living:
+            if not md.exists():
+                continue
+            for no, line in enumerate(md.read_text(encoding="utf-8").splitlines(), 1):
+                # ``z_surface`` is a legitimate CSV column of the migrated-points export, not a drift name
+                if legacy.search(line.replace("z_surface, depth_migrated", "")):
+                    problems.append(f"{md.name}:{no}: legacy drift name")
+                if "drift" in line.lower() or "sia" in line:
+                    for m in lists.finditer(line):
+                        bad = [n for n in re.findall(r'"([A-Za-z_]+)"', m.group(1)) if n not in DRIFT_PRIMITIVES]
+                        if bad:
+                            problems.append(f"{md.name}:{no}: non-primitive drift name(s) {bad}")
+        self.assertEqual(problems, [])
+
+
 if __name__ == "__main__":
     unittest.main()

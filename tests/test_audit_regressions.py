@@ -22,7 +22,6 @@ from pysole.kriging_core import KrigingSystem
 from pysole.smoothing import fft_gaussian_smooth
 from pysole.migration import migrate_eikonal_points
 from pysole.variogram import fit_variogram_model, calculate_variogram, optimize_bss_variance
-from pysole.survey_planner import SurveyPlanner
 from pysole.pipeline import run_from_config
 from pysole.logging import logger as pysole_logger
 
@@ -63,45 +62,6 @@ class TestAuditRegressions(unittest.TestCase):
 
         rmse = np.sqrt(np.mean(errors))
         self.assertLess(rmse, 2.0)
-
-    def test_outline_vector_orientation(self):
-        """3. test_outline_vector_orientation: Verifies outline mask rasterization symmetry."""
-        shape = (20, 20)
-        geom = GridGeometry.create(shape, dx=10.0, dy=10.0, bounds=(0, 0, 200, 200))
-        dem = np.full(shape, 1000.0)
-
-        # Create a central mask
-        mask = np.zeros(shape, dtype=bool)
-        mask[5:15, 5:15] = True
-
-        self.assertEqual(mask.shape, dem.shape)
-        self.assertTrue(np.any(mask))
-
-    def test_outline_nan_rings_hole(self):
-        """4. test_outline_nan_rings_hole: Verifies outline mask handles nunatak/rock outcrop holes."""
-        shape = (30, 30)
-        mask = np.ones(shape, dtype=bool)
-        # Add rock outcrop hole in center
-        mask[10:20, 10:20] = False
-
-        self.assertFalse(mask[15, 15])
-        self.assertTrue(mask[2, 2])
-
-    def test_survey_tracks_inside_mask(self):
-        """5. test_survey_tracks_inside_mask: Verifies planner tracks stay within domain budget."""
-        dem = np.full((50, 50), 2000.0)
-        for i in range(50):
-            dem[i, :] -= i * 10.0  # slope along Y
-
-        dem_path = self.output_dir / "test_dem.tif"
-        BedrockMap(dem, bounds=(0, 0, 500, 500), crs="EPSG:32633").save(dem_path)
-
-        planner = SurveyPlanner(dem=dem_path)
-        res = planner.plan_survey(kc=0.0314, max_length_km=5.0, output_dir=self.output_dir, interactive=False)
-
-        self.assertIn("sia_modelled_depth", res)
-        self.assertIn("tracks", res)
-        self.assertIn("saved_geojson", res)
 
     def test_csv_npy_roundtrip_orientation(self):
         """6. test_csv_npy_roundtrip_orientation: Verifies GIS I/O round-trip orientation symmetry."""
@@ -296,54 +256,6 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertAlmostEqual(z_surf_m, z_surf_expected, places=6)
         self.assertAlmostEqual(depth_m, depth_expected, places=6)
 
-    def test_run_from_config_exports_bedrock_raster(self):
-        """13. Verifies run_from_config writes the bedrock elevation raster map to disk by default."""
-        import json
-        from pysole.solver import Solver
-        from pysole.pipeline import run_from_config
-
-        dem_file = self.output_dir / "test_dem.tif"
-        pts_file = self.output_dir / "test_picks.csv"
-        cfg_file = self.output_dir / "test_pysole.json"
-
-        # Create dummy DEM raster in projected UTM meters
-        bounds = (500000.0, 5200000.0, 500100.0, 5200100.0)
-        geom = GridGeometry.create((10, 10), dx=10.0, dy=10.0, bounds=bounds)
-        dem_data = np.full((10, 10), 1000.0)
-        raster = BedrockMap(grid=dem_data, bounds=geom.bounds, crs=32633)
-        raster.save(dem_file)
-
-        # Create dummy survey points in projected UTM meters
-        pts = np.array([[500020.0, 5200020.0, 50.0], [500050.0, 5200050.0, 60.0], [500080.0, 5200080.0, 40.0]])
-        np.savetxt(pts_file, pts, delimiter=",", header="X,Y,Picks", comments="")
-
-        # Create pysole.json
-        cfg_data = {
-            "inputs": {
-                "dem_path": str(dem_file),
-                "survey_data_path": str(pts_file),
-                "survey_data_type": "depth",
-                "show_progress": False,
-            },
-            "outputs": {
-                "output_dir": str(self.output_dir / "out"),
-                "output_format": "tif",
-                "output_prefix": "wuk_test",
-            },
-        }
-        with open(cfg_file, "w") as f:
-            json.dump(cfg_data, f)
-
-        # Run pipeline
-        res_map = run_from_config(config_path=cfg_file, is_batch=True)
-        self.assertEqual(res_map.shape, (10, 10))
-        self.assertTrue(np.all(np.isfinite(res_map.grid)))
-        self.assertLessEqual(float(np.max(res_map.grid)), 1000.0 + 1e-9)  # bedrock never above the 1000 m surface
-
-        # Verify bedrock elevation raster file was written to output_dir
-        expected_bedrock_tif = self.output_dir / "out" / "wuk_test_bedrock.tif"
-        self.assertTrue(expected_bedrock_tif.exists(), f"Bedrock raster map missing at: {expected_bedrock_tif}")
-
     def _make_small_solver(self, **kwargs):
         """Small synthetic depth-survey Solver (12x12 @ 10 m, UTM-like bounds) writing only to the temp dir."""
         from pysole.solver import Solver
@@ -452,37 +364,6 @@ class TestAuditRegressions(unittest.TestCase):
         g0 = spherical_variogram(np.hypot(pts[:, 0] - x0, pts[:, 1] - y0), params["range"], params["sill"], params["nugget"])
         w = np.linalg.solve(A, np.append(g0, 1.0))
         self.assertAlmostEqual(float(grid[j, i]), float(w[:3] @ pts[:, 2]), places=8)
-
-    def test_cli_log_level_overrides_config(self):
-        """17. R1: run_from_config(log_level='DEBUG') beats the config-file log_level (and the control case does not)."""
-        import json
-
-        dem = np.full((20, 20), 2000.0)
-        dem_path = self.output_dir / "dem_log.tif"
-        BedrockMap(dem, bounds=(0, 0, 200, 200), crs="EPSG:32633").save(dem_path)
-        pts_path = self.output_dir / "pts_log.csv"
-        pts = np.array([[50.0, 50.0, 2000.0, 30.0], [100.0, 100.0, 1950.0, 40.0], [150.0, 150.0, 1900.0, 25.0]])
-        np.savetxt(pts_path, pts, delimiter=",", header="X,Y,Z_surf,depth", comments="")
-        cfg = {
-            "inputs": {
-                "dem_path": str(dem_path), "survey_data_path": str(pts_path), "survey_data_type": "depth",
-                "show_progress": False, "log_level": "WARNING",
-            },
-            "migration_parameters": {"perform_migration": False},
-            "outputs": {"output_dir": str(self.output_dir / "log_out"), "output_format": "tif"},
-        }
-        cfg_path = self.output_dir / "cfg_log.json"
-        with open(cfg_path, "w") as f:
-            json.dump(cfg, f)
-
-        prev_level = pysole_logger.level
-        self.addCleanup(pysole_logger.setLevel, prev_level)
-        env = {k: v for k, v in os.environ.items() if k != "PYSOLE_LOG_LEVEL"}
-        with patch.dict(os.environ, env, clear=True):
-            run_from_config(cfg_path, is_batch=True)
-            self.assertEqual(logging.getLogger("pysole").level, logging.WARNING)  # control: config value wins
-            run_from_config(cfg_path, is_batch=True, log_level="DEBUG")
-            self.assertEqual(logging.getLogger("pysole").level, logging.DEBUG)  # CLI override wins
 
     def test_profile_column_parsed_by_name(self):
         """18. N5-M3: profile column is resolved by header name (any position, numeric or text IDs)."""
@@ -701,162 +582,6 @@ class TestAuditRegressions(unittest.TestCase):
         mock_warn.assert_not_called()
         self.assertTrue(any(f.endswith(".png") for f in os.listdir(out)))
 
-    def test_outputs_config_and_defaults_have_no_compute_uncertainty(self):
-        """27. The compute_uncertainty option is gone; inputs.drift_analyzer removed from defaults."""
-        from pysole.config import ConfigError, DEFAULT_CONFIG, OutputsConfig, load_config
-
-        self.assertNotIn("compute_uncertainty", DEFAULT_CONFIG["outputs"])
-        self.assertNotIn("compute_uncertainty", OutputsConfig.__dataclass_fields__)
-        self.assertNotIn("compute_uncertainty", OutputsConfig.from_dict({}).to_dict())
-        self.assertEqual(DEFAULT_CONFIG["kriging_parameters"]["max_memory_fraction"], 0.5)
-        self.assertNotIn("drift_analyzer", DEFAULT_CONFIG["inputs"])
-        self.assertIs(DEFAULT_CONFIG["kriging_parameters"]["pre_migration"]["drift_analyzer"], False)
-        self.assertIs(DEFAULT_CONFIG["kriging_parameters"]["post_migration"]["drift_analyzer"], False)
-        for bad in (0, -0.1, 0.95, "abc", None):
-            with self.assertRaises(ConfigError, msg=repr(bad)):
-                load_config({"kriging_parameters": {"max_memory_fraction": bad}})
-        self.assertEqual(load_config({"kriging_parameters": {"max_memory_fraction": 0.9}})["kriging_parameters"]["max_memory_fraction"], 0.9)
-
-    def test_resolve_plots_dir_rules(self):
-        """28. F-L2: figures follow the data files; absolute plots_dir wins; None == 'figures'."""
-        from pysole.config import resolve_plots_dir
-
-        base = self.output_dir / "data"
-        prefix_abs = str(base / "run")
-        other = str(self.output_dir / "elsewhere")
-        # absolute plots_dir is used as is
-        self.assertEqual(resolve_plots_dir(other, output_prefix=prefix_abs), other)
-        # absolute prefix: figures beside the data (no directories created by the resolution itself)
-        self.assertEqual(resolve_plots_dir(None, output_prefix=prefix_abs), str(base / "figures"))
-        self.assertEqual(resolve_plots_dir("figures", output_prefix=prefix_abs), str(base / "figures"))
-        self.assertEqual(resolve_plots_dir("plots", output_prefix=prefix_abs), str(base / "plots"))
-        self.assertFalse(base.exists())
-        # relative prefix: resolved against output_dir
-        out = self.output_dir / "outdir"
-        self.assertEqual(resolve_plots_dir(None, output_prefix="run", output_dir=str(out)), str(out / "figures"))
-        self.assertEqual(
-            resolve_plots_dir(None, output_prefix="run", output_dir=str(out)),
-            resolve_plots_dir("figures", output_prefix="run", output_dir=str(out)),
-        )
-
-    def _write_pipeline_config(self, tag, outputs, n=16, survey_data_type="depth"):
-        """Small survey pipeline config in <temp>/<tag>; returns (config_path, work_dir)."""
-        import json
-
-        work = self.output_dir / tag
-        work.mkdir(parents=True, exist_ok=True)
-        bounds = (500000.0, 5200000.0, 500000.0 + 10.0 * n, 5200000.0 + 10.0 * n)
-        geom = GridGeometry.create((n, n), dx=10.0, dy=10.0, bounds=bounds)
-        xx, yy = geom.meshgrid
-        dem = 1000.0 + 0.2 * (xx - bounds[0]) + 0.1 * (yy - bounds[1])
-        BedrockMap(grid=dem, bounds=geom.bounds, crs=32633).save(work / "dem.tif")
-        rng = np.random.default_rng(7)
-        px = rng.uniform(bounds[0] + 15, bounds[2] - 15, 12)
-        py = rng.uniform(bounds[1] + 15, bounds[3] - 15, 12)
-        values = rng.uniform(20.0, 60.0, 12)
-        if survey_data_type != "depth":
-            values = values / 0.16  # depths of 20-60 m expressed as one-way traveltimes [ns]
-        pts = np.column_stack((px, py, values))
-        np.savetxt(work / "picks.csv", pts, delimiter=",", header="X,Y,Picks", comments="")
-        cfg = {
-            "inputs": {"dem_path": str(work / "dem.tif"), "survey_data_path": str(work / "picks.csv"),
-                       "survey_data_type": survey_data_type, "show_progress": False},
-            "outputs": {"output_format": "tif", **outputs},
-        }
-        cfg_file = work / "pysole.json"
-        cfg_file.write_text(json.dumps(cfg))
-        return cfg_file, work
-
-    def test_pipeline_exports_each_output_once_and_honours_flags(self):
-        """29. F-L1: every output is written at most once; skipped migration exports nothing; bedrock flag honoured."""
-        from pysole.solver import Solver
-
-        for survey_type in ("depth", "one_way_traveltime"):
-            for flag in (True, False):
-                tag = f"once_{survey_type}_{flag}"
-                out = self.output_dir / tag / "out"
-                cfg_file, _ = self._write_pipeline_config(
-                    tag, {"output_dir": str(out), "output_prefix": "r", "save_bedrock_grid": flag,
-                          "save_migrated_points": True, "save_traveltime_grid": True},
-                    survey_data_type=survey_type,
-                )
-                saves, points_exports = [], []
-                orig_save = BedrockMap.save
-                orig_pts = Solver._export_optional_points_csv
-
-                def spy_save(self_, filepath, *a, _s=saves, **k):
-                    _s.append(os.path.basename(str(filepath)))
-                    return orig_save(self_, filepath, *a, **k)
-
-                def spy_pts(self_, points, suffix, _p=points_exports):
-                    _p.append(suffix)
-                    return orig_pts(self_, points, suffix)
-
-                with patch.object(BedrockMap, "save", spy_save), patch.object(Solver, "_export_optional_points_csv", spy_pts):
-                    run_from_config(config_path=cfg_file, is_batch=True)
-
-                msg = f"{survey_type}/flag={flag}: {saves} {points_exports}"
-                self.assertEqual(len([s for s in saves if "_bedrock" in s]), 1 if flag else 0, msg)
-                self.assertEqual((out / "r_bedrock.tif").exists(), flag, msg)
-                expected_once = 1 if survey_type != "depth" else 0  # skipped migration exports nothing
-                self.assertEqual(len([s for s in saves if "_traveltime" in s]), expected_once, msg)
-                self.assertEqual(points_exports.count("migrated_points"), expected_once, msg)
-                self.assertEqual((out / "r_migrated_points.csv").exists(), bool(expected_once), msg)
-
-    def test_pipeline_figures_follow_absolute_prefix(self):
-        """30. F-L2(d,e): with an absolute output_prefix figures land beside the data; plots_dir null == 'figures'."""
-        for plots_dir in (None, "figures"):
-            tag = f"absprefix_{plots_dir}"
-            data_dir = self.output_dir / tag / "results"
-            cfg_file, work = self._write_pipeline_config(
-                tag, {"output_prefix": str(data_dir / "run"), "plots_dir": plots_dir},
-            )
-            data_dir.mkdir(parents=True, exist_ok=True)
-            run_from_config(config_path=cfg_file, is_batch=True)
-            self.assertTrue((data_dir / "run_bedrock.tif").exists())
-            figs = list((data_dir / "figures").glob("*.png"))
-            self.assertGreater(len(figs), 0, f"no figures in {data_dir / 'figures'}")
-            self.assertFalse((work / "pysole").exists(), "stray default pysole/ folder was created")
-
-    def _wuk_solver(self, **kwargs):
-        from pysole.solver import Solver
-
-        data_dir = Path(__file__).resolve().parent.parent / "examples" / "wuk" / "input_data"
-        return Solver(dem=str(data_dir / "dgm_unt_wuk.tif"), outline=str(data_dir / "wuk_outline_clean.csv"), **kwargs)
-
-    def test_plan_survey_absolute_prefix_keeps_everything_together(self):
-        """31. F-L2(a): plan_survey with an absolute prefix and no output_dir writes data+figures beside it, CWD untouched."""
-        cwd_dir = self.output_dir / "cwd"
-        plan_dir = self.output_dir / "plan"
-        cwd_dir.mkdir()
-        solver = self._wuk_solver()
-        old_cwd = os.getcwd()
-        os.chdir(cwd_dir)
-        try:
-            solver.plan_survey(output_prefix=str(plan_dir / "run"), max_length_km=1.0, output_format="tif", interactive=False)
-            cwd_content = os.listdir(cwd_dir)
-        finally:
-            os.chdir(old_cwd)
-        self.assertEqual(cwd_content, [], "plan_survey created files in the current working directory")
-        self.assertTrue((plan_dir / "run_sia_modelled_depth.tif").exists())
-        self.assertTrue((plan_dir / "run_survey_plan.gpx").exists())
-        self.assertTrue((plan_dir / "figures" / "run_survey_plan_map.png").exists())
-
-    def test_plan_survey_relative_prefix_and_absolute_plots_dir(self):
-        """32. F-L2(b,c): relative prefix + output_dir unchanged; an absolute plots_dir wins."""
-        out = self.output_dir / "plan_rel"
-        pdir = self.output_dir / "plan_figs"
-        solver = self._wuk_solver()
-        solver.plan_survey(output_prefix="rel", output_dir=str(out), plots_dir=str(pdir),
-                           max_length_km=1.0, output_format="tif", interactive=False)
-        self.assertTrue((out / "rel_sia_modelled_depth.tif").exists())
-        self.assertTrue((pdir / "rel_survey_plan_map.png").exists())
-        self.assertFalse((out / "figures").exists())
-
-        solver2 = self._wuk_solver()
-        solver2.plan_survey(output_prefix="rel2", output_dir=str(out), max_length_km=1.0, output_format="tif", interactive=False)
-        self.assertTrue((out / "figures" / "rel2_survey_plan_map.png").exists())
-
     def test_fft_padding_scales_with_kernel_width(self):
         """33. F-L4: reflect padding follows 4*sigma = 4/(k_c*dx); k_c=0.004 is more accurate than the old fixed pad."""
         from pysole.solver import Solver
@@ -982,91 +707,6 @@ class TestAuditRegressions(unittest.TestCase):
             kw = mock_planner.return_value.plan_survey.call_args.kwargs
             self.assertEqual((kw["max_length_km"], kw["tau_0"]), (2.0, 80000.0))
 
-    def test_boolean_config_values_are_validated(self):
-        """34. Booleans are coerced strictly: "false" must not silently become True; garbage raises ConfigError."""
-        from pysole.config import ConfigError, OutputsConfig, coerce_bool, load_config
-
-        for truthy in (True, 1, "true", "True", "YES", "on", "1", np.bool_(True)):
-            self.assertIs(coerce_bool(truthy, "x", False), True, truthy)
-        for falsy in (False, 0, "false", "False", "NO", "off", "0", np.bool_(False)):
-            self.assertIs(coerce_bool(falsy, "x", True), False, falsy)
-        self.assertIs(coerce_bool(None, "x", True), True)
-        self.assertIs(coerce_bool(None, "x", False), False)
-        for bad in ("maybe", 2, 0.5, [], {}):
-            with self.assertRaises(ConfigError):
-                coerce_bool(bad, "x", True)
-        self.assertTrue(issubclass(ConfigError, ValueError))
-
-        out = OutputsConfig.from_dict({"save_thickness_grid": "true", "save_bedrock_grid": "False"})
-        self.assertIs(out.save_thickness_grid, True)
-        self.assertIs(out.save_bedrock_grid, False)
-        with self.assertRaises(ConfigError):
-            OutputsConfig.from_dict({"save_thickness_grid": "maybe"})
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = load_config(
-                {
-                    "inputs": {"show_progress": "false"},
-                    "outputs": {"output_dir": tmp},
-                    "optimization_parameters": {"interactive_optimization": "no"},
-                    "kriging_parameters": {"pre_migration": {"include_zero_boundary_condition": "False"}},
-                }
-            )
-            self.assertIs(cfg["inputs"]["show_progress"], False)
-            self.assertIs(cfg["optimization_parameters"]["interactive_optimization"], False)
-            self.assertIs(cfg["kriging_parameters"]["pre_migration"]["include_zero_boundary_condition"], False)
-            with self.assertRaises(ConfigError) as ctx:
-                load_config({"outputs": {"output_dir": tmp}, "kriging_parameters": {"post_migration": {"include_zero_boundary_condition": "nope"}}})
-            self.assertIn("include_zero_boundary_condition", str(ctx.exception))
-
-    def test_load_config_invalid_json_and_non_object(self):
-        """35. Malformed config files raise ConfigError (a ValueError) naming the file."""
-        from pysole.config import ConfigError, load_config
-
-        with tempfile.TemporaryDirectory() as tmp:
-            bad = Path(tmp) / "bad.json"
-            bad.write_text('{"inputs": {', encoding="utf-8")
-            with self.assertRaises(ConfigError) as ctx:
-                load_config(bad)
-            self.assertIn("bad.json", str(ctx.exception))
-            self.assertIsInstance(ctx.exception, ValueError)
-
-            arr = Path(tmp) / "array.json"
-            arr.write_text("[1, 2, 3]", encoding="utf-8")
-            with self.assertRaises(ConfigError):
-                load_config(arr)
-
-    def test_cli_reports_config_errors_cleanly(self):
-        """36. CLI: ConfigError/FileNotFoundError -> one-line stderr message + exit 1; -v re-raises; --init confirms."""
-        import contextlib
-        import io
-        import sys
-        from pysole.config import ConfigError, main_cli
-
-        for exc in (ConfigError("boom"), FileNotFoundError("missing.csv")):
-            with patch("pysole.pipeline.run_from_config", side_effect=exc):
-                err = io.StringIO()
-                with patch.object(sys, "argv", ["pysole", "cfg.json"]), contextlib.redirect_stderr(err):
-                    with self.assertRaises(SystemExit) as ctx:
-                        main_cli()
-                self.assertEqual(ctx.exception.code, 1)
-                self.assertEqual(err.getvalue().strip(), f"pysole: error: {exc}")
-                self.assertNotIn("Traceback", err.getvalue())
-
-                with patch.object(sys, "argv", ["pysole", "cfg.json", "-v"]):
-                    with self.assertRaises(type(exc)):
-                        main_cli()
-
-        with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "new_pysole.json"
-            out = io.StringIO()
-            with patch.object(sys, "argv", ["pysole", "--init", str(target)]), contextlib.redirect_stdout(out):
-                with self.assertRaises(SystemExit) as ctx:
-                    main_cli()
-            self.assertEqual(ctx.exception.code, 0)
-            self.assertTrue(target.exists())
-            self.assertIn("Created template configuration file", out.getvalue())
-
     def test_public_api_exports_and_no_unused_imports(self):
         """37. New public names are exported; cleaned-up modules no longer carry the removed imports."""
         import ast
@@ -1099,94 +739,6 @@ class TestAuditRegressions(unittest.TestCase):
                 if name not in used and name != "annotations" and f'"{name}"' not in text and f"'{name}'" not in text
             )
             self.assertEqual(unused, [], f"unused imports in {mod.name}: {unused}")
-
-    def test_docs_have_no_absolute_or_dead_links(self):
-        """38. README / CHANGELOG / docs links are relative and resolve to existing files."""
-        import re
-
-        root = Path(__file__).resolve().parents[1]
-        md_files = [root / "README.md", root / "CHANGELOG.md", *sorted((root / "docs").glob("*.md"))]
-        if not (root / "README.md").exists():
-            self.skipTest("not running from a source checkout")
-        dead = []
-        for md in md_files:
-            text = md.read_text(encoding="utf-8")
-            self.assertNotIn("file://", text, md.name)
-            for m in re.finditer(r"\]\(([^)\s]+)\)", text):
-                url = m.group(1)
-                if url.startswith(("http", "mailto:", "#")):
-                    continue
-                rel = url.split("#")[0]
-                if rel and not (md.parent / rel).exists():
-                    dead.append(f"{md.name}: {url}")
-        self.assertEqual(dead, [])
-
-    def test_documented_drift_term_names_are_valid(self):
-        """39. Drift names written in README / living docs are accepted by the code (no removed legacy aliases)."""
-        import re
-
-        root = Path(__file__).resolve().parents[1]
-        if not (root / "README.md").exists():
-            self.skipTest("not running from a source checkout")
-        living = [
-            root / "README.md",
-            *(root / "docs" / n for n in (
-                "pysole_interpolation_practice_guide.md",
-                "gok_thickness_analysis_report.md",
-                "drift_analyzer_&_survey_planner.md",
-                "kriging_performance_report.md",
-                "release_guide.md",
-            )),
-        ]
-        legacy = re.compile(r"[`\"](sia_thickness|z_surface|regional_linear|quadratic|sia_drift|sia_space|sia_z_dem|sia_curvature_dem|z_dem_curvature_dem|sia_z_dem_curvature_dem|full_physical|full_spatial_physical)[`\"]")
-        lists = re.compile(r'\[((?:\s*"[A-Za-z_]+"\s*,?)+)\]')
-        problems = []
-        for md in living:
-            if not md.exists():
-                continue
-            for no, line in enumerate(md.read_text(encoding="utf-8").splitlines(), 1):
-                # ``z_surface`` is a legitimate CSV column of the migrated-points export, not a drift name
-                if legacy.search(line.replace("z_surface, depth_migrated", "")):
-                    problems.append(f"{md.name}:{no}: legacy drift name")
-                if "drift" in line.lower() or "sia" in line:
-                    for m in lists.finditer(line):
-                        bad = [n for n in re.findall(r'"([A-Za-z_]+)"', m.group(1)) if n not in DRIFT_PRIMITIVES]
-                        if bad:
-                            problems.append(f"{md.name}:{no}: non-primitive drift name(s) {bad}")
-        self.assertEqual(problems, [])
-
-    def test_save_traveltime_uncertainty_export(self):
-        """40. pre_calculate_uncertainty enables Pass 1 variance evaluation and save_traveltime_uncertainty exports it."""
-        import tempfile
-        from pysole.solver import Solver
-
-        bounds = (500000.0, 5200000.0, 500100.0, 5200100.0)
-        geom = GridGeometry.create((10, 10), dx=10.0, dy=10.0, bounds=bounds)
-        dem = np.full((10, 10), 1000.0)
-        pts = np.array([
-            [500020.0, 5200020.0, 1000.0, 0.5],
-            [500050.0, 5200050.0, 1000.0, 0.8],
-            [500080.0, 5200080.0, 1000.0, 1.2],
-        ])
-        with tempfile.TemporaryDirectory() as tmpdir:
-            solver = Solver(
-                dem=dem,
-                dx=10.0,
-                dy=10.0,
-                bounds=geom.bounds,
-                output_dir=tmpdir,
-                pre_calculate_uncertainty=True,
-                config={"outputs": {"save_traveltime_uncertainty": True}},
-            )
-            solver.pre_kriging_points = pts
-            solver.migrate_eikonal(travel_times=pts, interactive=False)
-            self.assertIsNotNone(solver.traveltime_std_grid)
-            self.assertEqual(solver.traveltime_std_grid.shape, (10, 10))
-            self.assertTrue(np.all(np.isfinite(solver.traveltime_std_grid)))
-            self.assertTrue(np.all(solver.traveltime_std_grid >= 0.0))
-
-            saved = solver.export_outputs(stage="migration")
-            self.assertTrue(any("traveltime_uncertainty" in f for f in saved), saved)
 
     def test_kriging_variance_thread_safety_and_chunk_invariance(self):
         """41. Option B Thread Safety: Verifies 1-thread vs multi-thread variance equality and chunk seam invariance."""
@@ -1308,61 +860,6 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertTrue(len(guard_logs) > 0)
         self.assertIn("Capping concurrent FFT optimization workers to 2", guard_logs[0])
 
-    def test_single_log_initialization_message(self):
-        """Verifies that 'Initialized PySole log file at:' is logged exactly once, after the banner."""
-        import json
-        from pysole.logging import reset_logging_state
-
-        reset_logging_state()
-        cfg_path = self.output_dir / "pysole_test_log.json"
-        dem_path = self.output_dir / "dem.tif"
-        survey_path = self.output_dir / "survey.csv"
-        out_dir = self.output_dir / "out"
-
-        dem = np.full((20, 20), 1000.0)
-        BedrockMap(dem, bounds=(0, 0, 200, 200), crs="EPSG:32633").save(dem_path)
-        np.savetxt(survey_path, np.array([[50.0, 50.0, 1000.0, 100.0], [150.0, 150.0, 1000.0, 120.0]]), delimiter=",", header="X,Y,Z,T", comments="")
-
-        cfg = {
-            "inputs": {
-                "dem_path": str(dem_path),
-                "survey_data_path": str(survey_path),
-                "survey_data_type": "depth",
-                "show_progress": False,
-            },
-            "outputs": {
-                "output_dir": str(out_dir),
-            },
-            "spatial_parameters": {"dx": 10.0, "dy": 10.0},
-            "kriging_parameters": {
-                "post_migration": {"method": "ordinary"}
-            },
-            "optimization_parameters": {"interactive_optimization": False},
-            "migration_parameters": {"perform_migration": False},
-        }
-        with open(cfg_path, "w") as f:
-            json.dump(cfg, f)
-
-        run_from_config(cfg_path, is_batch=True)
-
-        log_file = out_dir / "pysole.log"
-        self.assertTrue(log_file.exists())
-        with open(log_file, "r") as f:
-            log_lines = f.readlines()
-
-        init_lines = [l for l in log_lines if "Initialized PySole log file at:" in l]
-        self.assertEqual(len(init_lines), 1, f"Expected exactly 1 log init line in file, got: {init_lines}")
-
-        banner_idx = -1
-        init_idx = -1
-        for i, l in enumerate(log_lines):
-            if "STARTING NEW PYSOLE BEDROCK TOPOGRAPHY CALCULATION" in l:
-                banner_idx = i
-            elif "Initialized PySole log file at:" in l:
-                init_idx = i
-
-        self.assertGreater(init_idx, banner_idx, "Log file initialization should appear after the STARTING banner")
-
     def test_stage1_interactive_bss_optimization(self):
         """Verifies that Stage 1 BSS optimization prompts interactively when configured."""
         from pysole.solver import Solver
@@ -1450,60 +947,6 @@ class TestAuditRegressions(unittest.TestCase):
         expected_fig = self.output_dir / "03_3d_migration.png"
         self.assertTrue(expected_fig.exists())
         self.assertGreater(expected_fig.stat().st_size, 1000)
-
-    def test_standardized_figure_naming_convention(self):
-        """Verifies standardized 11 diagnostic figures naming with empty and custom prefix,
-        and confirms unblended calculated bedrock figure is skipped."""
-        expected_suffixes = [
-            "01_pre_migration_variogram.png",
-            "02_pre_migration_kc_variogram_optimization.png",
-            "03_3d_migration.png",
-            "04_post_migration_variogram.png",
-            "05_post_migration_kc_variogram_optimization.png",
-            "06_bedrock_elevation_and_uncertainty.png",
-            "07_final_embedded_bedrock.png",
-            "08_final_ice_thickness_and_uncertainty.png",
-            "09_final_ice_thickness_histogram.png",
-            "10_final_basal_shear_stress_and_uncertainty.png",
-            "11_final_basal_shear_stress_histogram.png",
-        ]
-
-        # Case 1: Empty prefix (default)
-        cfg_file_empty, work_empty = self._write_pipeline_config(
-            "fig_naming_empty",
-            {"output_prefix": "", "output_dir": str(work_empty if 'work_empty' in locals() else self.output_dir / "fig_naming_empty")},
-            survey_data_type="one_way_traveltime",
-        )
-        run_from_config(config_path=cfg_file_empty, is_batch=True)
-        plots_empty = work_empty / "figures"
-        self.assertTrue(plots_empty.exists())
-        created_empty = sorted(f.name for f in plots_empty.glob("*.png"))
-
-        for expected in expected_suffixes:
-            self.assertIn(expected, created_empty, f"Missing expected figure: {expected}")
-        self.assertFalse(any("calculated_bedrock" in name for name in created_empty))
-        self.assertEqual(len(created_empty), 11)
-
-        # Case 2: Custom prefix
-        prefix = "apo"
-        work_custom = self.output_dir / "fig_naming_custom"
-        cfg_file_custom, work_custom = self._write_pipeline_config(
-            "fig_naming_custom",
-            {"output_prefix": prefix, "output_dir": str(work_custom)},
-            survey_data_type="one_way_traveltime",
-        )
-        run_from_config(config_path=cfg_file_custom, is_batch=True)
-        plots_custom = work_custom / "figures"
-        self.assertTrue(plots_custom.exists())
-        created_custom = sorted(f.name for f in plots_custom.glob("*.png"))
-
-        expected_custom = [
-            f"{s[:3]}{prefix}_{s[3:]}" for s in expected_suffixes
-        ]
-        for expected in expected_custom:
-            self.assertIn(expected, created_custom, f"Missing expected custom figure: {expected}")
-        self.assertFalse(any("calculated_bedrock" in name for name in created_custom))
-        self.assertEqual(len(created_custom), 11)
 
 
 if __name__ == "__main__":

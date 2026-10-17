@@ -130,5 +130,95 @@ class TestConfigWorkflowWuk(unittest.TestCase):
         self.assertFalse(d["save_migrated_points"])
 
 
+class TestConfigValidationAndCli(unittest.TestCase):
+    def test_boolean_config_values_are_validated(self):
+        """Booleans are coerced strictly: "false" must not silently become True; garbage raises ConfigError."""
+        from pysole.config import ConfigError, OutputsConfig, coerce_bool, load_config
+
+        for truthy in (True, 1, "true", "True", "YES", "on", "1", np.bool_(True)):
+            self.assertIs(coerce_bool(truthy, "x", False), True, truthy)
+        for falsy in (False, 0, "false", "False", "NO", "off", "0", np.bool_(False)):
+            self.assertIs(coerce_bool(falsy, "x", True), False, falsy)
+        self.assertIs(coerce_bool(None, "x", True), True)
+        self.assertIs(coerce_bool(None, "x", False), False)
+        for bad in ("maybe", 2, 0.5, [], {}):
+            with self.assertRaises(ConfigError):
+                coerce_bool(bad, "x", True)
+        self.assertTrue(issubclass(ConfigError, ValueError))
+
+        out = OutputsConfig.from_dict({"save_thickness_grid": "true", "save_bedrock_grid": "False"})
+        self.assertIs(out.save_thickness_grid, True)
+        self.assertIs(out.save_bedrock_grid, False)
+        with self.assertRaises(ConfigError):
+            OutputsConfig.from_dict({"save_thickness_grid": "maybe"})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = load_config(
+                {
+                    "inputs": {"show_progress": "false"},
+                    "outputs": {"output_dir": tmp},
+                    "optimization_parameters": {"interactive_optimization": "no"},
+                    "kriging_parameters": {"pre_migration": {"include_zero_boundary_condition": "False"}},
+                }
+            )
+            self.assertIs(cfg["inputs"]["show_progress"], False)
+            self.assertIs(cfg["optimization_parameters"]["interactive_optimization"], False)
+            self.assertIs(cfg["kriging_parameters"]["pre_migration"]["include_zero_boundary_condition"], False)
+            with self.assertRaises(ConfigError) as ctx:
+                load_config({"outputs": {"output_dir": tmp}, "kriging_parameters": {"post_migration": {"include_zero_boundary_condition": "nope"}}})
+            self.assertIn("include_zero_boundary_condition", str(ctx.exception))
+
+    def test_load_config_invalid_json_and_non_object(self):
+        """Malformed config files raise ConfigError (a ValueError) naming the file."""
+        from pysole.config import ConfigError, load_config
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text('{"inputs": {', encoding="utf-8")
+            with self.assertRaises(ConfigError) as ctx:
+                load_config(bad)
+            self.assertIn("bad.json", str(ctx.exception))
+            self.assertIsInstance(ctx.exception, ValueError)
+
+            arr = Path(tmp) / "array.json"
+            arr.write_text("[1, 2, 3]", encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(arr)
+
+    def test_cli_reports_config_errors_cleanly(self):
+        """CLI: ConfigError/FileNotFoundError -> one-line stderr message + exit 1; -v re-raises; --init confirms."""
+        import contextlib
+        import io
+        import sys
+        from unittest.mock import patch
+        from pathlib import Path
+        from pysole.config import ConfigError, main_cli
+
+        for exc in (ConfigError("boom"), FileNotFoundError("missing.csv")):
+            with patch("pysole.pipeline.run_from_config", side_effect=exc):
+                err = io.StringIO()
+                with patch.object(sys, "argv", ["pysole", "cfg.json"]), contextlib.redirect_stderr(err):
+                    with self.assertRaises(SystemExit) as ctx:
+                        main_cli()
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertEqual(err.getvalue().strip(), f"pysole: error: {exc}")
+                self.assertNotIn("Traceback", err.getvalue())
+
+                with patch.object(sys, "argv", ["pysole", "cfg.json", "-v"]):
+                    with self.assertRaises(type(exc)):
+                        main_cli()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "new_pysole.json"
+            out = io.StringIO()
+            with patch.object(sys, "argv", ["pysole", "--init", str(target)]), contextlib.redirect_stdout(out):
+                with self.assertRaises(SystemExit) as ctx:
+                    main_cli()
+            self.assertEqual(ctx.exception.code, 0)
+            self.assertTrue(target.exists())
+            self.assertIn("Created template configuration file", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

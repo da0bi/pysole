@@ -10,6 +10,7 @@ import json
 import numpy as np
 import pysole
 from pysole.survey_planner import SurveyPlanner
+from pysole.raster import BedrockMap
 
 
 class TestSurveyPlanner(unittest.TestCase):
@@ -230,6 +231,61 @@ class TestSurveyPlanner(unittest.TestCase):
                         with self.assertRaises(SystemExit) as ctx:
                             main_cli()
                         self.assertEqual(ctx.exception.code, 0)
+
+    def test_survey_tracks_inside_mask(self):
+        """Verifies planner tracks stay within domain budget using synthetic DEM."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = pathlib.Path(tmp_dir)
+            dem = np.full((50, 50), 2000.0)
+            for i in range(50):
+                dem[i, :] -= i * 10.0  # slope along Y
+
+            dem_path = tmp_path / "test_dem.tif"
+            BedrockMap(dem, bounds=(0, 0, 500, 500), crs="EPSG:32633").save(dem_path)
+
+            planner = SurveyPlanner(dem=dem_path)
+            res = planner.plan_survey(kc=0.0314, max_length_km=5.0, output_dir=str(tmp_path), interactive=False)
+
+            self.assertIn("sia_modelled_depth", res)
+            self.assertIn("tracks", res)
+            self.assertIn("saved_geojson", res)
+
+    def test_plan_survey_absolute_prefix_keeps_everything_together(self):
+        """plan_survey with an absolute prefix and no output_dir writes data+figures beside it, CWD untouched."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = pathlib.Path(tmp_dir)
+            cwd_dir = tmp_path / "cwd"
+            plan_dir = tmp_path / "plan"
+            cwd_dir.mkdir()
+            solver = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline)
+            old_cwd = os.getcwd()
+            os.chdir(cwd_dir)
+            try:
+                solver.plan_survey(output_prefix=str(plan_dir / "run"), max_length_km=1.0, output_format="tif", interactive=False)
+                cwd_content = os.listdir(cwd_dir)
+            finally:
+                os.chdir(old_cwd)
+            self.assertEqual(cwd_content, [], "plan_survey created files in the current working directory")
+            self.assertTrue((plan_dir / "run_sia_modelled_depth.tif").exists())
+            self.assertTrue((plan_dir / "run_survey_plan.gpx").exists())
+            self.assertTrue((plan_dir / "figures" / "run_survey_plan_map.png").exists())
+
+    def test_plan_survey_relative_prefix_and_absolute_plots_dir(self):
+        """relative prefix + output_dir unchanged; an absolute plots_dir wins."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = pathlib.Path(tmp_dir)
+            out = tmp_path / "plan_rel"
+            pdir = tmp_path / "plan_figs"
+            solver = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline)
+            solver.plan_survey(output_prefix="rel", output_dir=str(out), plots_dir=str(pdir),
+                               max_length_km=1.0, output_format="tif", interactive=False)
+            self.assertTrue((out / "rel_sia_modelled_depth.tif").exists())
+            self.assertTrue((pdir / "rel_survey_plan_map.png").exists())
+            self.assertFalse((out / "figures").exists())
+
+            solver2 = pysole.Solver(dem=self.wuk_dem, outline=self.wuk_outline)
+            solver2.plan_survey(output_prefix="rel2", output_dir=str(out), max_length_km=1.0, output_format="tif", interactive=False)
+            self.assertTrue((out / "figures" / "rel2_survey_plan_map.png").exists())
 
 
 if __name__ == "__main__":

@@ -221,5 +221,109 @@ class TestTerminalUI(unittest.TestCase):
         self.assertEqual(lines[2], "=" * 80)
 
 
+class TestPipelineLogging(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.output_dir = self.temp_dir.name
+        self.addCleanup(self.temp_dir.cleanup)
+
+    def test_cli_log_level_overrides_config(self):
+        """run_from_config(log_level='DEBUG') beats the config-file log_level (and the control case does not)."""
+        import json
+        from pathlib import Path
+        import numpy as np
+        from pysole.raster import BedrockMap
+        from pysole.pipeline import run_from_config
+
+        out_path = Path(self.output_dir)
+        dem = np.full((20, 20), 2000.0)
+        dem_path = out_path / "dem_log.tif"
+        BedrockMap(dem, bounds=(0, 0, 200, 200), crs="EPSG:32633").save(dem_path)
+        pts_path = out_path / "pts_log.csv"
+        pts = np.array([[50.0, 50.0, 2000.0, 30.0], [100.0, 100.0, 1950.0, 40.0], [150.0, 150.0, 1900.0, 25.0]])
+        np.savetxt(pts_path, pts, delimiter=",", header="X,Y,Z_surf,depth", comments="")
+        cfg = {
+            "inputs": {
+                "dem_path": str(dem_path), "survey_data_path": str(pts_path), "survey_data_type": "depth",
+                "show_progress": False, "log_level": "WARNING",
+            },
+            "migration_parameters": {"perform_migration": False},
+            "outputs": {"output_dir": str(out_path / "log_out"), "output_format": "tif"},
+        }
+        cfg_path = out_path / "cfg_log.json"
+        with open(cfg_path, "w") as f:
+            json.dump(cfg, f)
+
+        prev_level = logger.level
+        self.addCleanup(logger.setLevel, prev_level)
+        env = {k: v for k, v in os.environ.items() if k != "PYSOLE_LOG_LEVEL"}
+        with patch.dict(os.environ, env, clear=True):
+            run_from_config(cfg_path, is_batch=True)
+            self.assertEqual(logging.getLogger("pysole").level, logging.WARNING)  # control: config value wins
+            run_from_config(cfg_path, is_batch=True, log_level="DEBUG")
+            self.assertEqual(logging.getLogger("pysole").level, logging.DEBUG)  # CLI override wins
+
+    def test_single_log_initialization_message(self):
+        """Verifies that 'Initialized PySole log file at:' is logged exactly once, after the banner."""
+        import json
+        from pathlib import Path
+        import numpy as np
+        from pysole.raster import BedrockMap
+        from pysole.pipeline import run_from_config
+        from pysole.logging import reset_logging_state
+
+        reset_logging_state()
+        out_path = Path(self.output_dir)
+        cfg_path = out_path / "pysole_test_log.json"
+        dem_path = out_path / "dem.tif"
+        survey_path = out_path / "survey.csv"
+        out_dir = out_path / "out"
+
+        dem = np.full((20, 20), 1000.0)
+        BedrockMap(dem, bounds=(0, 0, 200, 200), crs="EPSG:32633").save(dem_path)
+        np.savetxt(survey_path, np.array([[50.0, 50.0, 1000.0, 100.0], [150.0, 150.0, 1000.0, 120.0]]), delimiter=",", header="X,Y,Z,T", comments="")
+
+        cfg = {
+            "inputs": {
+                "dem_path": str(dem_path),
+                "survey_data_path": str(survey_path),
+                "survey_data_type": "depth",
+                "show_progress": False,
+            },
+            "outputs": {
+                "output_dir": str(out_dir),
+            },
+            "spatial_parameters": {"dx": 10.0, "dy": 10.0},
+            "kriging_parameters": {
+                "post_migration": {"method": "ordinary"}
+            },
+            "optimization_parameters": {"interactive_optimization": False},
+            "migration_parameters": {"perform_migration": False},
+        }
+        with open(cfg_path, "w") as f:
+            json.dump(cfg, f)
+
+        run_from_config(cfg_path, is_batch=True)
+
+        log_file = out_dir / "pysole.log"
+        self.assertTrue(log_file.exists())
+        with open(log_file, "r") as f:
+            log_lines = f.readlines()
+
+        init_lines = [l for l in log_lines if "Initialized PySole log file at:" in l]
+        self.assertEqual(len(init_lines), 1, f"Expected exactly 1 log init line in file, got: {init_lines}")
+
+        banner_idx = -1
+        init_idx = -1
+        for i, l in enumerate(log_lines):
+            if "STARTING NEW PYSOLE BEDROCK TOPOGRAPHY CALCULATION" in l:
+                banner_idx = i
+            elif "Initialized PySole log file at:" in l:
+                init_idx = i
+        self.assertGreater(banner_idx, -1)
+        self.assertGreater(init_idx, banner_idx)
+
+
 if __name__ == "__main__":
     unittest.main()
