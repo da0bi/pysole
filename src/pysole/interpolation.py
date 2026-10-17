@@ -641,7 +641,7 @@ def built_in_kriging_interpolation(
                 get_progress_bar(
                     executor.map(_process_chunk, chunks),
                     total=len(chunks),
-                    desc="   [Dual Kriging Engine] Interpolating DEM grid",
+                    desc="   [Dual Kriging Engine] Interpolating grid",
                     unit="chunks",
                     disable=not show_progress,
                 )
@@ -652,7 +652,7 @@ def built_in_kriging_interpolation(
                 _process_chunk(chunk_tuple)
                 for chunk_tuple in get_progress_bar(
                     chunks,
-                    desc="   [Dual Kriging Engine] Interpolating DEM grid",
+                    desc="   [Dual Kriging Engine] Interpolating grid",
                     unit="chunks",
                     disable=not show_progress,
                 )

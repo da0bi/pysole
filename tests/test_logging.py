@@ -206,15 +206,19 @@ class TestTerminalUI(unittest.TestCase):
         old_stdout = sys.stdout
         try:
             sys.stdout = buf
-            with self.assertLogs("pysole", level="INFO") as cm:
-                pysole_logging.log_section_header("TEST HEADLINE TITLE", width=80)
+            pysole_logging.log_section_header("TEST HEADLINE TITLE", width=80)
         finally:
             sys.stdout = old_stdout
 
         out = buf.getvalue()
-        self.assertEqual(out, "\n\n")
-        self.assertTrue(any("=" * 80 in m for m in cm.output))
-        self.assertTrue(any("TEST HEADLINE TITLE" in m for m in cm.output))
+        self.assertIn("=" * 80, out)
+        self.assertIn("TEST HEADLINE TITLE", out)
+        # Verify it has top and bottom dividers and centered title
+        lines = [line.strip() for line in out.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0], "=" * 80)
+        self.assertEqual(lines[1], "TEST HEADLINE TITLE")
+        self.assertEqual(lines[2], "=" * 80)
 
 
 if __name__ == "__main__":

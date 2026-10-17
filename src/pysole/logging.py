@@ -199,8 +199,8 @@ def print_welcome_banner(version: str | None = None, file=None) -> None:
     out.flush()
 
 
-def log_section_header(title: str, line_char: str = "=", width: int = 80) -> None:
-    """Logs a prominent section headline bounded by decorative divider lines.
+def log_section_header(title: str, line_char: str = "=", width: int = 80, file=None) -> None:
+    """Prints a prominent section headline bounded by decorative divider lines directly to the terminal.
 
     Parameters
     ----------
@@ -210,16 +210,14 @@ def log_section_header(title: str, line_char: str = "=", width: int = 80) -> Non
         Divider character.
     width : int, default 80
         Total line width for the divider and centering.
+    file : TextIO, optional
+        Target text stream (defaults to sys.stdout).
     """
+    out = file if file is not None else sys.stdout
     divider = line_char * width
     centered = title.center(width)
-    sys.stdout.write("\n")
-    sys.stdout.flush()
-    logger.info(divider)
-    logger.info(centered)
-    logger.info(divider)
-    sys.stdout.write("\n")
-    sys.stdout.flush()
+    out.write(f"\n{divider}\n{centered}\n{divider}\n\n")
+    out.flush()
 
 
 _BaseBar = tqdm if isinstance(tqdm, type) else object

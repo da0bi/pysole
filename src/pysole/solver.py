@@ -1551,9 +1551,6 @@ class Solver:
             self._warn_traveltime_exports_unavailable("survey_data_type is 'depth'")
             return self.migrated_points
 
-        if interactive:
-            log_section_header("INTERACTIVE 3D EIKONAL RAY MIGRATION")
-
         v_eff = float(velocity) if velocity is not None else 0.16
         if velocity is None and interactive:
             try:
@@ -1619,6 +1616,7 @@ class Solver:
         self.migrated_points = mig_res.migrated_points
 
         if interactive:
+            log_section_header("INTERACTIVE 3D EIKONAL RAY MIGRATION")
             while True:
                 try:
                     ans = input(f"\nCurrent migration velocity v = {v_eff:.4f} m/ns. Test another migration velocity? [y/N]: ").strip().lower()

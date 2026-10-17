@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import os
+import sys
 from pathlib import Path
 from scipy.spatial.distance import pdist
 from scipy.optimize import curve_fit
@@ -875,7 +876,8 @@ def optimize_bss_variance(
     while go_on:
         if interactive:
             metric_label = "wavelength [m]" if use_wavelength else "wavenumber [rad/m]"
-            logger.info(f"--- BSS Filter Optimization ({metric_label}, Grid k_Nyquist = {k_nyquist:.4f} rad/m, λ_Nyquist = {lambda_nyquist:.1f} m) ---")
+            sys.stdout.write(f"--- BSS Filter Optimization ({metric_label}, Grid k_Nyquist = {k_nyquist:.4f} rad/m, λ_Nyquist = {lambda_nyquist:.1f} m) ---\n")
+            sys.stdout.flush()
             try:
                 if use_wavelength:
                     cur_lmin = (2.0 * np.pi) / kc_max_val
@@ -1050,9 +1052,10 @@ def optimize_bss_variance(
             )
 
         if interactive:
-            logger.info("Iteration Results (Corner Frequency vs Mean Variance):")
+            sys.stdout.write("Iteration Results (Corner Frequency vs Mean Variance):\n")
             for kc_val, var_val in (step_variances if step_variances else all_kc_variances):
-                logger.info(f"  k_c = {kc_val:.4f} --> Mean Variance = {var_val:.6f}")
+                sys.stdout.write(f"  k_c = {kc_val:.4f} --> Mean Variance = {var_val:.6f}\n")
+            sys.stdout.flush()
 
             ans = input("\nContinue Optimization Process? [y/N]: ").strip().lower()
             if ans in ["y", "yes"]:

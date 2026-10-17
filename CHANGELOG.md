@@ -42,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Decoupled `outputs` section parameters (`save_traveltime_uncertainty`, `save_thickness_uncertainty`, `save_basal_shear_stress_uncertainty`) to strictly control disk writing of computed grids without triggering implicit Kriging variance evaluation.
   - When an uncertainty export is requested in `outputs` while `calculate_uncertainty` is `false` (or skipped by the memory guard), PySole cleanly logs `[Export Skipped] The {name} raster is not exported: Kriging uncertainty was not calculated (kriging_parameters.*.calculate_uncertainty=false, skipped by the memory guard, or not supported by method).`
   - Zero backward compatibility retained for removed legacy couplings.
+- **[Terminal Output of Interactive Headers & Sub-Labels] (`src/pysole/logging.py`, `src/pysole/variogram.py`, `src/pysole/solver.py`, `tests/test_logging.py`)**:
+  - `log_section_header()` now outputs decorative divider lines and centered stage titles directly to `sys.stdout` instead of routing through `logger.info`, eliminating timestamps and `[INFO]` prefix tags from interactive terminal banners.
+  - Interactive variogram sub-headers and iteration results in `src/pysole/variogram.py` write directly to stdout for a clean interactive CLI presentation.
+  - Relocated the `INTERACTIVE 3D EIKONAL RAY MIGRATION` section header in `Solver.migrate_eikonal()` from the method start to appear immediately before the migration velocity testing prompt (`Current migration velocity v = ... Test another migration velocity? [y/N]:`), after Pass 1 Kriging and ray displacement have completed.
+- **[Dual Kriging Progress Bar Description] (`src/pysole/interpolation.py`)**:
+  - Updated progress bar description from `[Dual Kriging Engine] Interpolating DEM grid` to `[Dual Kriging Engine] Interpolating grid` across both parallel and sequential interpolation branches, so that upon completion the bar cleanly renders as `[Dual Kriging Engine] Interpolating grid 100%`.
 
 ### Fixed
 - **[Relative Output Directory Resolution for Migrated Points] (`src/pysole/solver.py`)**:
