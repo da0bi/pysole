@@ -3,7 +3,9 @@ Unit tests for variogram calculation and BSS surface slope optimization using Wu
 """
 
 import unittest
+from unittest.mock import patch
 import os
+import tempfile
 import numpy as np
 from pysole.raster import load_dem, load_outline, GridGeometry
 from pysole.variogram import calculate_variogram, fit_variogram_model, optimize_bss_variance, OptimizationResult
@@ -51,6 +53,36 @@ class TestVariogramWuk(unittest.TestCase):
         self.assertGreater(opt_res.optimal_kc, 0)
         self.assertEqual(opt_res.optimal_slope_grid.shape, dem.shape)
         self.assertGreater(len(opt_res.all_smoothed_slopes), 0)
+
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_interactive_bss_custom_kc(self, mock_isatty):
+        dem, meta = load_dem(self.wuk_dem)
+        geometry = GridGeometry.create(dem.shape, dx=meta["dx"], dy=meta["dy"], bounds=meta["bounds"])
+        survey = np.loadtxt(self.wuk_survey, delimiter=",", skiprows=1)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Inputs:
+            # 1-3. kc_max, kc_min, n_steps -> defaults ("")
+            # 4. accept correlation range -> "y"
+            # 5. continue sweep -> "n"
+            # 6. accept optimal kc or enter custom kc -> "0.0450"
+            with patch("builtins.input", side_effect=["", "", "", "y", "n", "0.0450"]):
+                opt_res = optimize_bss_variance(
+                    dem=dem,
+                    survey_points=survey,
+                    geometry=geometry,
+                    kc_max=0.3,
+                    kc_min=0.01,
+                    n_steps=3,
+                    plots_dir=tmp_dir,
+                    prefix="02_",
+                    stage_name="pre_migration",
+                    interactive=True,
+                )
+
+            self.assertEqual(opt_res.optimal_kc, 0.0450)
+            fig_path = os.path.join(tmp_dir, "02_pre_migration_kc_variogram_optimization.png")
+            self.assertTrue(os.path.exists(fig_path), f"Figure should exist at {fig_path}")
 
     def test_n_cores_parallelization_wuk(self):
         dem, meta = load_dem(self.wuk_dem)

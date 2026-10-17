@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **[Interactive Bedrock Finalization] (`src/pysole/config.py`, `src/pysole/solver.py`, `src/pysole/pipeline.py`, `pysole.json`, `README.md`)**:
+  - Introduced `"interactive_finalization": true | false` under `finalization_parameters` (default: `false` in `DEFAULT_CONFIG` for automated and batch workflows, `true` in CLI templates).
+  - Added interactive review and adjustment loop in `Solver.finalize_bedrock()`. When enabled in an interactive TTY, presents prompts for bedrock spatial smoothing (toggle, method: gaussian/median/fft_lowpass, sigma/kernel_size/kc_cutoff), Random Forest gap filling (toggle), and geomorphological margin blending (toggle, minimum gap distance / margin width).
+  - Real-time figure refresh: Computes the candidate embedded bedrock on each iteration and immediately updates `07_[<prefix>_]final_embedded_bedrock.png` on disk alongside candidate summary statistics before asking `Accept final embedded bedrock? [Y/n] (or 'r' to re-adjust parameters): `.
+  - Silent non-interactive execution: In headless runs, batch mode (`--batch`), or when disabled, omits terminal prompts and section headers entirely for 100% deterministic, automated execution.
+- **[Real-Time BSS Optimization Diagnostic Figure Update on Custom $k_c$ Adoption] (`src/pysole/variogram.py`)**:
+  - Added interactive prompt at the conclusion of BSS variogram frequency sweeps allowing users to accept the numerically optimal corner frequency $k_c$ or supply a custom $k_c$ in rad/m.
+  - When a custom $k_c$ is entered, immediately evaluates the corresponding spatial filter and variogram, updates the best model, and re-renders/overwrites Figure `02_[<prefix>_]pre_migration_kc_variogram_optimization.png` (Stage 1) or `05_[<prefix>_]post_migration_kc_variogram_optimization.png` (Stage 2) on disk with the custom $k_c$ marked as optimal.
 - **[Decoupled Kriging Uncertainty Calculation] (`src/pysole/config.py`, `src/pysole/solver.py`, `pysole.json`, `README.md`)**:
   - Introduced `"calculate_uncertainty": true | false` (default: `false`) in both `kriging_parameters.pre_migration` and `kriging_parameters.post_migration`.
   - Replaced hardcoded `return_variance=True` in Pass 2 post-migration Dual Kriging with `post_calculate_uncertainty`, eliminating $O(N^2 \cdot m)$ dense matrix solves and RAM streaming overhead when uncertainty is not requested (yielding a **~25× speedup** on large regional grids such as Apo Glacier).

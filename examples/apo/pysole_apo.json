@@ -57,6 +57,7 @@
         }
     },
     "finalization_parameters": {
+        "interactive_finalization": true,
         "random_forest_gap_filling": false,
         "apply_margin_blend": true,
         "min_gap_dist": 50.0,

@@ -821,8 +821,8 @@ class TestAuditRegressions(unittest.TestCase):
 
         # 1. Interactive execution retains strictly O(1) optimal grids (length 1)
         # input sequence: kc_max (default=""), kc_min (default=""), n_steps (default=""),
-        # accept range (default="y"), continue process (default="n")
-        with patch("builtins.input", side_effect=["", "", "", "y", "n"]):
+        # accept range (default="y"), continue process (default="n"), accept optimal kc (default="y")
+        with patch("builtins.input", side_effect=["", "", "", "y", "n", "y"]):
             res_inter = optimize_bss_variance(
                 dem, pts, geom, kc_max=0.3, kc_min=0.01, n_steps=5, n_cores=1, interactive=True, show_progress=False
             )
@@ -885,7 +885,7 @@ class TestAuditRegressions(unittest.TestCase):
         # When migrate_eikonal is called with interactive_optimization=True,
         # Stage 1 optimization prompts the user via input()
         with patch("sys.stdin.isatty", return_value=True):
-            with patch("builtins.input", side_effect=["", "", "", "y", "n"]) as mock_input:
+            with patch("builtins.input", side_effect=["", "", "", "y", "n", "y"]) as mock_input:
                 solver.migrate_eikonal(
                     travel_times=pts,
                     velocity=0.16,

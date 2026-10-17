@@ -210,6 +210,7 @@ def run_from_config(
 
         interactive_mig = not is_batch and sys.stdin.isatty() and bool(mig_cfg.get("interactive_migration", True))
         interactive_opt = not is_batch and sys.stdin.isatty() and bool(opt_cfg.get("interactive_optimization", True))
+        interactive_fin = not is_batch and sys.stdin.isatty() and bool(fin_cfg.get("interactive_finalization", True))
 
         solver.migrate_eikonal(
             velocity=mig_cfg.get("velocity", 0.16),
@@ -219,7 +220,7 @@ def run_from_config(
         solver.optimize_bss(interactive=interactive_opt)
         solver.calculate_bedrock(interactive=interactive_opt)
         final_raster = solver.finalize_bedrock(
-            interactive=interactive_opt,
+            interactive=interactive_fin,
             random_forest_gap_filling=fin_cfg.get("random_forest_gap_filling"),
             apply_margin_blend=fin_cfg.get("apply_margin_blend"),
             min_gap_dist=fin_cfg.get("min_gap_dist"),

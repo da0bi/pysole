@@ -39,6 +39,70 @@ from .survey_planner import SurveyPlanner
 import sys
 
 
+def _prompt_finalization_bool(prompt_text: str, default: bool) -> bool:
+    tag = "Y/n" if default else "y/N"
+    try:
+        raw = input(f"{prompt_text} [{tag}]: ").strip().lower()
+        if not raw:
+            return default
+        return raw in ["y", "yes", "true", "1"]
+    except Exception:
+        return default
+
+
+def _prompt_finalization_float(prompt_text: str, default: float, min_val: float | None = None) -> float:
+    while True:
+        try:
+            raw = input(f"{prompt_text} [{default}]: ").strip()
+            if not raw:
+                return default
+            val = float(raw)
+            if min_val is not None and val < min_val:
+                sys.stdout.write(f"Value must be >= {min_val}. Please try again.\n")
+                sys.stdout.flush()
+                continue
+            return val
+        except ValueError:
+            sys.stdout.write("Invalid numeric value. Please try again.\n")
+            sys.stdout.flush()
+        except Exception:
+            return default
+
+
+def _prompt_finalization_choice(prompt_text: str, choices: list[str], default: str) -> str:
+    choices_str = "/".join(choices)
+    while True:
+        try:
+            raw = input(f"{prompt_text} ({choices_str}) [{default}]: ").strip().lower()
+            if not raw:
+                return default
+            if raw in choices:
+                return raw
+            sys.stdout.write(f"Invalid choice '{raw}'. Choose from: {choices_str}\n")
+            sys.stdout.flush()
+        except Exception:
+            return default
+
+
+def _prompt_finalization_odd_int(prompt_text: str, default: int) -> int:
+    while True:
+        try:
+            raw = input(f"{prompt_text} [{default}]: ").strip()
+            if not raw:
+                return default
+            val = int(raw)
+            if val < 1 or val % 2 == 0:
+                sys.stdout.write("Kernel size must be a positive odd integer (e.g. 3, 5, 7). Please try again.\n")
+                sys.stdout.flush()
+                continue
+            return val
+        except ValueError:
+            sys.stdout.write("Invalid integer. Please try again.\n")
+            sys.stdout.flush()
+        except Exception:
+            return default
+
+
 class Solver:
     """
     Physically-Informed Bedrock Interpolation & 3D Migration Solver.
@@ -1998,7 +2062,8 @@ class Solver:
         Parameters
         ----------
         interactive : bool, default False
-            If True, prompts in the terminal for unset options and displays interactive figures.
+            If True and running in an interactive terminal (non-batch), prompts to inspect and adjust
+            finalization options and refreshes diagnostic figure 07 in real time.
         random_forest_gap_filling : bool, optional
             If True, applies Random Forest ML regression to fill unconstrained voids. If None, asks
             when interactive, otherwise False.
@@ -2023,10 +2088,9 @@ class Solver:
         bedrock_map : BedrockMap
             Final continuous bedrock elevation map [m] wrapped with spatial georeferencing metadata.
         """
-        if interactive:
-            log_section_header("INTERACTIVE BEDROCK FINALIZATION")
-
+        is_interactive = bool(interactive and sys.stdin.isatty() and not getattr(self, "is_batch_mode", False))
         should_plot = interactive or (self.plots_dir is not None)
+        plot_extent = self.plot_extent
 
         if self.kriged_thickness is None:
             if self.kriged_bedrock is not None:
@@ -2034,91 +2098,196 @@ class Solver:
                 if self.outline_mask is not None:
                     self.kriged_thickness[~self.outline_mask] = 0.0
             else:
-                self.calculate_bedrock(interactive=interactive)
+                self.calculate_bedrock(interactive=False)
 
-        # Step 4 Topography Finalization: Takes depth field D(x,y) from Step 3
-        if smooth_bedrock:
-            logger.info(f"   Applying depth field spatial smoothing ({smoothing_method})...")
-            thick_raw = self.kriged_thickness.copy()
-            if self.outline_mask is not None:
-                thick_raw[~self.outline_mask] = 0.0
+        cur_smooth_bedrock = bool(smooth_bedrock) if smooth_bedrock is not None else False
+        cur_smoothing_method = str(smoothing_method or "gaussian")
+        cur_smoothing_sigma = float(smoothing_sigma if smoothing_sigma is not None else 1.5)
+        cur_smoothing_kernel_size = int(smoothing_kernel_size if smoothing_kernel_size is not None else 3)
+        cur_smoothing_kc_cutoff = smoothing_kc_cutoff
+        cur_rf = bool(random_forest_gap_filling) if random_forest_gap_filling is not None else False
+        cur_blend = bool(apply_margin_blend) if apply_margin_blend is not None else False
+        cur_min_gap_dist = float(min_gap_dist if min_gap_dist is not None else 50.0)
 
-            thick_smoothed = self.smooth_bedrock_dem(
-                thick_raw,
-                method=smoothing_method,
-                sigma=smoothing_sigma,
-                kernel_size=smoothing_kernel_size,
-                kc_cutoff=smoothing_kc_cutoff,
-            )
-            if self.outline_mask is not None:
-                thick_smoothed[~self.outline_mask] = 0.0
+        if is_interactive:
+            log_section_header("INTERACTIVE BEDROCK FINALIZATION")
+            sys.stdout.write("Post-migration Kriging has produced the initial bedrock elevation map (figure 06).\n")
+            sys.stdout.write("Configure finalization options below to refine the final embedded bedrock terrain.\n\n")
+            sys.stdout.flush()
 
-            self.kriged_bedrock = self.dem_grid - thick_smoothed
-        else:
-            self.kriged_bedrock = self.dem_grid - self.kriged_thickness
-            if self.outline_mask is not None:
-                self.kriged_bedrock[~self.outline_mask] = self.dem_grid[~self.outline_mask]
+            while True:
+                # Prompt 1: Spatial Bedrock Smoothing
+                sys.stdout.write("--- Finalization Option 1: Bedrock / Depth Field Spatial Smoothing ---\n")
+                sys.stdout.flush()
+                cur_smooth_bedrock = _prompt_finalization_bool("Apply spatial smoothing to kriged depth/bedrock?", cur_smooth_bedrock)
+                if cur_smooth_bedrock:
+                    cur_smoothing_method = _prompt_finalization_choice(
+                        "Smoothing method", ["gaussian", "median", "fft_lowpass"], cur_smoothing_method
+                    )
+                    if cur_smoothing_method == "gaussian":
+                        cur_smoothing_sigma = _prompt_finalization_float("Gaussian smoothing sigma [px]", cur_smoothing_sigma, min_val=0.1)
+                    elif cur_smoothing_method == "median":
+                        cur_smoothing_kernel_size = _prompt_finalization_odd_int("Median kernel size (odd int)", cur_smoothing_kernel_size)
+                    elif cur_smoothing_method == "fft_lowpass":
+                        default_kc = float(self.opt_kc) if self.opt_kc is not None else 0.03
+                        cur_kc_str = f"{cur_smoothing_kc_cutoff:.4f}" if cur_smoothing_kc_cutoff is not None else f"{default_kc:.4f}"
+                        try:
+                            ans_kc = input(f"Cutoff wavenumber k_c [rad/m] [{cur_kc_str}]: ").strip()
+                            cur_smoothing_kc_cutoff = float(ans_kc) if ans_kc else (cur_smoothing_kc_cutoff or default_kc)
+                        except Exception:
+                            cur_smoothing_kc_cutoff = cur_smoothing_kc_cutoff or default_kc
 
-        if random_forest_gap_filling is None:
-            if interactive:
-                try:
-                    ans = input("\nBased on Kriging plots, do you want to apply Random Forest gap filling? [y/N]: ").strip().lower()
-                    random_forest_gap_filling = ans in ["y", "yes"]
-                except Exception:
-                    random_forest_gap_filling = False
-            else:
-                random_forest_gap_filling = False
+                # Prompt 2: Machine Learning Gap Filling
+                sys.stdout.write("\n--- Finalization Option 2: Machine Learning Gap Filling ---\n")
+                sys.stdout.flush()
+                cur_rf = _prompt_finalization_bool("Based on Kriging plots, apply Random Forest gap filling across voids?", cur_rf)
 
-        if random_forest_gap_filling:
-            self.fill_holes_rf()
-            current_bedrock = self.rf_filled_bedrock
-        else:
-            self.rf_filled_bedrock = self.kriged_bedrock.copy()
-            current_bedrock = self.kriged_bedrock
+                # Prompt 3: Geomorphological Boundary Margin Blending
+                sys.stdout.write("\n--- Finalization Option 3: Geomorphological Boundary Margin Blending ---\n")
+                sys.stdout.flush()
+                cur_blend = _prompt_finalization_bool("Apply margin blending to surrounding terrain (blend_margin_topography)?", cur_blend)
+                if cur_blend:
+                    cur_min_gap_dist = _prompt_finalization_float("Margin blending transition buffer width [m]", cur_min_gap_dist, min_val=1.0)
 
-        plot_extent = self.plot_extent
+                sys.stdout.write("\n>> Computing candidate embedded bedrock topography...\n")
+                sys.stdout.flush()
 
-        if apply_margin_blend is None:
-            if interactive:
-                try:
-                    ans_blend = input("\nDo you want to apply margin blending to surrounding terrain (blend_margin_topography)? [Y/n]: ").strip().lower()
-                    apply_margin_blend = ans_blend not in ["n", "no"]
-                except Exception:
-                    apply_margin_blend = True
-            else:
-                apply_margin_blend = False
-
-        if apply_margin_blend:
-            if min_gap_dist is None:
-                if interactive:
-                    try:
-                        val_gap = input("Enter minimum gap distance / margin width [m] (e.g. 50.0): ").strip()
-                        min_gap_dist = float(val_gap) if val_gap else 50.0
-                    except Exception:
-                        min_gap_dist = 50.0
+                # Execute candidate finalization pipeline:
+                if cur_smooth_bedrock:
+                    thick_raw = self.kriged_thickness.copy()
+                    if self.outline_mask is not None:
+                        thick_raw[~self.outline_mask] = 0.0
+                    thick_smoothed = self.smooth_bedrock_dem(
+                        thick_raw,
+                        method=cur_smoothing_method,
+                        sigma=cur_smoothing_sigma,
+                        kernel_size=cur_smoothing_kernel_size,
+                        kc_cutoff=cur_smoothing_kc_cutoff,
+                    )
+                    if self.outline_mask is not None:
+                        thick_smoothed[~self.outline_mask] = 0.0
+                    cand_bedrock = self.dem_grid - thick_smoothed
                 else:
-                    min_gap_dist = 50.0
+                    cand_bedrock = self.dem_grid - self.kriged_thickness
+                    if self.outline_mask is not None:
+                        cand_bedrock[~self.outline_mask] = self.dem_grid[~self.outline_mask]
 
-            logger.info(f"   Applying geomorphological margin blending (min_gap_dist = {min_gap_dist:.1f} m)...")
-            self.blended_bedrock = blend_margin_topography(
-                dem=self.dem_grid,
-                bedrock_input=current_bedrock,
-                boundary_mask=self.outline_mask,
-                geometry=self.geometry,
-                min_gap_dist=min_gap_dist,
-            )
+                if cur_rf:
+                    self.fill_holes_rf()
+                    cand_bedrock = self.rf_filled_bedrock
+                else:
+                    self.rf_filled_bedrock = cand_bedrock.copy()
+
+                if cur_blend:
+                    if self.outline_mask is not None:
+                        cand_blended = blend_margin_topography(
+                            dem=self.dem_grid,
+                            bedrock_input=cand_bedrock,
+                            boundary_mask=self.outline_mask,
+                            geometry=self.geometry,
+                            min_gap_dist=cur_min_gap_dist,
+                        )
+                    else:
+                        cand_blended = cand_bedrock.copy()
+                else:
+                    cand_blended = cand_bedrock.copy()
+
+                self.blended_bedrock = cand_blended
+
+                # Immediately update diagnostic plot 07 on disk
+                if should_plot:
+                    from .plotting import plot_final_blended_bedrock_map
+                    plot_final_blended_bedrock_map(
+                        blended_bedrock=self.blended_bedrock,
+                        plot_extent=plot_extent,
+                        plots_dir=self.plots_dir,
+                        interactive=interactive,
+                        output_prefix=self.figure_prefix,
+                    )
+
+                cand_thickness = np.maximum(self.dem_grid - self.blended_bedrock, 0.0)
+                if self.outline_mask is not None:
+                    cand_thickness[~self.outline_mask] = 0.0
+                finite_bed = self.blended_bedrock[np.isfinite(self.blended_bedrock)]
+                min_bed = float(np.min(finite_bed)) if finite_bed.size > 0 else 0.0
+                max_bed = float(np.max(finite_bed)) if finite_bed.size > 0 else 0.0
+                active_thick = cand_thickness[self.outline_mask] if (self.outline_mask is not None and np.any(self.outline_mask)) else cand_thickness
+                finite_thick = active_thick[np.isfinite(active_thick)]
+                mean_th = float(np.mean(finite_thick)) if finite_thick.size > 0 else 0.0
+                max_th = float(np.max(finite_thick)) if finite_thick.size > 0 else 0.0
+
+                sys.stdout.write("Candidate Bedrock Summary:\n")
+                sys.stdout.write(f"  - Bedrock elevation range : {min_bed:.1f} m to {max_bed:.1f} m\n")
+                sys.stdout.write(f"  - Mean ice thickness      : {mean_th:.1f} m (max: {max_th:.1f} m)\n")
+                sys.stdout.write(f"  - Spatial smoothing       : {cur_smooth_bedrock} ({cur_smoothing_method})\n")
+                sys.stdout.write(f"  - Random Forest gap fill  : {cur_rf}\n")
+                sys.stdout.write(f"  - Margin blend applied    : {cur_blend} (buffer: {cur_min_gap_dist:.1f} m)\n")
+                if self.plots_dir:
+                    pfx_str = f"{self.figure_prefix}_" if self.figure_prefix else ""
+                    fig_path = Path(self.plots_dir).resolve() / f"07_{pfx_str}final_embedded_bedrock.png"
+                    sys.stdout.write(f"  - Diagnostic figure 07    : {fig_path}\n")
+                sys.stdout.flush()
+
+                try:
+                    ans_accept = input("\nAccept final embedded bedrock? [Y/n] (or 'r' to re-adjust parameters): ").strip().lower()
+                except Exception:
+                    ans_accept = "y"
+
+                if ans_accept in ["", "y", "yes"]:
+                    self.kriged_bedrock = cand_bedrock
+                    break
         else:
-            self.blended_bedrock = current_bedrock.copy()
+            # Single-pass deterministic execution using configured/passed arguments
+            if cur_smooth_bedrock:
+                logger.info(f"   Applying depth field spatial smoothing ({cur_smoothing_method})...")
+                thick_raw = self.kriged_thickness.copy()
+                if self.outline_mask is not None:
+                    thick_raw[~self.outline_mask] = 0.0
 
-        if should_plot:
-            from .plotting import plot_final_blended_bedrock_map
-            plot_final_blended_bedrock_map(
-                blended_bedrock=self.blended_bedrock,
-                plot_extent=plot_extent,
-                plots_dir=self.plots_dir,
-                interactive=interactive,
-                output_prefix=self.figure_prefix,
-            )
+                thick_smoothed = self.smooth_bedrock_dem(
+                    thick_raw,
+                    method=cur_smoothing_method,
+                    sigma=cur_smoothing_sigma,
+                    kernel_size=cur_smoothing_kernel_size,
+                    kc_cutoff=cur_smoothing_kc_cutoff,
+                )
+                if self.outline_mask is not None:
+                    thick_smoothed[~self.outline_mask] = 0.0
+
+                self.kriged_bedrock = self.dem_grid - thick_smoothed
+            else:
+                self.kriged_bedrock = self.dem_grid - self.kriged_thickness
+                if self.outline_mask is not None:
+                    self.kriged_bedrock[~self.outline_mask] = self.dem_grid[~self.outline_mask]
+
+            if cur_rf:
+                self.fill_holes_rf()
+                current_bedrock = self.rf_filled_bedrock
+            else:
+                self.rf_filled_bedrock = self.kriged_bedrock.copy()
+                current_bedrock = self.kriged_bedrock
+
+            if cur_blend:
+                logger.info(f"   Applying geomorphological margin blending (min_gap_dist = {cur_min_gap_dist:.1f} m)...")
+                self.blended_bedrock = blend_margin_topography(
+                    dem=self.dem_grid,
+                    bedrock_input=current_bedrock,
+                    boundary_mask=self.outline_mask,
+                    geometry=self.geometry,
+                    min_gap_dist=cur_min_gap_dist,
+                )
+            else:
+                self.blended_bedrock = current_bedrock.copy()
+
+            if should_plot:
+                from .plotting import plot_final_blended_bedrock_map
+                plot_final_blended_bedrock_map(
+                    blended_bedrock=self.blended_bedrock,
+                    plot_extent=plot_extent,
+                    plots_dir=self.plots_dir,
+                    interactive=interactive,
+                    output_prefix=self.figure_prefix,
+                )
 
         self.final_thickness = np.maximum(self.dem_grid - self.blended_bedrock, 0.0)
         if self.outline_mask is not None:
@@ -2415,6 +2584,7 @@ class Solver:
         is_batch = (not self.show_progress) or (not sys.stdin.isatty())
         opt_interactive = False if is_batch else opt.get("interactive_optimization", False)
         mig_interactive = False if is_batch else migration.get("interactive_migration", False)
+        fin_interactive = False if is_batch else fin_cfg.get("interactive_finalization", False)
 
         self.migrate_eikonal(
             travel_times=survey_data_path,
@@ -2434,7 +2604,7 @@ class Solver:
 
         logger.info("4. Finalizing Bedrock Topography...")
         bedrock_map = self.finalize_bedrock(
-            interactive=opt_interactive,
+            interactive=fin_interactive,
             random_forest_gap_filling=fin_cfg.get("random_forest_gap_filling", False),
             apply_margin_blend=fin_cfg.get("apply_margin_blend", False),
             min_gap_dist=fin_cfg.get("min_gap_dist", 50.0),

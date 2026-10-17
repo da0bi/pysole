@@ -291,6 +291,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
     },
     "finalization_parameters": {
+        "interactive_finalization": False,
         "random_forest_gap_filling": False,
         "apply_margin_blend": False,
         "min_gap_dist": 50.0,

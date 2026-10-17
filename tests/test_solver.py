@@ -3,6 +3,7 @@ Integration test for full Solver workflow using Wurtenkees Glacier dataset.
 """
 
 import unittest
+from unittest.mock import patch
 import tempfile
 import pathlib
 import os
@@ -141,6 +142,57 @@ class TestSolverWuk(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             pysole.Solver.from_config({"inputs": {"dem_path": None}, "outputs": {"output_dir": self.output_dir}})
         self.assertIn("Missing required 'dem_path'", str(ctx.exception))
+
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_interactive_bedrock_finalization_defaults(self, mock_isatty):
+        dem = np.full((20, 20), 2000.0, dtype=np.float64)
+        model = pysole.Solver(dem=dem, dx=10.0, dy=10.0, bounds=(0, 0, 200, 200), output_dir=self.output_dir)
+        model.kriged_thickness = np.full((20, 20), 50.0)
+        model.opt_slope = np.full((20, 20), 0.1)
+        model.plots_dir = self.output_dir
+
+        with patch("builtins.input", side_effect=["", "", "", "y"]):
+            bedrock_map = model.finalize_bedrock(interactive=True)
+
+        self.assertIsInstance(bedrock_map, pysole.BedrockMap)
+        fig07 = os.path.join(self.output_dir, "07_final_embedded_bedrock.png")
+        self.assertTrue(os.path.exists(fig07), "Figure 07 should be refreshed and saved to disk")
+
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_interactive_bedrock_finalization_readjust_loop(self, mock_isatty):
+        dem = np.full((20, 20), 2000.0, dtype=np.float64)
+        model = pysole.Solver(dem=dem, dx=10.0, dy=10.0, bounds=(0, 0, 200, 200), output_dir=self.output_dir)
+        model.kriged_thickness = np.full((20, 20), 50.0)
+        model.opt_slope = np.full((20, 20), 0.1)
+        model.plots_dir = self.output_dir
+
+        # Pass 1: "y" -> smoothing, "gaussian", "2.0", "n" -> RF, "y" -> margin, "30.0", "r" -> re-adjust!
+        # Pass 2: "n" -> smoothing, "n" -> RF, "n" -> margin, "y" -> accept!
+        inputs = [
+            "y", "gaussian", "2.0", "n", "y", "30.0", "r",
+            "n", "n", "n", "y"
+        ]
+        with patch("builtins.input", side_effect=inputs):
+            bedrock_map = model.finalize_bedrock(interactive=True)
+
+        self.assertIsInstance(bedrock_map, pysole.BedrockMap)
+        fig07 = os.path.join(self.output_dir, "07_final_embedded_bedrock.png")
+        self.assertTrue(os.path.exists(fig07), "Figure 07 should be updated and saved to disk")
+
+    def test_non_interactive_bedrock_finalization_never_prompts(self):
+        dem = np.full((20, 20), 2000.0, dtype=np.float64)
+        model = pysole.Solver(dem=dem, dx=10.0, dy=10.0, bounds=(0, 0, 200, 200), output_dir=self.output_dir)
+        model.kriged_thickness = np.full((20, 20), 50.0)
+        model.opt_slope = np.full((20, 20), 0.1)
+        model.plots_dir = self.output_dir
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("input() should never be called in non-interactive mode")
+
+        with patch("builtins.input", side_effect=fail_if_called):
+            bedrock_map = model.finalize_bedrock(interactive=False)
+
+        self.assertIsInstance(bedrock_map, pysole.BedrockMap)
 
 
 if __name__ == "__main__":

@@ -1065,6 +1065,54 @@ def optimize_bss_variance(
         else:
             go_on = False
 
+    if interactive and sys.stdin.isatty() and best_kc is not None:
+        opt_wl_prompt = compute_cutoff_wavelength(best_kc)
+        ans_kc = input(f"\nOptimal corner frequency k_c = {best_kc:.4f} rad/m (λ_c = {opt_wl_prompt:.2f} m). Accept? [Y/n] (or enter custom k_c [rad/m]): ").strip()
+        if ans_kc and ans_kc.lower() not in ["y", "yes"]:
+            try:
+                custom_kc = float(ans_kc)
+                if custom_kc > 0:
+                    logger.info(f"   [Interactive BSS] Evaluating user-selected custom corner frequency k_c = {custom_kc:.4f} rad/m...")
+                    custom_res = _eval_single_kc(custom_kc)
+                    if custom_res is not None:
+                        kc_val, kc_key, smoothed_dem, smoothed_slope, var_result, mean_product = custom_res
+                        if len(var_result["val"]) > 0:
+                            gamma_norm = var_result["val"] / (mean_product**2) if (mean_product != 0 and not np.isnan(mean_product)) else var_result["val"].copy()
+                            counts_bin = var_result.get("np")
+                            range_mask = var_result["distance"] <= range_fix if range_fix is not None else np.ones_like(var_result["distance"], dtype=bool)
+                            if not np.any(range_mask):
+                                range_mask = np.ones_like(var_result["distance"], dtype=bool)
+                            if counts_bin is not None and np.sum(counts_bin[range_mask]) > 0:
+                                mean_variance = float(np.average(gamma_norm[range_mask], weights=np.sqrt(np.maximum(counts_bin[range_mask], 1))))
+                            else:
+                                mean_variance = float(np.mean(gamma_norm[range_mask]))
+                            all_kc_variances.append([custom_kc, mean_variance])
+                            evaluated_variograms.append({
+                                "kc": custom_kc,
+                                "distance": var_result["distance"],
+                                "gamma_raw": var_result["val"],
+                                "gamma_norm": gamma_norm,
+                                "mean_product": mean_product,
+                            })
+                        best_kc = custom_kc
+                        best_slope_grid = smoothed_slope
+                        best_dem_grid = smoothed_dem
+                        # Immediately update the diagnostic figure on disk
+                        if (interactive or (plots_dir is not None)) and len(evaluated_variograms) > 0:
+                            from .plotting import plot_bss_kc_optimization_variograms
+                            plot_bss_kc_optimization_variograms(
+                                evaluated_variograms=evaluated_variograms,
+                                best_kc=best_kc,
+                                all_kc_variances=all_kc_variances,
+                                plots_dir=plots_dir,
+                                prefix=prefix,
+                                stage_name=stage_name,
+                                interactive=interactive,
+                                output_prefix=output_prefix,
+                            )
+            except ValueError:
+                logger.warning(f"   Invalid corner frequency '{ans_kc}', retaining optimal k_c = {best_kc:.4f} rad/m.")
+
     if best_kc is None:
         fallback_kc = float(kc_max_val)
         logger.warning(f"BSS optimization search found no valid minimum variance. Defaulting k_c to {fallback_kc:.4f} rad/m.")
