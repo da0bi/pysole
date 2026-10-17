@@ -159,12 +159,14 @@ class TestTerminalUI(unittest.TestCase):
         self.assertIn(f"v{__version__}", banner_auto)
 
     def test_welcome_banner_centering(self):
+        block_width = 33
         for width in [80, 100, 120]:
             banner = pysole_logging.get_welcome_banner(version="0.5.1", term_width=width)
             lines = [l for l in banner.splitlines() if l.strip()]
             tagline = [l for l in lines if "The soul of the sole" in l][0]
             left_space = len(tagline) - len(tagline.lstrip())
-            expected_left = (width - len("The soul of the sole")) // 2
+            art_margin = (width - block_width) // 2
+            expected_left = art_margin + (block_width - len("The soul of the sole")) // 2
             self.assertEqual(left_space, expected_left)
 
     def test_print_welcome_banner(self):

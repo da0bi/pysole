@@ -645,13 +645,15 @@ class Solver:
             f"  Post-Migration Target: {self._drift_plan('post_migration').describe()} (Target: '{self.post_interpolation_target}')",
         ]
         if self.final_thickness is not None:
-            valid_h = self.final_thickness[self.outline_mask]
+            mask_h = (self.outline_mask & (self.final_thickness > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (self.final_thickness > 0)
+            valid_h = self.final_thickness[mask_h & np.isfinite(self.final_thickness)]
             if len(valid_h) > 0:
-                lines.append(f"  Ice Thickness Range  : min={np.nanmin(valid_h):.1f} m, mean={np.nanmean(valid_h):.1f} m, max={np.nanmax(valid_h):.1f} m")
+                lines.append(f"  Ice Thickness Range  : min={np.min(valid_h):.1f} m, mean={np.mean(valid_h):.1f} m, max={np.max(valid_h):.1f} m")
         if self.final_bss is not None:
-            valid_tau = self.final_bss[self.outline_mask]
+            mask_tau = (self.outline_mask & (self.final_bss > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (self.final_bss > 0)
+            valid_tau = self.final_bss[mask_tau & np.isfinite(self.final_bss)]
             if len(valid_tau) > 0:
-                lines.append(f"  Basal Shear Stress   : min={np.nanmin(valid_tau):.1f} kPa, mean={np.nanmean(valid_tau):.1f} kPa, max={np.nanmax(valid_tau):.1f} kPa")
+                lines.append(f"  Basal Shear Stress   : min={np.min(valid_tau):.1f} kPa, mean={np.mean(valid_tau):.1f} kPa, max={np.max(valid_tau):.1f} kPa")
         lines.append("================================================================================")
         summary_text = "\n".join(lines)
         logger.info(summary_text)
@@ -748,9 +750,9 @@ class Solver:
         saved = raster.save(filepath, formats=fmt)
         if isinstance(saved, list):
             for sf in saved:
-                logger.info(f"   Saved optional {name} map to: {sf}")
+                logger.info(f"   Saved {name} grid to: {sf}")
         else:
-            logger.info(f"   Saved optional {name} map to: {saved}")
+            logger.info(f"   Saved {name} grid to: {saved}")
         return saved
 
     def _export_optional_points_csv(self, points: np.ndarray | None, suffix: str) -> str | None:
@@ -772,7 +774,7 @@ class Solver:
             return None
         filepath = self._get_output_filepath(suffix, ext=".csv")
         saved = save_points_csv(points, filepath)
-        logger.info(f"   Saved optional migrated survey points to: {saved}")
+        logger.info(f"   Saved migrated survey points to: {saved}")
         return saved
 
     @staticmethod
@@ -851,7 +853,7 @@ class Solver:
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
             if getattr(cfg_out, "save_bedrock_grid", True) and self.final_grid is not None:
-                res = self._export_optional_raster(self.final_grid, suffix="bedrock", name="bedrock elevation")
+                res = self._export_optional_raster(self.final_grid, suffix="bedrock", name="bedrock")
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
 
@@ -2212,7 +2214,7 @@ class Solver:
                 min_bed = float(np.min(finite_bed)) if finite_bed.size > 0 else 0.0
                 max_bed = float(np.max(finite_bed)) if finite_bed.size > 0 else 0.0
                 active_thick = cand_thickness[self.outline_mask] if (self.outline_mask is not None and np.any(self.outline_mask)) else cand_thickness
-                finite_thick = active_thick[np.isfinite(active_thick)]
+                finite_thick = active_thick[np.isfinite(active_thick) & (active_thick > 0)]
                 mean_th = float(np.mean(finite_thick)) if finite_thick.size > 0 else 0.0
                 max_th = float(np.max(finite_thick)) if finite_thick.size > 0 else 0.0
 
@@ -2302,16 +2304,12 @@ class Solver:
             if self.outline_mask is not None:
                 self.kriged_std[~self.outline_mask] = np.nan
 
-        def _safe_nanmean(arr: np.ndarray) -> float:
-            finite = arr[np.isfinite(arr)]
-            return float(np.mean(finite)) if finite.size > 0 else float("nan")
-
-        if self.outline_mask is not None and np.any(self.outline_mask):
-            mean_thick = _safe_nanmean(self.final_thickness[self.outline_mask])
-            mean_unc = _safe_nanmean(self.kriged_std[self.outline_mask])
-        else:
-            mean_thick = _safe_nanmean(self.final_thickness)
-            mean_unc = _safe_nanmean(self.kriged_std)
+        # Domain & histogram means (strictly evaluated over positive glaciated cells H > 0 and tau_b > 0)
+        mask_thick = (self.outline_mask & (self.final_thickness > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (self.final_thickness > 0)
+        thick_valid = self.final_thickness[mask_thick & np.isfinite(self.final_thickness)]
+        unc_valid = self.kriged_std[mask_thick & np.isfinite(self.kriged_std)]
+        mean_thick = float(np.mean(thick_valid)) if thick_valid.size > 0 else 0.0
+        mean_unc = float(np.mean(unc_valid)) if unc_valid.size > 0 else 0.0
 
         # Basal Shear Stress Calculation (tb = rho_ice * g * D * sin(alpha) in kPa).
         # Deliberately the UNFLOORED slope: the slope floor only stabilizes the P <-> D/T
@@ -2324,12 +2322,11 @@ class Solver:
             self.final_bss[~self.outline_mask] = np.nan
             self.bss_std[~self.outline_mask] = np.nan
 
-        if self.outline_mask is not None and np.any(self.outline_mask):
-            mean_bss = _safe_nanmean(self.final_bss[self.outline_mask])
-            mean_bss_unc = _safe_nanmean(self.bss_std[self.outline_mask])
-        else:
-            mean_bss = _safe_nanmean(self.final_bss)
-            mean_bss_unc = _safe_nanmean(self.bss_std)
+        mask_bss = (self.outline_mask & (self.final_bss > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (self.final_bss > 0)
+        bss_valid = self.final_bss[mask_bss & np.isfinite(self.final_bss)]
+        bss_unc_valid = self.bss_std[mask_bss & np.isfinite(self.bss_std)]
+        mean_bss = float(np.mean(bss_valid)) if bss_valid.size > 0 else 0.0
+        mean_bss_unc = float(np.mean(bss_unc_valid)) if bss_unc_valid.size > 0 else 0.0
 
         if should_plot:
             from .plotting import (

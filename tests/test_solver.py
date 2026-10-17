@@ -194,6 +194,27 @@ class TestSolverWuk(unittest.TestCase):
 
         self.assertIsInstance(bedrock_map, pysole.BedrockMap)
 
+    def test_positive_histogram_and_domain_means(self):
+        dem = np.full((10, 10), 2000.0, dtype=np.float64)
+        model = pysole.Solver(dem=dem, dx=10.0, dy=10.0, bounds=(0, 0, 100, 100), output_dir=self.output_dir)
+        # 50 cells with thickness 100.0 m, 50 cells with thickness 0.0 m (e.g. margin/outcrops)
+        thick = np.full((10, 10), 0.0, dtype=np.float64)
+        thick[:5, :] = 100.0
+        model.kriged_thickness = thick
+        model.opt_slope = np.full((10, 10), 0.1)
+        model.plots_dir = self.output_dir
+
+        model.finalize_bedrock(interactive=False, apply_margin_blend=False)
+
+        # Domain mean thickness must be 100.0 m (excluding 0.0 cells)
+        # If zeros were included, it would be diluted to 50.0 m.
+        summary_txt = model.summary()
+        self.assertIn("Ice Thickness Range  : min=100.0 m, mean=100.0 m, max=100.0 m", summary_txt)
+
+        # Basal Shear Stress mean must also be computed strictly over positive cells
+        expected_bss = (model.ice_density * model.g * 100.0 * np.sin(0.1)) / 1000.0
+        self.assertIn(f"mean={expected_bss:.1f} kPa", summary_txt)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -988,10 +988,12 @@ def plot_final_ice_thickness_histogram(
         if len(thick_valid) > 0:
             n_bins = max(15, min(50, len(thick_valid) // 100))
             plt.hist(thick_valid, bins=n_bins, color="#38bdf8", edgecolor="#1e293b", alpha=0.85, label="Ice Depth Frequency")
+            mean_thick = float(np.mean(thick_valid))
             median_thick = float(np.median(thick_valid))
             max_thick = float(np.max(thick_valid))
             std_thick = float(np.std(thick_valid))
         else:
+            mean_thick = 0.0 if mean_thick is None else mean_thick
             median_thick = mean_thick
             max_thick = 0.0
             std_thick = 0.0
@@ -1188,10 +1190,12 @@ def plot_final_basal_shear_stress_histogram(
         if len(bss_valid) > 0:
             n_bins = max(15, min(50, len(bss_valid) // 100))
             plt.hist(bss_valid, bins=n_bins, color="#10b981", edgecolor="#1e293b", alpha=0.85, label="BSS Frequency")
+            mean_bss = float(np.mean(bss_valid))
             median_bss = float(np.median(bss_valid))
             max_bss = float(np.max(bss_valid))
             std_bss = float(np.std(bss_valid))
         else:
+            mean_bss = 0.0 if mean_bss is None else mean_bss
             median_bss = mean_bss
             max_bss = 0.0
             std_bss = 0.0

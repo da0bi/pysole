@@ -165,20 +165,18 @@ def get_welcome_banner(version: str | None = None, term_width: int | None = None
         r"      /____/                      ",
     ]
 
-    block_width = max(len(line) for line in ascii_art)
+    block_width = max(len(line.rstrip()) for line in ascii_art)
     art_margin = max(0, (term_width - block_width) // 2)
     art_indent = " " * art_margin
 
     lines = [""]
     for art_line in ascii_art:
-        lines.append(f"{art_indent}{art_line}".rstrip())
+        lines.append(f"{art_indent}{art_line.rstrip()}".rstrip())
 
-    lines.append("")
-    lines.append("The soul of the sole".center(term_width).rstrip())
-    lines.append("")
-    lines.append(version_str.center(term_width).rstrip())
-    lines.append("")
-    lines.append("Released under the MIT License.".center(term_width).rstrip())
+    for text in ["The soul of the sole", version_str, "Released under the MIT License."]:
+        t_indent = " " * (art_margin + max(0, (block_width - len(text)) // 2))
+        lines.append("")
+        lines.append(f"{t_indent}{text}".rstrip())
     lines.append("")
 
     return "\n".join(lines)

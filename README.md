@@ -470,7 +470,30 @@ Level-3 BLAS matrix products (such as `np.dot`) use SIMD (*Single Instruction, M
 
 To avoid BLAS thread oversubscription, `PySole` caps the BLAS threads (via `threadpoolctl`) to the physical cores around the factorization and the inverse, and sets them to 1 around the already parallel grid chunk threads (grid Kriging is 1.3-2.8x faster at N = 1000-2500 observations). The production run and the `Drift Analyzer` share one Kriging system (`KrigingSystem`: same variogram, regularization and drift columns).
 
-To guarantee numerical stability during matrix decomposition, diagonal Tikhonov regularization adds a relative offset (10<sup>−6</sup> &middot; sill) to the sample block diagonal of <i>K</i>, ensuring positive-definiteness and preventing matrix singularities. Combined with zero-centered spatial coordinate normalization, `PySole`'s Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds).
+##### Adaptive Diagonal Tikhonov Regularization & Scale Invariance
+In Dual Kriging, the sample variogram block $\boldsymbol{\Gamma}$ has zeros along the main diagonal ($\gamma(0) = 0$). When observation soundings are densely spaced or collinear (e.g., along continuous GPR profiles), the augmented matrix $\mathbf{K}$ can become ill-conditioned or nearly singular. To guarantee numerical stability during LU decomposition, `PySole` applies diagonal Tikhonov regularization strictly to the sample observation block:
+
+<p align="center">
+$$\mathbf{K}_{ii} \mathrel{+}= \lambda_{\text{reg}} \quad \text{for } i = 1, \dots, N$$
+</p>
+
+Crucially, $\lambda_{\text{reg}}$ is **not** a hardcoded static constant. A static scalar (e.g., an arbitrary fixed $10^{-6}$) would violate dimensional scale-covariance: for small-variance targets ($S \approx 10^{-4}$), a fixed $10^{-6}$ would inject a $1\%$ artificial nugget distortion; for large-variance targets ($S \approx 10^5$), it would be negligible ($10^{-11}$) and fail to prevent matrix singularity. Instead, `PySole` employs an **adaptive relative regularization** scaled dynamically by the fitted variogram sill $S$:
+
+<p align="center">
+$$\lambda_{\text{reg}} = \epsilon_{\text{reg}} \cdot S = 10^{-6} \cdot S$$
+</p>
+
+where $\epsilon_{\text{reg}} = 10^{-6}$ (1 part per million, or $0.0001\%$) is the constant dimensionless regularization fraction, and $S$ is the empirical variogram sill of the observation data for that stage. This guarantees:
+1. **Strict Scale Invariance**: Because both the variogram block $\boldsymbol{\Gamma}$ and the regularization term $\lambda_{\text{reg}}\mathbf{I}$ scale proportionally with $S$, the solved dual weights scale inversely ($\mathbf{w} \propto 1/S$) while the drift multipliers $\boldsymbol{\mu}$ remain unchanged. When evaluating predictions $\hat{z}(\mathbf{x}_0) = \mathbf{w}^T \boldsymbol{\gamma}_0 + \boldsymbol{\mu}^T \mathbf{f}_0$, the sill factor cancels out identically, ensuring predictions are perfectly invariant to arbitrary linear rescaling of the input data or variogram sill.
+2. **Exact Drift Constraints**: Regularization is confined strictly to the $N \times N$ sample block $\mathbf{K}[:N, :N]$. The unbiasedness and drift Lagrange multiplier blocks remain unperturbed, so $\mathbf{F}^T \mathbf{w}_{\text{sample}} = \mathbf{0}$ holds exactly.
+3. **Log File Interpretation**: In `pysole.log` and the terminal console, `PySole` reports the evaluated absolute regularization value applied to the current system:
+   ```text
+   [Dual Kriging Engine] Applied 5.7e-07 Tikhonov matrix regularization (N=6 points, n_drift=1)
+   [Dual Kriging Engine] Applied 2.7e-06 Tikhonov matrix regularization (N=5 points, n_drift=1)
+   ```
+   The reported number (e.g. `5.7e-07` or `2.7e-06`) dynamically reflects the product $\lambda_{\text{reg}} = 10^{-6} \cdot S$ for that specific target and stage (e.g. $S = 0.57 \implies \lambda_{\text{reg}} = 5.7 \times 10^{-7}$).
+
+Combined with zero-centered spatial coordinate normalization, `PySole`'s Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds).
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Drift Models

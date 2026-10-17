@@ -36,7 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `11_[<prefix>_]final_basal_shear_stress_histogram.png`
   - Propagated `output_prefix` cleanly across `EikonalMigrator.migrate()`, `BSSOptimizer.optimize()`, `optimize_bss_variance()`, and all plotting functions in `Solver`.
 
-### Changed
+- **[CLI Welcome Banner Centering Relative to ASCII Art] (`src/pysole/logging.py`, `tests/test_logging.py`)**:
+  - Normalized ASCII art line width parsing and centered each line of text (tagline, version, and license) directly within the ASCII art logo bounding box margin, ensuring the text block and ASCII art logo remain visually centered relative to each other on any terminal geometry.
+- **[Standardized Raster Grid Export Logging] (`src/pysole/solver.py`)**:
+  - Modernized raster export log messages from `Saved optional {name} map to:` to `Saved {name} grid to:`.
+  - Updated bedrock raster export to log `Saved bedrock grid to: <filepath>`, applying this clean, modern log format consistently across all saved raster outputs (`bedrock`, `thickness`, `traveltime`, `basal shear stress`, and uncertainties) and updating points CSV export to `Saved migrated survey points to: <filepath>`.
+- **[Clarified Adaptive Diagonal Tikhonov Regularization in Documentation] (`README.md`)**:
+  - Expanded Section 5 with a dedicated subsection `Adaptive Diagonal Tikhonov Regularization & Scale Invariance`.
+  - Clarified that the regularization offset $\lambda_{\text{reg}} = 10^{-6} \cdot S$ is data-adaptive rather than a static hardcoded constant, scaling proportionally with the empirical variogram sill $S$ of each interpolation stage to ensure scale-covariance, prevent singularity, and guarantee exact mathematical scale-invariance for predictions.
+  - Documented how to interpret the dynamic absolute regularizer values reported in `pysole.log` (e.g. `Applied 5.7e-07 Tikhonov matrix regularization`).
+- **[Consistent Non-Zero Domain & Histogram Means for Ice Thickness & Basal Shear Stress] (`src/pysole/plotting.py`, `src/pysole/solver.py`)**:
+  - Excluded non-positive boundary and ice-free cells ($H \le 0$ and $\tau_b \le 0$) from domain mean calculations across all diagnostic products and solver reports.
+  - Aligned Figure 09 (`final_ice_thickness_histogram.png`) and Figure 11 (`final_basal_shear_stress_histogram.png`) so that the red dashed vertical lines, titles, and text box `Mean` values strictly match the centroid/first moment of the positive plotted histogram bins ($\bar{x} = \frac{1}{N}\sum_{x_i > 0} x_i$), resolving previous visual and statistical offsets where zero margin cells depressed the mean.
+  - Applied the exact positive histogram means to the domain headers of Figure 08 (`Mean Thickness: XX m`), Figure 10 (`Mean Basal Shear Stress: XX.X kPa`), interactive finalization candidate summaries, and `Solver.summary()`.
 - **[Renamed Output Parameter `save_bedrock_grid`] (`src/pysole/config.py`, `src/pysole/solver.py`, `pysole.json`, `README.md`, benchmarks)**:
   - Renamed `outputs.save_bedrock_elevation_map` to `outputs.save_bedrock_grid` (default: `true`), aligning with `save_traveltime_grid` and `save_thickness_grid`.
   - Updated `OutputsConfig` dataclass, `DEFAULT_CONFIG["outputs"]`, `Solver.export_outputs("finalization")`, template configs (`pysole.json`, `examples/apo/pysole_apo.json`, `examples/gok/pysole_gok.json`, `examples/wuk/pysole_wuk.json`), documentation, and tests. Retained zero legacy compatibility aliases.
