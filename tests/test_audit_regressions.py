@@ -292,7 +292,7 @@ class TestAuditRegressions(unittest.TestCase):
             with patch("pysole.solver.kriging_interpolation", return_value=fake) as mock_krig:
                 solver._execute_kriging_pass(
                     target_type="D", points=solver.migrated_points, krig_method="ordinary",
-                    var_model="spherical", zero_boundary=False, pass_name="Pass 2: Post-Migration",
+                    var_model="spherical", zero_boundary=False, pass_name="Pass 2 - Constructing Depth Grid",
                 )
             mock_krig.assert_called_once()
             self.assertEqual(mock_krig.call_args.kwargs["engine"], engine)
@@ -431,7 +431,7 @@ class TestAuditRegressions(unittest.TestCase):
                 solver.post_drift_terms = model_terms
                 solver._execute_kriging_pass(
                     target_type="D", points=solver.migrated_points, krig_method="universal",
-                    var_model="spherical", zero_boundary=False, pass_name="Pass 2: Post-Migration",
+                    var_model="spherical", zero_boundary=False, pass_name="Pass 2 - Constructing Depth Grid",
                 )
                 mock_curv.assert_called_once_with(0.02)
                 ext = mock_krig.call_args.kwargs["external_drift_grid"]
@@ -443,7 +443,7 @@ class TestAuditRegressions(unittest.TestCase):
             solver.post_drift_terms = ["sia", "z_dem"]
             solver._execute_kriging_pass(
                 target_type="D", points=solver.migrated_points, krig_method="universal",
-                var_model="spherical", zero_boundary=False, pass_name="Pass 2: Post-Migration",
+                var_model="spherical", zero_boundary=False, pass_name="Pass 2 - Constructing Depth Grid",
             )
             mock_curv.assert_not_called()
             self.assertEqual(set(mock_krig.call_args.kwargs["external_drift_grid"]), {"sia", "z_dem"})
@@ -501,7 +501,7 @@ class TestAuditRegressions(unittest.TestCase):
         with patch("pysole.solver.kriging_interpolation", return_value=fake) as mock_krig:
             solver_arg._execute_kriging_pass(
                 target_type="D", points=solver_arg.migrated_points, krig_method="ordinary",
-                var_model="spherical", zero_boundary=False, pass_name="Pass 1: Pre-Migration", return_variance=False,
+                var_model="spherical", zero_boundary=False, pass_name="Pass 1 - Constructing Traveltime Grid", return_variance=False,
             )
             self.assertFalse(mock_krig.call_args.kwargs["return_variance"])
             self.assertEqual(mock_krig.call_args.kwargs["max_memory_fraction"], 0.2)
@@ -856,7 +856,7 @@ class TestAuditRegressions(unittest.TestCase):
                         )
                     except Exception:
                         pass
-        guard_logs = [log for log in cm.output if "[BSS Memory Guard]" in log]
+        guard_logs = [log for log in cm.output if "[Memory Guard]" in log]
         self.assertTrue(len(guard_logs) > 0)
         self.assertIn("Capping concurrent FFT optimization workers to 2", guard_logs[0])
 

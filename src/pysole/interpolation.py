@@ -390,7 +390,7 @@ def standardise_drift_grid(name: str, grid: np.ndarray) -> np.ndarray | None:
     """
     spread = float(np.nanstd(grid))
     if spread < 1e-12:
-        logger.warning(f"External drift raster '{name}' has zero spatial variance (flat). Skipping redundant constant drift column.")
+        logger.warning(f"   [Dual Kriging Engine] External drift raster '{name}' has zero spatial variance (flat surface); omitting redundant constant drift column.")
         return None
     return (grid - float(np.nanmean(grid))) / spread
 
@@ -413,7 +413,7 @@ def sample_drift_grid(
     missing = np.isnan(values)
     if missing.any():
         logger.warning(
-            f"External drift raster '{name}' is NaN at {int(missing.sum())} sample location(s); "
+            f"   [Dual Kriging Engine] External drift raster '{name}' is NaN at {int(missing.sum())} sample location(s); "
             "imputing the grid mean (standardised value 0)."
         )
     return np.nan_to_num(values, nan=0.0)
@@ -534,13 +534,13 @@ def built_in_kriging_interpolation(
 
     if method_clean == "ordinary":
         if ext_dict or drift_terms:
-            logger.warning("Kriging method 'ordinary' ignores drift_terms and external drift grids.")
+            logger.warning("   [Dual Kriging Engine] Kriging method 'ordinary' ignores drift_terms and external drift grids.")
         ext_dict = {}
         poly_terms = set()
 
     use_universal = method_clean == "universal"
     if use_universal and N_pts < 4:
-        logger.warning(f"Universal Kriging needs at least 4 valid points (got {N_pts}); falling back to Ordinary Kriging.")
+        logger.warning(f"   [Dual Kriging Engine] Universal Kriging needs at least 4 valid points (got {N_pts}); falling back to Ordinary Kriging.")
         ext_dict = {}
         poly_terms = set()
         use_universal = False
@@ -1006,7 +1006,7 @@ def kriging_interpolation(
 
     if method_clean == "ordinary":
         if valid_terms or external_drift_grids:
-            logger.warning("Kriging method 'ordinary' ignores drift_terms and external drift grids.")
+            logger.warning("   [Dual Kriging Engine] Kriging method 'ordinary' ignores drift_terms and external drift grids.")
         valid_terms = []
         external_drift_grids = {}
     elif method_clean == "regression":
@@ -1015,7 +1015,7 @@ def kriging_interpolation(
                 valid_terms = list(DEFAULT_REGRESSION_DRIFT_TERMS)
             else:
                 logger.warning(
-                    "DEM grid is missing for Regression Kriging default drift terms; "
+                    "   [Dual Kriging Engine] DEM grid is missing for Regression Kriging default drift terms; "
                     "falling back to coordinate regression ['linear_xy']."
                 )
                 valid_terms = ["linear_xy"]
@@ -1235,7 +1235,7 @@ class DriftBasis:
             spread = float(np.nanstd(grid))
             if spread < 1e-12:
                 logger.warning(
-                    f"Drift raster '{term}' has zero spatial variance (flat). Skipping redundant constant drift column."
+                    f"   [Drift Analyzer] Drift raster '{term}' has zero spatial variance (flat surface); omitting redundant constant drift column."
                 )
                 continue
             standardised = (grid - float(np.nanmean(grid))) / spread
@@ -1271,7 +1271,7 @@ class DriftBasis:
             if term not in self._nan_warned:
                 self._nan_warned.add(term)
                 logger.warning(
-                    f"Drift raster '{term}' is NaN at {int(missing.sum())} sample location(s); "
+                    f"   [Drift Analyzer] Drift raster '{term}' is NaN at {int(missing.sum())} sample location(s); "
                     "imputing the grid mean (standardised value 0)."
                 )
             values = np.where(missing, 0.0, values)

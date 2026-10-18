@@ -173,7 +173,7 @@ def get_welcome_banner(version: str | None = None, term_width: int | None = None
     for art_line in ascii_art:
         lines.append(f"{art_indent}{art_line.rstrip()}".rstrip())
 
-    for text in ["The soul of the sole", version_str, "Released under the MIT License."]:
+    for text in [">> The soul of the sole <<", version_str, "Released under the MIT License."]:
         t_indent = " " * (art_margin + max(0, (block_width - len(text)) // 2))
         lines.append("")
         lines.append(f"{t_indent}{text}".rstrip())

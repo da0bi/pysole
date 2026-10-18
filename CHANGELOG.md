@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **[Unified Task Group Log Message Tags] (`src/pysole/solver.py`, `src/pysole/variogram.py`, `src/pysole/interpolation.py`, `src/pysole/drift_analyzer.py`, `src/pysole/raster.py`)**:
+  - Unified bracketed task-group log prefixes across all modules for consistent visual hierarchy and log filtering:
+    - `[Survey Data Type]`: Standardized detection and reporting for all survey input formats (OWTT, TWT, and direct depth/thickness).
+    - `[3D Ray Migration]`: Unified 3D ray displacement, test velocity evaluation, and migration skip logs.
+    - `[BSS Optimization]`: Standardized DEM Nyquist limits, domain limits, variogram lag binning, and optimal corner frequency reporting.
+    - `[BSS Optimization Warning]`: Standardized warnings across lag distance binning edge cases, invalid custom $k_c$ inputs, search boundary limits, and parameter fallbacks.
+    - `[Memory Guard]`: Standardized resource safety and RAM allocation checks across pre-migration, post-migration, and uncertainty calculation, replacing legacy module-specific tags.
+    - `[Pass 1 - Constructing Traveltime Grid]` & `[Pass 2 - Constructing Depth Grid]`: Renamed Kriging passes from legacy `[Pass 1: Pre-Migration]` and `[Pass 2: Post-Migration]` to descriptive, goal-oriented pass titles.
+    - `[Dual Kriging Engine]`: Unified pass execution notices (`[Dual Kriging Engine] [{pass_name}] ...`), drift plan summaries, Tikhonov regularization reports, and external drift fallback warnings.
+    - `[Drift Analyzer]`: Standardized drift candidate ranking, drift basis diagnostics, and rank-deficiency notices.
+    - `[Spatial Smoothing]` & `[Margin Blending]`: Unified bedrock post-processing and boundary blending logs.
+    - `[DEM Grid]`, `[Boundary Outline]`, and `[Survey Points]`: Standardized raster/vector loading, spatial resolution, and deduplication messages.
+
 ### Added
 - **[Interactive Bedrock Finalization] (`src/pysole/config.py`, `src/pysole/solver.py`, `src/pysole/pipeline.py`, `pysole.json`, `README.md`)**:
   - Introduced `"interactive_finalization": true | false` under `finalization_parameters` (default: `false` in `DEFAULT_CONFIG` for automated and batch workflows, `true` in CLI templates).

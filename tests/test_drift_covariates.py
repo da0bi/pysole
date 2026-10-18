@@ -282,7 +282,7 @@ class TestSolverSharesDriftGrids(unittest.TestCase):
             self.solver._execute_kriging_pass(
                 target_type="D", points=self.solver.migrated_points, krig_method="universal",
                 var_model="spherical", zero_boundary=False,
-                pass_name="Pass 2: Post-Migration",
+                pass_name="Pass 2 - Constructing Depth Grid",
             )
         analyzer_kwargs = mock_analyzer.return_value.run_diagnostics.call_args.kwargs
         production_grids = mock_kriging.call_args.kwargs["external_drift_grid"]

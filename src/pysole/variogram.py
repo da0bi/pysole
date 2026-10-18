@@ -320,7 +320,7 @@ def calculate_variogram(
         avg_pairs = in_range_pairs / float(actual_nrbins) if actual_nrbins > 0 else 0
         if warn_low_pairs and avg_pairs < 30.0 and in_range_pairs >= 30:
             logger.warning(
-                f"Specified lag bin count (nrbins={actual_nrbins}) yields an average of only {avg_pairs:.1f} "
+                f"   [BSS Optimization Warning] Specified lag bin count (nrbins={actual_nrbins}) yields an average of only {avg_pairs:.1f} "
                 f"point pairs per bin (violating recommended minimum threshold of 30 pairs/bin). "
                 f"Recommended maximum bin count for this dataset is nrbins={max_bins_for_30_pairs}."
             )
@@ -704,7 +704,7 @@ def optimize_bss_variance(
     eval_workers = min(effective_n_cores, max_safe_workers)
     if eval_workers < effective_n_cores:
         logger.info(
-            f"   [BSS Memory Guard] Capping concurrent FFT optimization workers to {eval_workers} "
+            f"   [Memory Guard] Capping concurrent FFT optimization workers to {eval_workers} "
             f"(from {effective_n_cores} requested) for large grid ({grid_cells:,} cells) to maintain safe memory footprint."
         )
 
@@ -715,7 +715,7 @@ def optimize_bss_variance(
     k_nyquist = np.pi / cellsize_min
 
     logger.info(
-        f"   DEM Spatial Resolution dx={dx:.1f}m, dy={dy:.1f}m -> Nyquist Limits: "
+        f"   [BSS Optimization] DEM Spatial Resolution dx={dx:.1f}m, dy={dy:.1f}m -> Nyquist Limits: "
         f"k_Nyquist = {k_nyquist:.4f} rad/m, λ_Nyquist = {lambda_nyquist:.1f} m"
     )
     Lx = abs(dx) * N_cols
@@ -723,7 +723,7 @@ def optimize_bss_variance(
     k_half_domain = 4.0 * np.pi / L_max
     lambda_half_domain = L_max / 2.0
     logger.info(
-        f"   DEM Domain Extent Lx={Lx:.1f}m, Ly={Ly:.1f}m -> Half-Domain Limits: "
+        f"   [BSS Optimization] DEM Domain Extent Lx={Lx:.1f}m, Ly={Ly:.1f}m -> Half-Domain Limits: "
         f"k_c,min = {k_half_domain:.4f} rad/m, λ_max = {lambda_half_domain:.1f} m"
     )
 
@@ -811,7 +811,7 @@ def optimize_bss_variance(
         max_p = int(np.max(counts_calc)) if len(counts_calc) > 0 else 0
 
         logger.info(
-            f"   Variogram Lag Distance Binning: {actual_nrbins_calc} bins (maxdist = {maxdist_calc:.2f} m, "
+            f"   [BSS Optimization] Variogram Lag Distance Binning: {actual_nrbins_calc} bins (maxdist = {maxdist_calc:.2f} m, "
             f"bin width = {bin_w:.2f} m), relative distances per bin: avg = {avg_pairs_p_bin:.1f} pairs/bin "
             f"(range: {min_p} - {max_p} pairs, in-range pairs = {in_range_pairs_calc} of {n_pairs} total)"
         )
@@ -1072,7 +1072,7 @@ def optimize_bss_variance(
             try:
                 custom_kc = float(ans_kc)
                 if custom_kc > 0:
-                    logger.info(f"   [Interactive BSS] Evaluating user-selected custom corner frequency k_c = {custom_kc:.4f} rad/m...")
+                    logger.info(f"   [BSS Optimization] Evaluating user-selected custom corner frequency k_c = {custom_kc:.4f} rad/m...")
                     custom_res = _eval_single_kc(custom_kc)
                     if custom_res is not None:
                         kc_val, kc_key, smoothed_dem, smoothed_slope, var_result, mean_product = custom_res
@@ -1111,11 +1111,11 @@ def optimize_bss_variance(
                                 output_prefix=output_prefix,
                             )
             except ValueError:
-                logger.warning(f"   Invalid corner frequency '{ans_kc}', retaining optimal k_c = {best_kc:.4f} rad/m.")
+                logger.warning(f"   [BSS Optimization Warning] Invalid corner frequency '{ans_kc}', retaining optimal k_c = {best_kc:.4f} rad/m.")
 
     if best_kc is None:
         fallback_kc = float(kc_max_val)
-        logger.warning(f"BSS optimization search found no valid minimum variance. Defaulting k_c to {fallback_kc:.4f} rad/m.")
+        logger.warning(f"   [BSS Optimization Warning] BSS optimization search found no valid minimum variance. Defaulting k_c to {fallback_kc:.4f} rad/m.")
         best_kc = fallback_kc
 
     # Retain strictly the single optimal smoothed DEM and slope in the returned result (O(1) grids)
@@ -1130,7 +1130,7 @@ def optimize_bss_variance(
         )
 
     opt_wl = compute_cutoff_wavelength(best_kc)
-    logger.info(f"   Optimal Corner Frequency k_c = {best_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
+    logger.info(f"   [BSS Optimization] Optimal Corner Frequency k_c = {best_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
 
     kc_var_array = np.array(all_kc_variances)
     return OptimizationResult(

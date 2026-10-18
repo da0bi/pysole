@@ -435,7 +435,7 @@ class DriftAnalyzer:
         for target in targets:
             evaluated[target] = True
         logger.info(
-            f"   [INFO] Exact block leave-out cross-validation: {len(blocks)} blocks, "
+            f"   [Drift Analyzer] Exact block leave-out cross-validation: {len(blocks)} blocks, "
             f"n = {int(evaluated.sum())} evaluated points, {len(candidates)} candidate models."
         )
 
@@ -616,8 +616,8 @@ class DriftAnalyzer:
         """
         t_char = "T" if "travel" in str(self.target_name).lower() else "D"
         target_descr = f"Product P(x,y) = {t_char}*sin(alpha)" if self.interpolation_target == "P" else f"Direct Field {self.interpolation_target}(x,y)"
-        logger.info(f"[INFO] DriftAnalyzer initialized (Mode: {self.mode.title()}, Target: {self.target_name} [{target_descr}], Boundary Conditions: {self.include_zero_boundary}).")
-        logger.info(f"[INFO] Extracting spatial covariates (Z_dem, C_kc, sin(alpha_opt)^-1, X, Y) at N = {len(z_values)} sample locations...")
+        logger.info(f"   [Drift Analyzer] Initialized (Mode: {self.mode.title()}, Target: {self.target_name} [{target_descr}], Boundary Conditions: {self.include_zero_boundary}).")
+        logger.info(f"   [Drift Analyzer] Extracting spatial covariates (Z_dem, C_kc, sin(alpha_opt)^-1, X, Y) at N = {len(z_values)} sample locations...")
 
         x_pts = np.asarray(x_pts, dtype=np.float64)
         y_pts = np.asarray(y_pts, dtype=np.float64)
@@ -637,16 +637,16 @@ class DriftAnalyzer:
             n_profs = len(np.unique(profile_ids))
             if n_profs >= 3:
                 cv_mode = "lopo"
-                logger.info(f"[INFO] Cross-Validation Mode: Leave-One-Profile-Out (LOPO-CV) using column '{self.survey_profile_column}' (N_profiles = {n_profs}).")
+                logger.info(f"   [Drift Analyzer] Cross-Validation Mode: Leave-One-Profile-Out (LOPO-CV) using column '{self.survey_profile_column}' (N_profiles = {n_profs}).")
             else:
-                logger.info(f"[INFO] Fewer than 3 unique profile IDs found (N_profiles = {n_profs}). Falling back to Spatial Buffer LOOCV.")
+                logger.info(f"   [Drift Analyzer] Fewer than 3 unique profile IDs found (N_profiles = {n_profs}). Falling back to Spatial Buffer LOOCV.")
 
         if cv_mode == "buffer":
             if show_prompts:
                 buffer_radius_m = self._prompt_buffer_radius(a_0, buffer_radius_m)
-            logger.info(f"[INFO] Fitted spatial range: a_0 = {a_0:.1f} meters. Spatial exclusion buffer radius set to r_buffer = {buffer_radius_m:.1f} meters.")
+            logger.info(f"   [Drift Analyzer] Fitted spatial range: a_0 = {a_0:.1f} meters. Spatial exclusion buffer radius set to r_buffer = {buffer_radius_m:.1f} meters.")
 
-        logger.info(f"[INFO] Evaluating {len(candidates)} candidate drift models via block leave-out {cv_mode.upper()}...")
+        logger.info(f"   [Drift Analyzer] Evaluating {len(candidates)} candidate drift models via block leave-out {cv_mode.upper()}...")
         eval_results = self.evaluate_spatial_cv(
             x_pts, y_pts, z_values, geometry, drift_grids, candidates,
             variogram_model, params, cv_mode=cv_mode,
@@ -655,18 +655,18 @@ class DriftAnalyzer:
 
         top_model = eval_results[0] if eval_results else None
         if top_model:
-            logger.info(f"[INFO] DriftAnalyzer ranking complete. Top model: '{top_model.name}' (RMSE = {top_model.cv_rmse:.2f}m, AICc = {top_model.aicc:.1f}).")
+            logger.info(f"   [Drift Analyzer] Ranking complete. Top model: '{top_model.name}' (RMSE = {top_model.cv_rmse:.2f}m, AICc = {top_model.aicc:.1f}).")
 
         # Interactive Terminal Ranking & Selection Table
         if show_prompts and eval_results:
             log_section_header("INTERACTIVE DRIFT MODEL SELECTION")
             print(format_ranking_table(eval_results, f"DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS ({self.mode.upper()})"))
-            print(f"[DriftAnalyzer] Recommended model: #1 '{eval_results[0].name}'")
+            print(f"   [Drift Analyzer] Recommended model: #1 '{eval_results[0].name}'")
             chosen = self._prompt_model_selection(eval_results)
             if chosen is not None:
                 eval_results.remove(chosen)
                 eval_results.insert(0, chosen)
 
-            logger.info(f"[INFO] Drift model '{eval_results[0].name}' selected for the production Kriging run.")
+            logger.info(f"   [Drift Analyzer] Drift model '{eval_results[0].name}' selected for the production Kriging run.")
 
         return eval_results

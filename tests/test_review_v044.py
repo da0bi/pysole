@@ -132,7 +132,7 @@ class TestLinearVariogramHandling(ReviewTestCase):
             mock_analyzer.return_value.run_diagnostics.return_value = [SimpleNamespace(terms=["sia"], aicc=0.0)]
             solver._execute_kriging_pass(
                 target_type="D", points=solver.migrated_points, krig_method="universal",
-                var_model="linear", zero_boundary=False, pass_name="Pass 2: Post-Migration",
+                var_model="linear", zero_boundary=False, pass_name="Pass 2 - Constructing Depth Grid",
             )
         self.assertEqual(mock_analyzer.return_value.run_diagnostics.call_args.kwargs["variogram_model"], "spherical")
 
@@ -154,7 +154,7 @@ class TestVariancePropagation(ReviewTestCase):
         direct = self._direct(solver, "P")
         res = solver._execute_kriging_pass(
             target_type="P", points=solver.survey_points, krig_method="ordinary",
-            var_model="spherical", zero_boundary=False, pass_name="Pass 1: Pre-Migration", return_variance=True,
+            var_model="spherical", zero_boundary=False, pass_name="Pass 1 - Constructing Traveltime Grid", return_variance=True,
         )
         safe = np.maximum(np.sin(solver.opt_slope), np.sin(np.radians(solver.slope_floor_deg)))
         self.assertTrue(np.any(np.sin(solver.opt_slope) < np.sin(np.radians(solver.slope_floor_deg))))
@@ -168,7 +168,7 @@ class TestVariancePropagation(ReviewTestCase):
         direct = self._direct(solver, "D")
         res = solver._execute_kriging_pass(
             target_type="D", points=solver.survey_points, krig_method="ordinary",
-            var_model="spherical", zero_boundary=False, pass_name="Pass 1: Pre-Migration", return_variance=True,
+            var_model="spherical", zero_boundary=False, pass_name="Pass 1 - Constructing Traveltime Grid", return_variance=True,
         )
         np.testing.assert_allclose(res.bedrock_grid, direct.bedrock_grid, rtol=1e-10)
         np.testing.assert_allclose(res.variance_grid, direct.variance_grid, rtol=1e-10)

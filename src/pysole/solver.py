@@ -266,8 +266,8 @@ class Solver:
         self.pre_drift_terms = pre_terms
         self.post_kriging_method = normalize_method(post_method)
         self.post_drift_terms = post_terms
-        self._log_drift_plan("Pre-Migration", self._drift_plan("pre_migration"))
-        self._log_drift_plan("Post-Migration", self._drift_plan("post_migration"))
+        self._log_drift_plan("Pass 1 - Constructing Traveltime Grid", self._drift_plan("pre_migration"))
+        self._log_drift_plan("Pass 2 - Constructing Depth Grid", self._drift_plan("post_migration"))
 
         self.output_dir = output_dir
         self.survey_data_path = survey_data_path
@@ -467,7 +467,7 @@ class Solver:
     def _log_drift_plan(stage_label: str, plan: DriftPlan) -> None:
         """Logs the notices (overrides, skipped analyzer) of a drift plan once."""
         for level, message in plan.notices:
-            getattr(logger, level)(f"   [{stage_label} Kriging] {message}")
+            getattr(logger, level)(f"   [Dual Kriging Engine] [{stage_label}] {message}")
 
     def _resolve_variogram_for_engine(self, model: str, method: str, warn: bool = True) -> str:
         """Resolves variogram model compatibility for the selected Kriging engine.
@@ -1398,7 +1398,7 @@ class Solver:
         krig_method: str,
         var_model: str,
         zero_boundary: bool,
-        pass_name: str = "Pass 1: Pre-Migration",
+        pass_name: str = "Pass 1 - Constructing Traveltime Grid",
         return_variance: bool = True,
         interactive_optimization: bool | None = None,
     ) -> KrigingResult:
@@ -1423,7 +1423,7 @@ class Solver:
             Theoretical variogram model name ('spherical', 'exponential', 'gaussian').
         zero_boundary : bool
             If True, enforces zero values along the glacier perimeter outline.
-        pass_name : str, default 'Pass 1: Pre-Migration'
+        pass_name : str, default 'Pass 1 - Constructing Traveltime Grid'
             Descriptive pass label for logging.
         return_variance : bool, default True
             If True, computes formal Kriging estimation variance.
@@ -1448,7 +1448,12 @@ class Solver:
         drift_terms = plan.terms
 
         if target_upper == "P":
-            logger.info(f"   [{pass_name}] Performing {krig_method.capitalize()} Kriging Interpolation for BSS Product P(x,y)...")
+            target_desc = "BSS Product P(x, y)"
+        elif target_upper == "T":
+            target_desc = "Traveltime T(x, y)"
+        else:
+            target_desc = "Depth D(x, y)"
+        logger.info(f"   [Dual Kriging Engine] [{pass_name}] Performing {krig_method.capitalize()} Kriging Interpolation for {target_desc}...")
 
         if plan.analyze:
             is_batch = self.is_batch_mode or not sys.stdin.isatty()
@@ -1467,7 +1472,7 @@ class Solver:
             # The winner decides the final method: Ordinary (no drift term) or Universal with its terms
             if not diag or diag[0].aicc >= FAILED_AICC:
                 logger.warning(
-                    f"   [{pass_name}] The Drift Analyzer could not cross-validate any candidate; "
+                    f"   [Dual Kriging Engine] [{pass_name}] The Drift Analyzer could not cross-validate any candidate; "
                     "falling back to Ordinary Kriging."
                 )
                 drift_terms = []
@@ -1477,7 +1482,7 @@ class Solver:
 
         if target_upper == "P" and krig_method == "universal" and "sia" in drift_terms:
             logger.warning(
-                f"   [{pass_name} Warning] 'sia' drift is active during BSS product P(x,y) interpolation. "
+                f"   [Dual Kriging Engine] [{pass_name} Warning] 'sia' drift is active during BSS product P(x,y) interpolation. "
                 "This can cause 1/sin^2(alpha) double-scaling artifacts at low-slope margins. "
                 "Recommendation: Use 'ordinary' Kriging or non-slope spatial drifts (e.g. ['z_dem']) for product targets."
             )
@@ -1527,7 +1532,7 @@ class Solver:
         ]
         if flags:
             logger.warning(
-                f"   [Migration Skipped] {', '.join(flags)} requested, but no traveltime grid is computed "
+                f"   [3D Ray Migration] {', '.join(flags)} requested, but no traveltime grid is computed "
                 f"because {reason}; nothing will be exported for it."
             )
 
@@ -1601,19 +1606,19 @@ class Solver:
         dtype_str = self._normalize_survey_data_type()
 
         if dtype_str == "two_way_traveltime":
-            logger.info("   [Survey Data Type: TWT] Two-Way Traveltimes detected. Converting to One-Way Traveltimes (OWTT = TWT / 2.0).")
+            logger.info("   [Survey Data Type] Two-Way Traveltimes (TWT) detected. Converting to One-Way Traveltimes (OWTT = TWT / 2.0)...")
             pts[:, 3] = pts[:, 3] / 2.0
         elif dtype_str == "one_way_traveltime":
-            logger.info("   [Survey Data Type: OWTT] One-Way Traveltimes detected.")
+            logger.info("   [Survey Data Type] One-Way Traveltimes (OWTT) detected.")
 
         self.survey_points = pts
         self._sample_pts_cache.clear()  # cached sample points refer to the previous survey/migrated arrays
 
         if dtype_str == "depth":
-            logger.info("   [Survey Data Type: Depth] Input data represents direct depth/thickness measurements. Skipping 3D Eikonal ray migration.")
+            logger.info("   [Survey Data Type] Direct depth/thickness measurements detected. Skipping 3D Eikonal ray migration.")
             self.migrated_points = pts.copy()
             if self.outputs_config.get("save_migrated_points", False):
-                logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
+                logger.info("   [3D Ray Migration] Migration is disabled. Skipping 'save_migrated_points' output.")
             self._warn_traveltime_exports_unavailable("survey_data_type is 'depth'")
             return self.migrated_points
 
@@ -1627,12 +1632,12 @@ class Solver:
                 pass
 
         if not self.perform_migration:
-            logger.info("   [Migration Skipped] 'perform_migration' is set to False in configuration. Using unmigrated survey points directly.")
+            logger.info("   [3D Ray Migration] 'perform_migration' is set to False in configuration. Using unmigrated survey coordinates.")
             unmig_depths = pts[:, 3] * v_eff if pts[:, 3].max() > 15.0 else pts[:, 3]
             # Preserve optional profile-ID column (index 4) so LOPO / drift CV stays available
             self.migrated_points = np.column_stack((pts[:, 0], pts[:, 1], pts[:, 2], unmig_depths, pts[:, 4:]))
             if self.outputs_config.get("save_migrated_points", False):
-                logger.info("   [Migration Skipped] 3D Eikonal Ray Migration is disabled. Skipping 'save_migrated_points' output.")
+                logger.info("   [3D Ray Migration] Migration is disabled. Skipping 'save_migrated_points' output.")
             self._warn_traveltime_exports_unavailable("'perform_migration' is False")
             return self.migrated_points
 
@@ -1647,7 +1652,7 @@ class Solver:
             krig_method=self.pre_kriging_method,
             var_model=self.pre_variogram_model,
             zero_boundary=self.pre_zero_boundary,
-            pass_name="Pass 1: Pre-Migration",
+            pass_name="Pass 1 - Constructing Traveltime Grid",
             return_variance=self.pre_calculate_uncertainty,
             interactive_optimization=effective_opt_interactive,
         )
@@ -1665,7 +1670,7 @@ class Solver:
 
         cached_dem_grads = self._get_dem_gradients()
 
-        logger.info(f"   [Ray Migration] Executing 3D Eikonal Ray Displacement (velocity v = {v_eff:.4f} m/ns)...")
+        logger.info(f"   [3D Ray Migration] Executing 3D Eikonal Ray Displacement (velocity v = {v_eff:.4f} m/ns)...")
         mig_res = migrate_eikonal_points(
             dem=self.dem_grid,
             travel_time_grid=tt_grid,
@@ -1690,7 +1695,7 @@ class Solver:
                         val = input("Enter new signal propagation velocity [m/ns] (e.g. 0.15): ").strip()
                         if val:
                             v_eff = float(val)
-                            logger.info(f"Re-running 3D Eikonal ray migration with v = {v_eff:.4f} m/ns...")
+                            logger.info(f"   [3D Ray Migration] Re-running with custom velocity v = {v_eff:.4f} m/ns...")
                             mig_res2 = migrate_eikonal_points(
                                 dem=self.dem_grid,
                                 travel_time_grid=tt_grid,
@@ -1873,7 +1878,7 @@ class Solver:
         should_plot = interactive or (self.plots_dir is not None)
 
         if method is not None:
-            self._log_drift_plan("Post-Migration", self._drift_plan("post_migration", method=method))
+            self._log_drift_plan("Pass 2 - Constructing Depth Grid", self._drift_plan("post_migration", method=method))
             krig_method = normalize_method(method)
         else:
             krig_method = self.post_kriging_method
@@ -1889,7 +1894,7 @@ class Solver:
             krig_method=krig_method,
             var_model=var_model,
             zero_boundary=self.post_zero_boundary,
-            pass_name="Pass 2: Post-Migration",
+            pass_name="Pass 2 - Constructing Depth Grid",
             return_variance=eff_calc_unc,
         )
         grid_raw = krig_res.bedrock_grid
@@ -2241,7 +2246,7 @@ class Solver:
         else:
             # Single-pass deterministic execution using configured/passed arguments
             if cur_smooth_bedrock:
-                logger.info(f"   Applying depth field spatial smoothing ({cur_smoothing_method})...")
+                logger.info(f"   [Spatial Smoothing] Applying depth field spatial smoothing ({cur_smoothing_method})...")
                 thick_raw = self.kriged_thickness.copy()
                 if self.outline_mask is not None:
                     thick_raw[~self.outline_mask] = 0.0
@@ -2270,7 +2275,7 @@ class Solver:
                 current_bedrock = self.kriged_bedrock
 
             if cur_blend:
-                logger.info(f"   Applying geomorphological margin blending (min_gap_dist = {cur_min_gap_dist:.1f} m)...")
+                logger.info(f"   [Margin Blending] Applying geomorphological margin blending (min_gap_dist = {cur_min_gap_dist:.1f} m)...")
                 self.blended_bedrock = blend_margin_topography(
                     dem=self.dem_grid,
                     bedrock_input=current_bedrock,
@@ -2555,7 +2560,7 @@ class Solver:
 
         survey_data_path = self.survey_data_path or inputs.get("survey_data_path")
         if not survey_data_path:
-            logger.info("[INFO] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
+            logger.info("   [Survey Planner] No survey_data_path provided. Automatically switching execution mode to Unprobed Glacier Survey Planner.")
             is_interactive = not getattr(self, "is_batch_mode", False) if interactive is None else bool(interactive)
             res = self.plan_survey(interactive=is_interactive)
             return BedrockMap(grid=res["sia_modelled_depth"], bounds=self.bounds, crs=self.meta.get("crs"), transform=self.meta.get("transform"), name="sia_modelled_depth")
@@ -2596,7 +2601,7 @@ class Solver:
             plotit=True,
         )
         opt_wl = compute_cutoff_wavelength(opt_kc)
-        logger.info(f"   Optimal Post-Migration Corner Frequency k_c = {opt_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
+        logger.info(f"   [BSS Optimization] Optimal Post-Migration Corner Frequency k_c = {opt_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
         self.calculate_bedrock(interactive=opt_interactive)
 
         logger.info("4. Finalizing Bedrock Topography...")

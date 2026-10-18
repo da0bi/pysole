@@ -436,8 +436,8 @@ class TestSolverConstructorRules(unittest.TestCase):
             )
         overrides = [m for m in cm.output if "overrides" in m]
         self.assertEqual(len(overrides), 2, cm.output)
-        self.assertIn("Pre-Migration", overrides[0])
-        self.assertIn("Post-Migration", overrides[1])
+        self.assertIn("Pass 1 - Constructing Traveltime Grid", overrides[0])
+        self.assertIn("Pass 2 - Constructing Depth Grid", overrides[1])
         self.assertFalse(solver._drift_plan("pre_migration").analyze)
 
     def test_single_candidate_override_logs_info(self):
@@ -498,7 +498,7 @@ class TestKrigingPassUsesPlan(unittest.TestCase):
                 ]
             solver._execute_kriging_pass(
                 target_type="D", points=solver.migrated_points, krig_method=solver.post_kriging_method,
-                var_model="spherical", zero_boundary=False, pass_name="Pass 2: Post-Migration",
+                var_model="spherical", zero_boundary=False, pass_name="Pass 2 - Constructing Depth Grid",
             )
         return analyzer, kriging
 

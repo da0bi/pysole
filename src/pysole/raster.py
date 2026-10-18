@@ -800,7 +800,7 @@ def load_dem(
         if dx is None or dy is None:
             lbl = "np.ndarray" if isinstance(dem_input, np.ndarray) else f"Headerless DEM '{dem_input}'"
             logger.warning(
-                f"{lbl} loaded without explicit pixel spacing (dx, dy). "
+                f"   [DEM Grid] {lbl} loaded without explicit pixel spacing (dx, dy). "
                 f"Defaulting cell spacing to dx={native_dx:.2f} m, dy={native_dy:.2f} m."
             )
         if calc_bounds is None:
@@ -810,7 +810,7 @@ def load_dem(
             else:
                 lbl = "np.ndarray" if isinstance(dem_input, np.ndarray) else f"Headerless DEM '{dem_input}'"
                 logger.warning(
-                    f"{lbl} loaded without spatial bounds or origin. "
+                    f"   [DEM Grid] {lbl} loaded without spatial bounds or origin. "
                     f"Defaulting coordinate origin to (0.0, 0.0) in local meters."
                 )
                 calc_bounds = (0.0, 0.0, float(width) * native_dx, float(height) * native_dy)
@@ -829,7 +829,7 @@ def load_dem(
 
     # Perform DEM resampling if dx and dy target resolutions are specified
     if (dx is not None and abs(dx - native_dx) > 1e-4) or (dy is not None and abs(dy - native_dy) > 1e-4):
-        logger.info(f"Resampling DEM grid from native ({native_dx:.2f}m x {native_dy:.2f}m) to target ({calc_dx:.2f}m x {calc_dy:.2f}m)...")
+        logger.info(f"   [DEM Grid] Resampling DEM grid from native ({native_dx:.2f}m x {native_dy:.2f}m) to target ({calc_dx:.2f}m x {calc_dy:.2f}m)...")
         grid_out, calc_bounds = resample_dem(
             grid,
             native_dx=native_dx,
@@ -880,7 +880,7 @@ def validate_and_extract_polygons(gdf: Any) -> list[Any]:
             continue
 
         if not geom.is_valid:
-            logger.warning(f"Boundary geometry at feature #{idx} is invalid. Extracting outer boundary shell only for processing.")
+            logger.warning(f"   [Boundary Outline] Boundary geometry at feature #{idx} is invalid. Extracting outer boundary shell only for processing.")
             try:
                 if isinstance(geom, Polygon):
                     geom = Polygon(geom.exterior)
@@ -895,7 +895,7 @@ def validate_and_extract_polygons(gdf: Any) -> list[Any]:
                 hole_poly = Polygon(hole)
                 if not hole_poly.is_valid or hole_poly.area <= 0:
                     has_invalid_hole = True
-                    logger.warning(f"Interior hole #{h_idx} in feature #{idx} fails shapefile criteria. Falling back to outer boundary shell only.")
+                    logger.warning(f"   [Boundary Outline] Interior hole #{h_idx} in feature #{idx} fails shapefile criteria. Falling back to outer boundary shell only.")
                     break
 
         if has_invalid_hole:
@@ -951,12 +951,12 @@ def load_outline(
         if nan_count > 0:
             valid_count = dem_grid.size - nan_count
             logger.info(
-                f"No boundary outline provided. Delineated active body boundary and rock outcrops "
+                f"   [Boundary Outline] No boundary outline provided. Delineated active body boundary and rock outcrops "
                 f"from DEM NaN values ({nan_count:,} NaN pixels, {valid_count:,} valid domain pixels)."
             )
         else:
             logger.warning(
-                "No boundary outline provided and no NaN values found in DEM. "
+                "   [Boundary Outline] No boundary outline provided and no NaN values found in DEM. "
                 "Entire DEM grid rectangle will be treated as the active domain without boundary constraints."
             )
         return ~nan_mask
@@ -1140,11 +1140,11 @@ def load_survey_points(
                     pts = df_csv.drop(columns=[profile_column]).select_dtypes(include=[np.number]).to_numpy(dtype=np.float64)
                 else:
                     logger.warning(
-                        f"Survey profile column '{profile_column}' not found in CSV header {list(df_csv.columns)}. "
+                        f"   [Survey Points] Survey profile column '{profile_column}' not found in CSV header {list(df_csv.columns)}. "
                         "Profile-based cross-validation is disabled for this dataset."
                     )
             except Exception as e:
-                logger.warning(f"Could not parse survey profile column '{profile_column}': {e}")
+                logger.warning(f"   [Survey Points] Could not parse survey profile column '{profile_column}': {e}")
                 prof_arr = None
                 pts = None
         if pts is None:
@@ -1202,7 +1202,7 @@ def load_survey_points(
         if len(unique_coords) < len(pts):
             n_dups = len(pts) - len(unique_coords)
             logger.warning(
-                f"Detected {n_dups} duplicate survey point coordinate(s) (X, Y). "
+                f"   [Survey Points] Detected {n_dups} duplicate survey point coordinate(s) (X, Y). "
                 f"Consolidating duplicate points by averaging values to ensure numerical stability in Kriging."
             )
             n_cols = pts.shape[1]

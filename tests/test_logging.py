@@ -166,7 +166,7 @@ class TestTerminalUI(unittest.TestCase):
             tagline = [l for l in lines if "The soul of the sole" in l][0]
             left_space = len(tagline) - len(tagline.lstrip())
             art_margin = (width - block_width) // 2
-            expected_left = art_margin + (block_width - len("The soul of the sole")) // 2
+            expected_left = art_margin + (block_width - len(tagline.strip())) // 2
             self.assertEqual(left_space, expected_left)
 
     def test_print_welcome_banner(self):
