@@ -231,7 +231,7 @@ class TestOptionalOutputs(unittest.TestCase):
         solver_enabled.run_pipeline()
         self.assertTrue(os.path.exists(f"{output_stem_enabled}_bedrock.tif"))
 
-    def _write_pipeline_config(self, tag, outputs, n=16, survey_data_type="depth"):
+    def _write_pipeline_config(self, tag, outputs, n=16, survey_data_type="depth", extra_cfg=None):
         """Small survey pipeline config in <temp>/<tag>; returns (config_path, work_dir)."""
         import json
         from pathlib import Path
@@ -257,6 +257,8 @@ class TestOptionalOutputs(unittest.TestCase):
                        "survey_data_type": survey_data_type, "show_progress": False},
             "outputs": {"output_format": "tif", **outputs},
         }
+        if extra_cfg:
+            cfg.update(extra_cfg)
         cfg_file = work / "pysole.json"
         cfg_file.write_text(json.dumps(cfg))
         return cfg_file, work
@@ -383,15 +385,15 @@ class TestOptionalOutputs(unittest.TestCase):
 
         out_path = Path(self.temp_dir)
         expected_suffixes = [
-            "01_pre_migration_variogram.png",
-            "02_pre_migration_kc_variogram_optimization.png",
+            "01_pass1_variogram.png",
+            "02_pass1_kc_variogram_optimization.png",
             "03_3d_migration.png",
-            "04_post_migration_variogram.png",
-            "05_post_migration_kc_variogram_optimization.png",
+            "04_pass2_variogram.png",
+            "05_pass2_kc_variogram_optimization.png",
             "06_bedrock_elevation_and_uncertainty.png",
             "07_final_embedded_bedrock.png",
-            "08_final_ice_thickness_and_uncertainty.png",
-            "09_final_ice_thickness_histogram.png",
+            "08_final_thickness_and_uncertainty.png",
+            "09_final_thickness_histogram.png",
             "10_final_basal_shear_stress_and_uncertainty.png",
             "11_final_basal_shear_stress_histogram.png",
         ]
@@ -433,6 +435,31 @@ class TestOptionalOutputs(unittest.TestCase):
             self.assertIn(expected, created_custom, f"Missing expected custom figure: {expected}")
         self.assertFalse(any("calculated_bedrock" in name for name in created_custom))
         self.assertEqual(len(created_custom), 11)
+
+        # Case 3: grad_traveltime_grid visualization
+        work_grad = out_path / "fig_naming_grad"
+        cfg_file_grad, _ = self._write_pipeline_config(
+            "fig_naming_grad",
+            {
+                "output_prefix": "apo",
+                "output_dir": str(work_grad),
+            },
+            survey_data_type="one_way_traveltime",
+            extra_cfg={
+                "migration_parameters": {
+                    "perform_migration": True,
+                    "velocity": 0.16,
+                    "interactive_migration": False,
+                    "horizontal_displacement_visualization": "grad_traveltime_grid",
+                },
+            },
+        )
+        run_from_config(config_path=cfg_file_grad, is_batch=True)
+        plots_grad = work_grad / "figures"
+        self.assertTrue(plots_grad.exists())
+        created_grad = sorted(f.name for f in plots_grad.glob("*.png"))
+        self.assertIn("03_apo_3d_migration_hor_displacements.png", created_grad)
+        self.assertEqual(len(created_grad), 12)
 
 
 if __name__ == "__main__":

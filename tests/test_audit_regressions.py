@@ -226,7 +226,7 @@ class TestAuditRegressions(unittest.TestCase):
 
     def test_eikonal_migration_oblique_slope(self):
         """12. Verifies exact 3D Eikonal closed-form slowness vector on oblique surface slopes."""
-        pts = np.array([[100.0, 100.0, 2020.0, 500.0]])  # OWTT 500 ns
+        pts = np.array([[100.0, 100.0, 2020.0, 500.0]])  # one_way_traveltime 500 ns
         geom = GridGeometry.create((30, 30), dx=10.0, dy=10.0, bounds=(0, 0, 300, 300))
         # Oblique slope: z_x = 0.1, z_y = 0.1
         X, Y = np.meshgrid(geom.x_coords, geom.y_coords)
@@ -240,7 +240,7 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(mig_pts[0])))
 
         # Analytic zero-offset ray: travels along the downward surface normal n = (f_x, f_y, -1) / s with
-        # s = sqrt(1 + f_x^2 + f_y^2); path length d = v * OWTT = 0.16 m/ns * 500 ns = 80 m.
+        # s = sqrt(1 + f_x^2 + f_y^2); path length d = v * one_way_traveltime = 0.16 m/ns * 500 ns = 80 m.
         f_x = f_y = 0.1
         s = np.sqrt(1.0 + f_x ** 2 + f_y ** 2)
         d = 0.16 * 500.0

@@ -256,6 +256,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "perform_migration": True,
         "velocity": 0.16,
         "interactive_migration": False,
+        "horizontal_displacement_visualization": "arrows",
     },
     "optimization_parameters": {
         "fft_filter_metric": "wavenumber",
@@ -590,6 +591,13 @@ def load_config(
     config["kriging_parameters"]["max_memory_fraction"] = validate_memory_fraction(
         config["kriging_parameters"]["max_memory_fraction"]
     )
+
+    hdv = config.get("migration_parameters", {}).get("horizontal_displacement_visualization", "arrows")
+    if hdv not in ("arrows", "grad_traveltime_grid"):
+        raise ConfigError(
+            f"Invalid migration_parameters.horizontal_displacement_visualization '{hdv}'. "
+            f"Must be one of ['arrows', 'grad_traveltime_grid']."
+        )
 
     # Resolve and validate the Kriging drift configuration of both stages (fail fast, before any data is read)
     kp = config.get("kriging_parameters", {})

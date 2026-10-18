@@ -326,6 +326,36 @@ class TestPipelineLogging(unittest.TestCase):
         self.assertGreater(banner_idx, -1)
         self.assertGreater(init_idx, banner_idx)
 
+    def test_survey_data_type_logging_and_conversion(self):
+        """Verifies [Survey Data Type] log messages and data halving for two_way_traveltime."""
+        from pysole.solver import Solver
+        import numpy as np
+
+        dem = np.full((10, 10), 1000.0)
+        bounds = (500000.0, 5000000.0, 500100.0, 5000100.0)
+        pts = np.array([[500050.0, 5000050.0, 1000.0, 100.0]])
+
+        # 1. two_way_traveltime
+        solver_twt = Solver(dem=dem, bounds=bounds, survey_data_type="two_way_traveltime", dx=10.0, dy=10.0)
+        with self.assertLogs("pysole", level="INFO") as cm:
+            solver_twt.migrate_eikonal(pts.copy())
+        self.assertTrue(any("[Survey Data Type] two_way_traveltime detected. Converting to one_way_traveltime (one_way_traveltime = two_way_traveltime / 2.0)..." in m for m in cm.output))
+        self.assertAlmostEqual(solver_twt.survey_points[0, 3], 50.0)
+
+        # 2. one_way_traveltime
+        solver_owtt = Solver(dem=dem, bounds=bounds, survey_data_type="one_way_traveltime", dx=10.0, dy=10.0)
+        with self.assertLogs("pysole", level="INFO") as cm:
+            solver_owtt.migrate_eikonal(pts.copy())
+        self.assertTrue(any("[Survey Data Type] one_way_traveltime detected." in m for m in cm.output))
+        self.assertAlmostEqual(solver_owtt.survey_points[0, 3], 100.0)
+
+        # 3. depth
+        solver_depth = Solver(dem=dem, bounds=bounds, survey_data_type="depth", dx=10.0, dy=10.0)
+        with self.assertLogs("pysole", level="INFO") as cm:
+            solver_depth.migrate_eikonal(pts.copy())
+        self.assertTrue(any("[Survey Data Type] depth detected. Skipping 3D Eikonal ray migration." in m for m in cm.output))
+        self.assertAlmostEqual(solver_depth.survey_points[0, 3], 100.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -144,6 +144,7 @@ class Solver:
         post_calculate_uncertainty: bool = False,
         perform_migration: bool = True,
         survey_data_type: str = "one_way_traveltime",
+        horizontal_displacement_visualization: str = "arrows",
         plots_dir: str | Path | None = None,
         n_cores: int = -1,
         kriging_engine: str = "native",
@@ -216,7 +217,7 @@ class Solver:
             If True, performs 3D Eikonal normal ray migration on radar traveltimes. If False, skips migration.
         survey_data_type : str, default 'one_way_traveltime'
             Type of input survey data: 'one_way_traveltime' [ns], 'two_way_traveltime' [ns]
-            (automatically converted via TWT/2), or 'depth' [m] (direct ice thickness measurements).
+            (automatically converted via two_way_traveltime / 2.0), or 'depth' [m] (direct ice thickness measurements).
         plots_dir : str or Path, optional
             Directory where diagnostic figures and maps are saved.
         n_cores : int, default -1
@@ -310,6 +311,7 @@ class Solver:
 
         self.perform_migration = perform_migration
         self.survey_data_type = survey_data_type
+        self.horizontal_displacement_visualization = horizontal_displacement_visualization
         self.n_cores = n_cores
 
         # "linear" is a 1-D model: under the native engine it is replaced by "spherical" once, here,
@@ -1215,6 +1217,7 @@ class Solver:
             post_calculate_uncertainty=post_calculate_uncertainty,
             perform_migration=migration_cfg.get("perform_migration", True),
             survey_data_type=survey_dtype,
+            horizontal_displacement_visualization=migration_cfg.get("horizontal_displacement_visualization", "arrows"),
             plots_dir=outputs.get("plots_dir", None),
             n_cores=n_cores,
             kriging_engine=kriging_engine,
@@ -1606,16 +1609,16 @@ class Solver:
         dtype_str = self._normalize_survey_data_type()
 
         if dtype_str == "two_way_traveltime":
-            logger.info("   [Survey Data Type] Two-Way Traveltimes (TWT) detected. Converting to One-Way Traveltimes (OWTT = TWT / 2.0)...")
+            logger.info("   [Survey Data Type] two_way_traveltime detected. Converting to one_way_traveltime (one_way_traveltime = two_way_traveltime / 2.0)...")
             pts[:, 3] = pts[:, 3] / 2.0
         elif dtype_str == "one_way_traveltime":
-            logger.info("   [Survey Data Type] One-Way Traveltimes (OWTT) detected.")
+            logger.info("   [Survey Data Type] one_way_traveltime detected.")
 
         self.survey_points = pts
         self._sample_pts_cache.clear()  # cached sample points refer to the previous survey/migrated arrays
 
         if dtype_str == "depth":
-            logger.info("   [Survey Data Type] Direct depth/thickness measurements detected. Skipping 3D Eikonal ray migration.")
+            logger.info("   [Survey Data Type] depth detected. Skipping 3D Eikonal ray migration.")
             self.migrated_points = pts.copy()
             if self.outputs_config.get("save_migrated_points", False):
                 logger.info("   [3D Ray Migration] Migration is disabled. Skipping 'save_migrated_points' output.")
@@ -1683,6 +1686,7 @@ class Solver:
             dem_grads=cached_dem_grads,
             show_progress=self.show_progress,
             output_prefix=self.figure_prefix,
+            horizontal_displacement_visualization=self.horizontal_displacement_visualization,
         )
         self.migrated_points = mig_res.migrated_points
 
@@ -1708,6 +1712,7 @@ class Solver:
                                 dem_grads=cached_dem_grads,
                                 show_progress=self.show_progress,
                                 output_prefix=self.figure_prefix,
+                                horizontal_displacement_visualization=self.horizontal_displacement_visualization,
                             )
                             self.migrated_points = mig_res2.migrated_points
                     else:

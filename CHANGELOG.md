@@ -8,9 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **[Diagnostic Plots Standardization & Refinements] (`src/pysole/plotting.py`, `src/pysole/variogram.py`, `src/pysole/migration.py`, `src/pysole/solver.py`)**:
+  - **Figures 01 & 04**: Renamed to `01_[<prefix>_]pass1_variogram.png` and `04_[<prefix>_]pass2_variogram.png` (matching pass-naming conventions) and removed `(Unfiltered Product)` from the isotropic variogram plot titles.
+  - **Figures 02 & 05**: Renamed to `02_[<prefix>_]pass1_kc_variogram_optimization.png` and `05_[<prefix>_]pass2_kc_variogram_optimization.png`. Added a vertical black dashed line on the left panel marking the active spatial correlation range $a_{\text{range}}$ (either computed or custom-specified). Updated right panel title to `Mean BSS Variance in Range vs Corner Frequency kc` and formatted $k_c$ legend values with 4 decimal places.
+  - **Figure 03**: Enhanced with `horizontal_displacement_visualization` option. When `"grad_traveltime_grid"` is selected, upper panel title is set to `'Calculated Traveltime Field'` without displacement arrows, and the lower panel displays migrated points colored by depth while omitting pre-migrated points and legend.
+  - **Figure 06**: Reduced survey point scatter size to `s=0.5` so dense sounding tracks do not obscure underlying bedrock elevation contours.
+  - **Figure 07**: Removed in-plot title from `07_[<prefix>_]final_embedded_bedrock.png`.
+  - **Figure 08**: Renamed to `08_[<prefix>_]final_thickness_and_uncertainty.png`.
+  - **Figure 09**: Renamed to `09_[<prefix>_]final_thickness_histogram.png`. Standardized title to `Final Thickness Distribution`, X-axis label to `Thickness [m]`, constrained X-axis to start at zero (`xlim(left=0)`), omitted legend, and updated statistics box with explicit red dashed line reference (`Mean (red dashed):`) and clean `Max:` label.
+  - **Figure 10**: Formatted basal shear stress with subscript 'b' ($\tau_b$), updated right panel title to `Mean Basal Shear Stress Uncertainty: \pm{mean_bss_unc:.1f} kPa`, and right colorbar label to `Basal Shear Stress Uncertainty [\pm kPa]`.
+  - **Figure 11**: Formatted basal shear stress with subscript 'b' ($\tau_b$), constrained X-axis to start at zero (`xlim(left=0)`), omitted legend, and updated statistics box with explicit red dashed line reference (`Mean $\tau_b$ (red dashed):`) and clean `Max:` label.
+- **[Elimination of OWTT and TWT Abbreviations] (`src/pysole/solver.py`, `src/pysole/plotting.py`, `paper.md`, `README.md`)**:
+  - Replaced all abbreviations `OWTT` and `TWT` with explicit `one_way_traveltime` and `two_way_traveltime` across all log messages, docstrings, tests, and documentation.
+  - Standardized `[Survey Data Type]` log output to explicitly report canonical data types:
+    - `[Survey Data Type] one_way_traveltime detected.`
+    - `[Survey Data Type] two_way_traveltime detected. Converting to one_way_traveltime (one_way_traveltime = two_way_traveltime / 2.0)...`
+    - `[Survey Data Type] depth detected. Skipping 3D Eikonal ray migration.`
+
+### Added
+- **[3D Migration Horizontal Displacement Gradient Visualization] (`src/pysole/config.py`, `src/pysole/migration.py`, `src/pysole/plotting.py`, `src/pysole/solver.py`, `pysole*.json`)**:
+  - Added configuration parameter `migration_parameters.horizontal_displacement_visualization` (`"arrows"` vs `"grad_traveltime_grid"`, default `"arrows"`).
+  - When `"grad_traveltime_grid"` is selected (e.g. for large regional glaciers like Apo), generates companion figure `03_[<prefix>_]3d_migration_hor_displacements.png` displaying the continuous traveltime gradient magnitude field $|\nabla T| = \sqrt{(\partial T/\partial x)^2 + (\partial T/\partial y)^2}$ with a unit-agnostic colorbar (`Traveltime Gradient Magnitude |∇T|`), glacier boundary outline, and overlaid grey unmigrated vs. black migrated sounding coordinates.
+  - Configured `"grad_traveltime_grid"` in `examples/apo/pysole_apo.json`.
 - **[Unified Task Group Log Message Tags] (`src/pysole/solver.py`, `src/pysole/variogram.py`, `src/pysole/interpolation.py`, `src/pysole/drift_analyzer.py`, `src/pysole/raster.py`)**:
   - Unified bracketed task-group log prefixes across all modules for consistent visual hierarchy and log filtering:
-    - `[Survey Data Type]`: Standardized detection and reporting for all survey input formats (OWTT, TWT, and direct depth/thickness).
+    - `[Survey Data Type]`: Standardized detection and reporting for all survey input formats (one_way_traveltime, two_way_traveltime, and direct depth/thickness).
     - `[3D Ray Migration]`: Unified 3D ray displacement, test velocity evaluation, and migration skip logs.
     - `[BSS Optimization]`: Standardized DEM Nyquist limits, domain limits, variogram lag binning, and optimal corner frequency reporting.
     - `[BSS Optimization Warning]`: Standardized warnings across lag distance binning edge cases, invalid custom $k_c$ inputs, search boundary limits, and parameter fallbacks.
@@ -805,6 +827,6 @@ Multi-drift Universal Kriging, a corrected and much faster Drift Analyzer, and o
 
 ### Added
 - Initial release of `PySole` for physically-informed bedrock topography interpolation & 3D Eikonal ray migration.
-- Support for One-Way Traveltime (OWTT) and Ice Thickness radar picks.
+- Support for one_way_traveltime and Ice Thickness radar picks.
 - Random Forest gap-filling for unmeasured glacier creeping body regions.
 - Multi-format GIS export (`.tif`, `.asc`, `.csv`, `.npy`).

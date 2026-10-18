@@ -180,7 +180,8 @@ All execution options can be fully defined in a single JSON configuration file, 
     "migration_parameters": {
         "perform_migration": true,
         "velocity": 0.16,
-        "interactive_migration": false
+        "interactive_migration": false,
+        "horizontal_displacement_visualization": "arrows"
     },
     "optimization_parameters": {
         "fft_filter_metric": "wavenumber",
@@ -268,6 +269,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal traveltimes. If `false`, migration is skipped. |
 | | `velocity` | `float` | `0.16` | Signal propagation velocity (default value of `0.16` m/ns is characteristic for radar wave propagation in temperate ice). |
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual migrated depths and horizontal displacement vector plots. |
+| | `horizontal_displacement_visualization` | `str` | `"arrows"` | Horizontal displacement visualization mode: `"arrows"` (default, quiver displacement vectors overlaid on traveltime grid) or `"grad_traveltime_grid"` (displays traveltime field without arrows, and creates a companion figure `03_[<prefix>_]3d_migration_hor_displacements.png` showing continuous traveltime gradient magnitude $|\nabla T|$ and survey sounding shifts). |
 | **`optimization_parameters`** | `fft_filter_metric` | `str` | `"wavenumber"` | Frequency spectrum filter metric: `"wavenumber"` [rad/m] or `"wavelength"` [m]. |
 | | `kc_max` | `float` | `null` | Maximum corner frequency cutoff $k_{\text{c,max}}$ in [rad/m]. If `null`, defaults to grid Nyquist wavenumber $k_{\text{Nyquist}}$. For full details, see [here](#wavenumber-to-wavelength-conversion). |
 | | `kc_min` | `float` | `null` | Minimum corner frequency cutoff $k_{\text{c,min}}$ in [rad/m]. If `null`, defaults to half of the DEM extent. For full details, see [here](#wavenumber-to-wavelength-conversion).|

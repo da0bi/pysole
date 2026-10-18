@@ -21,7 +21,8 @@
     "migration_parameters": {
         "perform_migration": true,
         "velocity": 0.168,
-        "interactive_migration": false
+        "interactive_migration": false,
+        "horizontal_displacement_visualization": "grad_traveltime_grid"
     },
     "optimization_parameters": {
         "fft_filter_metric": "wavenumber",

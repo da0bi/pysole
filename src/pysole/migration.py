@@ -88,6 +88,7 @@ class EikonalMigrator:
         interactive: bool = False,
         show_progress: bool = True,
         output_prefix: str = "",
+        horizontal_displacement_visualization: str = "arrows",
     ) -> MigrationResult:
         """
         Executes 3D Eikonal ray migration for a continuous traveltime field and scattered picks.
@@ -109,6 +110,8 @@ class EikonalMigrator:
             If True, displays a progress bar during point relocation.
         output_prefix : str, default ""
             Output prefix for diagnostic figures.
+        horizontal_displacement_visualization : str, default "arrows"
+            Visualization style for horizontal displacements: 'arrows' or 'grad_traveltime_grid'.
 
         Returns
         -------
@@ -127,6 +130,7 @@ class EikonalMigrator:
             dem_grads=self.dem_grads,
             show_progress=show_progress,
             output_prefix=output_prefix,
+            horizontal_displacement_visualization=horizontal_displacement_visualization,
         )
 
     def migrate_points(self, points: np.ndarray, velocity: float = 0.16) -> np.ndarray:
@@ -166,6 +170,7 @@ def migrate_eikonal_points(
     dem_grads: dict[str, np.ndarray] | None = None,
     show_progress: bool = True,
     output_prefix: str = "",
+    horizontal_displacement_visualization: str = "arrows",
 ) -> MigrationResult:
     """
     Relocates scattered radar soundings into 3D space using 3D Eikonal ray normal migration.
@@ -336,7 +341,23 @@ def migrate_eikonal_points(
             plots_dir=plots_dir,
             interactive=interactive,
             output_prefix=output_prefix,
+            horizontal_displacement_visualization=horizontal_displacement_visualization,
         )
+        if horizontal_displacement_visualization == "grad_traveltime_grid":
+            from .plotting import plot_migration_horizontal_displacements
+            plot_migration_horizontal_displacements(
+                travel_time_grid=travel_time_grid,
+                survey_points=survey_points,
+                migrated_points=migrated_points,
+                x_coords=x_coords,
+                y_coords=y_coords,
+                dx=dx,
+                dy=dy,
+                outline_mask=outline_mask,
+                plots_dir=plots_dir,
+                interactive=interactive,
+                output_prefix=output_prefix,
+            )
 
     return MigrationResult(
         migrated_points=migrated_points,

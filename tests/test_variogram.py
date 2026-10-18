@@ -81,7 +81,7 @@ class TestVariogramWuk(unittest.TestCase):
                 )
 
             self.assertEqual(opt_res.optimal_kc, 0.0450)
-            fig_path = os.path.join(tmp_dir, "02_pre_migration_kc_variogram_optimization.png")
+            fig_path = os.path.join(tmp_dir, "02_pass1_kc_variogram_optimization.png")
             self.assertTrue(os.path.exists(fig_path), f"Figure should exist at {fig_path}")
 
     def test_n_cores_parallelization_wuk(self):

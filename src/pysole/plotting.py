@@ -184,15 +184,15 @@ def plot_unfiltered_product_variogram(
         plt.grid(True)
         plt.xlabel("Lag Distance h [m]")
         plt.ylabel("Semivariance \u03b3(h)")
-        plt.title(f"Isotropic Variogram (Unfiltered Product)\nCalculated Range = {a_range:.2f} m, Sill = {sill:.4f}, Nugget = {nugget:.4f}")
+        plt.title(f"Isotropic Variogram\nCalculated Range = {a_range:.2f} m, Sill = {sill:.4f}, Nugget = {nugget:.4f}")
         plt.legend()
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
         if stage_name in ("stage2", "post_migration", "post") or str(prefix).startswith("03"):
-            fig_name = f"04_{pfx_str}post_migration_variogram.png"
+            fig_name = f"04_{pfx_str}pass2_variogram.png"
         else:
-            fig_name = f"01_{pfx_str}pre_migration_variogram.png"
+            fig_name = f"01_{pfx_str}pass1_variogram.png"
         _save_figure(plt, plots_dir, fig_name)
 
         if interactive:
@@ -207,6 +207,7 @@ def plot_bss_kc_optimization_variograms(
     evaluated_variograms: list[dict[str, Any]],
     best_kc: float,
     all_kc_variances: list[tuple[float, float]],
+    a_range: float | None = None,
     plots_dir: str | Path | None = None,
     prefix: str = "01_",
     stage_name: str = "stage1",
@@ -233,6 +234,8 @@ def plot_bss_kc_optimization_variograms(
         Optimal corner frequency wavenumber kc in rad/m minimizing product field variance.
     all_kc_variances : list of tuple of (float, float)
         List of (kc, variance) pairs evaluated during the frequency sweep.
+    a_range : float, optional
+        Active spatial correlation range parameter a in meters.
     plots_dir : str, Path, or None, optional
         Target directory to save the output figure PNG. If None, figure is not saved.
     prefix : str, default="01_"
@@ -264,20 +267,29 @@ def plot_bss_kc_optimization_variograms(
             else:
                 ax1.plot(dist, gamma_norm, "--", color=cmap(idx), linewidth=1.0, alpha=0.7, label=f"kc = {kc_val:.3f}")
 
+        if a_range is not None:
+            ax1.axvline(x=a_range, color="k", linestyle="--", linewidth=1.5, label=f"Correlation Range a = {a_range:.2f} m")
+
         ax1.set_xlabel("Lag Distance h [m]")
         ax1.set_ylabel("Normalized Semivariance \u03b3(h) / Mean\u00b2")
         ax1.set_title(f"Normalized Variograms across Corner Frequencies (kc)\nOptimum kc = {best_kc:.4f}")
         ax1.grid(True)
         if len(evaluated_variograms) <= 12:
             ax1.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
+        elif a_range is not None:
+            handles, labels = ax1.get_legend_handles_labels()
+            key_items = [(h, l) for h, l in zip(handles, labels) if "Optimum" in l or "Correlation Range" in l]
+            if key_items:
+                kh, kl = zip(*key_items)
+                ax1.legend(kh, kl, loc="upper right", fontsize=8)
 
         if len(all_kc_variances) > 0:
             kcs, vars_vals = zip(*all_kc_variances)
             ax2.plot(kcs, vars_vals, "s-b", linewidth=2, markersize=6)
-            ax2.axvline(x=best_kc, color="r", linestyle="--", label=f"Min Variance kc = {best_kc:.3f}")
+            ax2.axvline(x=best_kc, color="r", linestyle="--", label=f"Min Variance kc = {best_kc:.4f}")
             ax2.set_xlabel("Corner Frequency kc [rad/m]")
             ax2.set_ylabel("Product Field Variance")
-            ax2.set_title("BSS Variance vs Corner Frequency kc")
+            ax2.set_title("Mean BSS Variance in Range vs Corner Frequency kc")
             ax2.grid(True)
             ax2.legend()
 
@@ -285,9 +297,9 @@ def plot_bss_kc_optimization_variograms(
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
         if stage_name in ("stage2", "post_migration", "post") or str(prefix).startswith("03"):
-            fig_name = f"05_{pfx_str}post_migration_kc_variogram_optimization.png"
+            fig_name = f"05_{pfx_str}pass2_kc_variogram_optimization.png"
         else:
-            fig_name = f"02_{pfx_str}pre_migration_kc_variogram_optimization.png"
+            fig_name = f"02_{pfx_str}pass1_kc_variogram_optimization.png"
         _save_figure(plt, plots_dir, fig_name)
 
         if interactive:
@@ -374,12 +386,13 @@ def plot_migration_displacement_vectors(
     plots_dir: str | Path | None = None,
     interactive: bool = False,
     output_prefix: str = "",
+    horizontal_displacement_visualization: str = "arrows",
 ) -> None:
     """
     Plot 3D ray-tracing migration displacement vectors and migrated sounding depths.
 
     Generates a 2-panel glaciological diagnostic figure:
-    - Upper Panel: Interpolated two-way traveltime field (in nanoseconds) overlaid with
+    - Upper Panel: Interpolated one_way_traveltime field (in nanoseconds) overlaid with
       horizontal displacement vectors (quiver arrows) illustrating the lateral shift
       from apex points to true basal reflection points driven by cross-profile slope.
     - Lower Panel: Spatial scatter plot comparing pre-migrated surface sounding locations
@@ -388,7 +401,7 @@ def plot_migration_displacement_vectors(
     Parameters
     ----------
     travel_time_grid : np.ndarray
-        2D array of interpolated two-way traveltimes in nanoseconds (ns) of shape (M_rows, N_cols).
+        2D array of interpolated one_way_traveltimes in nanoseconds (ns) of shape (M_rows, N_cols).
     survey_points : np.ndarray
         Pre-migration survey point coordinates of shape (N, >=2) in projected meters.
     migrated_points : np.ndarray
@@ -450,27 +463,30 @@ def plot_migration_displacement_vectors(
                 linestyles="solid",
             )
 
-        # Downsample arrows for clean plot and dynamically amplify for visibility
-        step = max(len(survey_points) // 80, 1)
-        scale_factor = _compute_vector_scale_factor(dxi[::step], dyi[::step], x_coords, y_coords)
-        ax1.quiver(
-            survey_points[::step, 0],
-            survey_points[::step, 1],
-            dxi[::step] * scale_factor,
-            dyi[::step] * scale_factor,
-            color="white",
-            angles="xy",
-            scale_units="xy",
-            scale=1,
-            width=0.003,
-            zorder=4,
-        )
-        vec_label = f" (displacement vectors \u00d7{int(scale_factor) if scale_factor == int(scale_factor) else scale_factor:g})" if scale_factor > 1.0 else ""
-        ax1.set_title(f"Calculated Traveltime Field and 3D Migration Horizontal Displacement Vectors{vec_label}", fontsize=9.5)
+        if horizontal_displacement_visualization == "grad_traveltime_grid":
+            ax1.set_title("Calculated Traveltime Field", fontsize=9.5)
+        else:
+            # Downsample arrows for clean plot and dynamically amplify for visibility
+            step = max(len(survey_points) // 80, 1)
+            scale_factor = _compute_vector_scale_factor(dxi[::step], dyi[::step], x_coords, y_coords)
+            ax1.quiver(
+                survey_points[::step, 0],
+                survey_points[::step, 1],
+                dxi[::step] * scale_factor,
+                dyi[::step] * scale_factor,
+                color="white",
+                angles="xy",
+                scale_units="xy",
+                scale=1,
+                width=0.003,
+                zorder=4,
+            )
+            vec_label = f" (displacement vectors \u00d7{int(scale_factor) if scale_factor == int(scale_factor) else scale_factor:g})" if scale_factor > 1.0 else ""
+            ax1.set_title(f"Calculated Traveltime Field and 3D Migration Horizontal Displacement Vectors{vec_label}", fontsize=9.5)
         ax1.set_xlabel("X [m]")
         ax1.set_ylabel("Y [m]")
 
-        # Lower Subplot: Pre-migrated points (black dots) and Migrated points (colored by depth)
+        # Lower Subplot: Migrated points colored by depth
         x_mig = migrated_points[:, 0]
         y_mig = migrated_points[:, 1]
         d_mig = migrated_points[:, 3]
@@ -479,15 +495,16 @@ def plot_migration_displacement_vectors(
         s_mig = float(np.clip(180.0 / np.sqrt(n_pts), 1.5, 14.0))
         s_pre = float(np.clip(100.0 / np.sqrt(n_pts), 0.8, 8.0))
 
-        ax2.scatter(
-            survey_points[:, 0],
-            survey_points[:, 1],
-            c="black",
-            s=s_pre,
-            alpha=0.7,
-            label="Pre-migrated Points",
-            zorder=2,
-        )
+        if horizontal_displacement_visualization != "grad_traveltime_grid":
+            ax2.scatter(
+                survey_points[:, 0],
+                survey_points[:, 1],
+                c="black",
+                s=s_pre,
+                alpha=0.7,
+                label="Pre-migrated Points",
+                zorder=2,
+            )
         sc = ax2.scatter(
             x_mig,
             y_mig,
@@ -520,12 +537,131 @@ def plot_migration_displacement_vectors(
         ax2.set_title("Migrated Survey Point Depths [m]", fontsize=9.5)
         ax2.set_xlabel("X [m]")
         ax2.set_ylabel("Y [m]")
-        ax2.legend(loc="upper right", fontsize=8)
+        if horizontal_displacement_visualization != "grad_traveltime_grid":
+            ax2.legend(loc="upper right", fontsize=8)
 
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
         _save_figure(plt, plots_dir, f"03_{pfx_str}3d_migration.png")
+
+        if interactive:
+            _safe_interactive_pause(plt, 0.5)
+
+        plt.close(fig)
+    except Exception as e:
+        warnings.warn(f"Plotting skipped: {e}", UserWarning)
+
+
+def plot_migration_horizontal_displacements(
+    travel_time_grid: np.ndarray,
+    survey_points: np.ndarray,
+    migrated_points: np.ndarray,
+    x_coords: np.ndarray,
+    y_coords: np.ndarray,
+    dx: float,
+    dy: float,
+    outline_mask: np.ndarray | None = None,
+    plots_dir: str | Path | None = None,
+    interactive: bool = False,
+    output_prefix: str = "",
+) -> None:
+    """
+    Plot 3D ray migration horizontal displacements over the traveltime gradient magnitude field.
+
+    Generates a standalone diagnostic figure (Figure 03 companion) displaying the magnitude of the
+    spatial traveltime gradient |∇T| = sqrt((dT/dx)^2 + (dT/dy)^2) overlaid with the original
+    survey points (grey) and the migrated reflection points (black).
+
+    Parameters
+    ----------
+    travel_time_grid : np.ndarray
+        2D array of interpolated one_way_traveltimes of shape (M_rows, N_cols).
+    survey_points : np.ndarray
+        Pre-migration survey point coordinates of shape (N, >=2) in projected meters.
+    migrated_points : np.ndarray
+        Migrated point array of shape (N, >=2) containing [x_mig, y_mig, ...].
+    x_coords : np.ndarray
+        1D array of cell center X coordinates in meters.
+    y_coords : np.ndarray
+        1D array of cell center Y coordinates in meters.
+    dx : float
+        Grid resolution along the X dimension in meters.
+    dy : float
+        Grid resolution along the Y dimension in meters.
+    outline_mask : np.ndarray, optional
+        2D boolean active domain mask of shape (M_rows, N_cols).
+    plots_dir : str, Path, or None, optional
+        Target directory to save the output figure PNG. If None, figure is not saved.
+    interactive : bool, default=False
+        If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
+
+    Returns
+    -------
+    None
+    """
+    try:
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+        slope_y, slope_x = np.gradient(travel_time_grid, dy, dx)
+        grad_mag = np.hypot(slope_x, slope_y)
+        if outline_mask is not None:
+            grad_mag = grad_mag.copy()
+            grad_mag[~outline_mask] = np.nan
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        plot_extent = _get_cell_edge_extent(x_coords, y_coords)
+
+        im = ax.imshow(grad_mag, extent=plot_extent, origin="lower", cmap="viridis")
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.1)
+        fig.colorbar(im, cax=cax, label="Traveltime Gradient Magnitude |\u2207T|")
+
+        if outline_mask is not None:
+            ax.contour(
+                outline_mask,
+                levels=[0.5],
+                extent=plot_extent,
+                origin="lower",
+                colors="black",
+                linewidths=0.8,
+                linestyles="solid",
+            )
+
+        n_pts = len(survey_points)
+        s_pts = float(np.clip(100.0 / np.sqrt(n_pts), 1.0, 8.0))
+        ax.scatter(
+            survey_points[:, 0],
+            survey_points[:, 1],
+            c="#94a3b8",
+            s=s_pts,
+            alpha=0.8,
+            label="Original Points",
+            zorder=3,
+        )
+        ax.scatter(
+            migrated_points[:, 0],
+            migrated_points[:, 1],
+            c="black",
+            s=s_pts,
+            alpha=0.9,
+            label="Migrated Points",
+            zorder=4,
+        )
+
+        ax.set_aspect("equal")
+        ax.set_title("3D Ray Migration Horizontal Displacements", fontsize=10)
+        ax.set_xlabel("X [m]")
+        ax.set_ylabel("Y [m]")
+        ax.legend(loc="upper right", fontsize=8)
+
+        plt.tight_layout()
+
+        pfx_str = f"{output_prefix}_" if output_prefix else ""
+        _save_figure(plt, plots_dir, f"03_{pfx_str}3d_migration_hor_displacements.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -643,7 +779,7 @@ def plot_kriging_bedrock_and_uncertainty(
 
         im1 = ax1.imshow(kriged_bedrock, extent=plot_extent, origin="lower", cmap="terrain")
         if pts is not None and len(pts) > 0:
-            ax1.scatter(pts[:, 0], pts[:, 1], c="black", s=1.5, alpha=0.7, label="Survey Points")
+            ax1.scatter(pts[:, 0], pts[:, 1], c="black", s=0.5, alpha=0.7, label="Survey Points")
             ax1.legend()
         ax1.set_title("Interpolated Bedrock Elevation")
         ax1.set_xlabel("X [m]")
@@ -818,7 +954,6 @@ def plot_final_blended_bedrock_map(
         plt.clf()
         plt.imshow(blended_bedrock, extent=plot_extent, origin="lower", cmap="terrain")
         plt.colorbar(label="Elevation [m]")
-        plt.title("Final Geomorphologically Blended Bedrock Elevation")
         plt.xlabel("X [m]")
         plt.ylabel("Y [m]")
         plt.tight_layout()
@@ -933,7 +1068,7 @@ def plot_final_ice_thickness_and_uncertainty(
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
-        _save_figure(plt, plots_dir, f"08_{pfx_str}final_ice_thickness_and_uncertainty.png")
+        _save_figure(plt, plots_dir, f"08_{pfx_str}final_thickness_and_uncertainty.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -987,7 +1122,7 @@ def plot_final_ice_thickness_histogram(
 
         if len(thick_valid) > 0:
             n_bins = max(15, min(50, len(thick_valid) // 100))
-            plt.hist(thick_valid, bins=n_bins, color="#38bdf8", edgecolor="#1e293b", alpha=0.85, label="Ice Depth Frequency")
+            plt.hist(thick_valid, bins=n_bins, color="#38bdf8", edgecolor="#1e293b", alpha=0.85)
             mean_thick = float(np.mean(thick_valid))
             median_thick = float(np.median(thick_valid))
             max_thick = float(np.max(thick_valid))
@@ -998,13 +1133,13 @@ def plot_final_ice_thickness_histogram(
             max_thick = 0.0
             std_thick = 0.0
 
-        plt.axvline(x=mean_thick, color="#ef4444", linestyle="--", linewidth=2.0, label=f"Mean Ice Depth = {mean_thick:.1f} m")
+        plt.axvline(x=mean_thick, color="#ef4444", linestyle="--", linewidth=2.0)
 
         stats_text = (
-            f"Mean: {mean_thick:.1f} m\n"
+            f"Mean (red dashed): {mean_thick:.1f} m\n"
             f"Median: {median_thick:.1f} m\n"
             f"Std Dev: \u00b1{std_thick:.1f} m\n"
-            f"Max Depth: {max_thick:.1f} m"
+            f"Max: {max_thick:.1f} m"
         )
         plt.gca().text(
             0.95, 0.95, stats_text,
@@ -1016,14 +1151,14 @@ def plot_final_ice_thickness_histogram(
         )
 
         plt.grid(True, linestyle=":", alpha=0.6)
-        plt.xlabel("Ice Depth / Thickness [m]")
+        plt.xlim(left=0)
+        plt.xlabel("Thickness [m]")
         plt.ylabel("Pixel Frequency Count")
-        plt.title(f"Final Ice Thickness Distribution\nMean = {mean_thick:.1f} m (Max = {max_thick:.1f} m)")
-        plt.legend(loc="upper left")
+        plt.title("Final Thickness Distribution")
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
-        _save_figure(plt, plots_dir, f"09_{pfx_str}final_ice_thickness_histogram.png")
+        _save_figure(plt, plots_dir, f"09_{pfx_str}final_thickness_histogram.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -1090,7 +1225,7 @@ def plot_final_basal_shear_stress_and_uncertainty(
         vmax1 = float(np.percentile(valid_bss, 98.5)) if len(valid_bss) > 0 else None
 
         im1 = ax1.imshow(bss_draw, extent=plot_extent, origin="lower", cmap=cmap1, vmin=0, vmax=vmax1)
-        fig.colorbar(im1, ax=ax1, label="Basal Shear Stress \u03c4b [kPa]", extend="max" if vmax1 is not None else "neither")
+        fig.colorbar(im1, ax=ax1, label=r"Basal Shear Stress $\tau_b$ [kPa]", extend="max" if vmax1 is not None else "neither")
         if outline_mask is not None:
             ax1.contour(
                 outline_mask,
@@ -1107,7 +1242,7 @@ def plot_final_basal_shear_stress_and_uncertainty(
 
         cmap2 = _get_transparent_cmap("plasma")
         if _uncertainty_unavailable(bss_std):
-            _draw_uncertainty_placeholder(ax2, plot_extent, "Mean BSS Uncertainty: n/a")
+            _draw_uncertainty_placeholder(ax2, plot_extent, "Mean Basal Shear Stress Uncertainty: n/a")
         else:
             valid_unc = bss_std[np.isfinite(bss_std) & (bss_std > 0)]
             if len(valid_unc) > 0:
@@ -1117,7 +1252,7 @@ def plot_final_basal_shear_stress_and_uncertainty(
                 vmax2 = None
 
             im2 = ax2.imshow(bss_std, extent=plot_extent, origin="lower", cmap=cmap2, vmin=0, vmax=vmax2)
-            fig.colorbar(im2, ax=ax2, label="BSS Standard Uncertainty [\u00b1 kPa]", extend="max" if vmax2 is not None else "neither")
+            fig.colorbar(im2, ax=ax2, label="Basal Shear Stress Uncertainty [\u00b1 kPa]", extend="max" if vmax2 is not None else "neither")
             if outline_mask is not None:
                 ax2.contour(
                     outline_mask,
@@ -1128,7 +1263,7 @@ def plot_final_basal_shear_stress_and_uncertainty(
                     linewidths=1.5,
                     linestyles="--",
                 )
-            ax2.set_title(f"Mean BSS Uncertainty: \u00b1{mean_bss_unc:.1f} kPa")
+            ax2.set_title(f"Mean Basal Shear Stress Uncertainty: \u00b1{mean_bss_unc:.1f} kPa")
             ax2.set_xlabel("X [m]")
             ax2.set_ylabel("Y [m]")
 
@@ -1189,7 +1324,7 @@ def plot_final_basal_shear_stress_histogram(
 
         if len(bss_valid) > 0:
             n_bins = max(15, min(50, len(bss_valid) // 100))
-            plt.hist(bss_valid, bins=n_bins, color="#10b981", edgecolor="#1e293b", alpha=0.85, label="BSS Frequency")
+            plt.hist(bss_valid, bins=n_bins, color="#10b981", edgecolor="#1e293b", alpha=0.85)
             mean_bss = float(np.mean(bss_valid))
             median_bss = float(np.median(bss_valid))
             max_bss = float(np.max(bss_valid))
@@ -1200,13 +1335,13 @@ def plot_final_basal_shear_stress_histogram(
             max_bss = 0.0
             std_bss = 0.0
 
-        plt.axvline(x=mean_bss, color="#ef4444", linestyle="--", linewidth=2.0, label=f"Mean BSS = {mean_bss:.1f} kPa")
+        plt.axvline(x=mean_bss, color="#ef4444", linestyle="--", linewidth=2.0)
 
         stats_text = (
-            f"Mean: {mean_bss:.1f} kPa\n"
+            f"Mean $\\tau_b$ (red dashed): {mean_bss:.1f} kPa\n"
             f"Median: {median_bss:.1f} kPa\n"
             f"Std Dev: \u00b1{std_bss:.1f} kPa\n"
-            f"Max BSS: {max_bss:.1f} kPa"
+            f"Max: {max_bss:.1f} kPa"
         )
         plt.gca().text(
             0.95, 0.95, stats_text,
@@ -1218,10 +1353,10 @@ def plot_final_basal_shear_stress_histogram(
         )
 
         plt.grid(True, linestyle=":", alpha=0.6)
-        plt.xlabel("Basal Shear Stress \u03c4b [kPa]")
+        plt.xlim(left=0)
+        plt.xlabel(r"Basal Shear Stress $\tau_b$ [kPa]")
         plt.ylabel("Pixel Frequency Count")
-        plt.title(f"Final Basal Shear Stress Distribution\nMean = {mean_bss:.1f} kPa (Max = {max_bss:.1f} kPa)")
-        plt.legend(loc="upper left")
+        plt.title(r"Final Basal Shear Stress $\tau_b$ Distribution")
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
