@@ -257,15 +257,23 @@ def plot_bss_kc_optimization_variograms(
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
         cmap = matplotlib.colormaps["viridis"].resampled(max(len(evaluated_variograms), 1))
+        best_idx = 0
+        min_diff = float("inf")
+        for idx, item in enumerate(evaluated_variograms):
+            diff = abs(float(item["kc"]) - float(best_kc))
+            if diff < min_diff:
+                min_diff = diff
+                best_idx = idx
+
         for idx, item in enumerate(evaluated_variograms):
             kc_val = item["kc"]
             dist = item["distance"]
             gamma_norm = item["gamma_norm"]
 
-            if round(float(kc_val), 6) == round(float(best_kc), 6):
+            if idx == best_idx:
                 ax1.plot(dist, gamma_norm, "-o", color="red", linewidth=2.5, markersize=6, label=f"Optimum $k_c$ = {kc_val:.4f}")
             else:
-                ax1.plot(dist, gamma_norm, "--", color=cmap(idx), linewidth=1.0, alpha=0.7, label=f"$k_c$ = {kc_val:.4f}")
+                ax1.plot(dist, gamma_norm, "--", color=cmap(idx), linewidth=1.0, alpha=0.7)
 
         if a_range is not None:
             ax1.axvline(x=a_range, color="k", linestyle="--", linewidth=1.5, label=f"Correlation Range a = {a_range:.2f} m")
@@ -274,14 +282,7 @@ def plot_bss_kc_optimization_variograms(
         ax1.set_ylabel("Normalized Semivariance \u03b3(h) / Mean\u00b2")
         ax1.set_title(f"Normalized Variograms across Corner Frequencies ($k_c$)\nOptimum $k_c$ = {best_kc:.4f}")
         ax1.grid(True)
-        if len(evaluated_variograms) <= 12:
-            ax1.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
-        elif a_range is not None:
-            handles, labels = ax1.get_legend_handles_labels()
-            key_items = [(h, l) for h, l in zip(handles, labels) if "Optimum" in l or "Correlation Range" in l]
-            if key_items:
-                kh, kl = zip(*key_items)
-                ax1.legend(kh, kl, loc="upper right", fontsize=8)
+        ax1.legend(loc="best", fontsize=8)
 
         if len(all_kc_variances) > 0:
             kcs, vars_vals = zip(*all_kc_variances)
