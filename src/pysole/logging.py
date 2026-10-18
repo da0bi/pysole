@@ -157,12 +157,12 @@ def get_welcome_banner(version: str | None = None, term_width: int | None = None
     term_width = max(term_width, 40)
 
     ascii_art = [
-        r"    ____        _____       __    ",
-        r"   / __ \__  _ / ___/____  / /__  ",
-        r"  / /_/ / / / /\__ \/ __ \/ / _ \ ",
-        r" / ____/ /_/ /___/ / /_/ / /  __/ ",
-        r"/_/    \__, /_____/\____/_/\___/  ",
-        r"      /____/                      ",
+        r"     __          ___        _     ",
+        r"   / _  \ _  _ / ___/ __   / /_   ",
+        r"  / /_/ / / / /\__ \/ _  \/ / _ \ ",
+        r" /  __ / /_/ /__ / / /_/ / /  __/ ",
+        r"/_/    \__  /_____/\ __ /_/\__ /  ",
+        r"      /___ /                      ",
     ]
 
     block_width = max(len(line.rstrip()) for line in ascii_art)

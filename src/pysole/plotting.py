@@ -263,16 +263,16 @@ def plot_bss_kc_optimization_variograms(
             gamma_norm = item["gamma_norm"]
 
             if round(float(kc_val), 6) == round(float(best_kc), 6):
-                ax1.plot(dist, gamma_norm, "-o", color="red", linewidth=2.5, markersize=6, label=f"Optimum kc = {kc_val:.3f}")
+                ax1.plot(dist, gamma_norm, "-o", color="red", linewidth=2.5, markersize=6, label=f"Optimum $k_c$ = {kc_val:.4f}")
             else:
-                ax1.plot(dist, gamma_norm, "--", color=cmap(idx), linewidth=1.0, alpha=0.7, label=f"kc = {kc_val:.3f}")
+                ax1.plot(dist, gamma_norm, "--", color=cmap(idx), linewidth=1.0, alpha=0.7, label=f"$k_c$ = {kc_val:.4f}")
 
         if a_range is not None:
             ax1.axvline(x=a_range, color="k", linestyle="--", linewidth=1.5, label=f"Correlation Range a = {a_range:.2f} m")
 
         ax1.set_xlabel("Lag Distance h [m]")
         ax1.set_ylabel("Normalized Semivariance \u03b3(h) / Mean\u00b2")
-        ax1.set_title(f"Normalized Variograms across Corner Frequencies (kc)\nOptimum kc = {best_kc:.4f}")
+        ax1.set_title(f"Normalized Variograms across Corner Frequencies ($k_c$)\nOptimum $k_c$ = {best_kc:.4f}")
         ax1.grid(True)
         if len(evaluated_variograms) <= 12:
             ax1.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
@@ -286,10 +286,10 @@ def plot_bss_kc_optimization_variograms(
         if len(all_kc_variances) > 0:
             kcs, vars_vals = zip(*all_kc_variances)
             ax2.plot(kcs, vars_vals, "s-b", linewidth=2, markersize=6)
-            ax2.axvline(x=best_kc, color="r", linestyle="--", label=f"Min Variance kc = {best_kc:.4f}")
-            ax2.set_xlabel("Corner Frequency kc [rad/m]")
+            ax2.axvline(x=best_kc, color="r", linestyle="--", label=f"Min Variance $k_c$ = {best_kc:.4f}")
+            ax2.set_xlabel(r"Corner Frequency $k_c$ [rad/m]")
             ax2.set_ylabel("Product Field Variance")
-            ax2.set_title("Mean BSS Variance in Range vs Corner Frequency kc")
+            ax2.set_title(r"Mean BSS Variance in Correlation Range vs Corner Frequency $k_c$")
             ax2.grid(True)
             ax2.legend()
 
@@ -605,6 +605,7 @@ def plot_migration_horizontal_displacements(
     try:
         import matplotlib.pyplot as plt
         from mpl_toolkits.axes_grid1 import make_axes_locatable
+        from matplotlib.colors import LinearSegmentedColormap
 
         slope_y, slope_x = np.gradient(travel_time_grid, dy, dx)
         grad_mag = np.hypot(slope_x, slope_y)
@@ -615,7 +616,21 @@ def plot_migration_horizontal_displacements(
         fig, ax = plt.subplots(figsize=(8, 6))
         plot_extent = _get_cell_edge_extent(x_coords, y_coords)
 
-        im = ax.imshow(grad_mag, extent=plot_extent, origin="lower", cmap="viridis")
+        cmap_gradient = LinearSegmentedColormap.from_list(
+            "white_ylorrd", ["#ffffff", "#ffeda0", "#feb24c", "#f03b20", "#800026"]
+        ).copy()
+        if hasattr(cmap_gradient, "with_extremes"):
+            cmap_gradient = cmap_gradient.with_extremes(bad=(1.0, 1.0, 1.0, 0.0))
+        else:
+            cmap_gradient.set_bad(color="white", alpha=0.0)
+
+        im = ax.imshow(
+            grad_mag,
+            extent=plot_extent,
+            origin="lower",
+            cmap=cmap_gradient,
+            vmin=0.0,
+        )
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.1)
         fig.colorbar(im, cax=cax, label="Traveltime Gradient Magnitude |\u2207T|")
@@ -632,13 +647,16 @@ def plot_migration_horizontal_displacements(
             )
 
         n_pts = len(survey_points)
-        s_pts = float(np.clip(100.0 / np.sqrt(n_pts), 1.0, 8.0))
+        s_mig = float(np.clip(16.0 / np.sqrt(n_pts), 0.12, 1.8))
+        s_orig = float(np.clip(22.0 / np.sqrt(n_pts), 0.18, 2.2))
         ax.scatter(
             survey_points[:, 0],
             survey_points[:, 1],
             c="#94a3b8",
-            s=s_pts,
-            alpha=0.8,
+            s=s_orig,
+            alpha=0.7,
+            linewidths=0,
+            edgecolors="none",
             label="Original Points",
             zorder=3,
         )
@@ -646,8 +664,10 @@ def plot_migration_horizontal_displacements(
             migrated_points[:, 0],
             migrated_points[:, 1],
             c="black",
-            s=s_pts,
+            s=s_mig,
             alpha=0.9,
+            linewidths=0,
+            edgecolors="none",
             label="Migrated Points",
             zorder=4,
         )
@@ -656,7 +676,8 @@ def plot_migration_horizontal_displacements(
         ax.set_title("3D Ray Migration Horizontal Displacements", fontsize=10)
         ax.set_xlabel("X [m]")
         ax.set_ylabel("Y [m]")
-        ax.legend(loc="upper right", fontsize=8)
+        markerscale = float(max(1.0, 2.5 / np.sqrt(s_mig)))
+        ax.legend(loc="upper right", fontsize=8, markerscale=markerscale)
 
         plt.tight_layout()
 
