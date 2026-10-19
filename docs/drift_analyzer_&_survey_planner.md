@@ -204,6 +204,65 @@ WARNING: SIA slope drift on Product P target causes 1/sin^2(alpha) double-scalin
 
 ---
 
+#### 6. Detailed 24-Candidate Case Study: Understanding Multicollinearity & `PENALIZED` Models (APO Dataset)
+
+The following complete 24-candidate ranking table was generated for the **APO** glacier dataset during post-migration (Pass 2, target $P = D \cdot \sin(\alpha_{\text{opt}})$, $N = 8{,}939$ soundings, spatial exclusion buffer $r_{\text{buffer}} = 1{,}700\text{ m}$):
+
+```
+================================================================================================================
+       DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS (PASS 2)
+================================================================================================================
+#   Drift Model                                  RMSE (m)   dRMSE %   AICc       dAICc     VIF      Status
+----------------------------------------------------------------------------------------------------------------
+1   ordinary                                     6.38       0.00      33129.6    0.0       1.0      VALID
+2   sia                                          6.45       1.06      33320.0    190.3     1.0      WARNING
+3   linear_xy                                    6.47       1.43      33387.9    258.2     1.2      VALID
+4   z_dem                                        6.49       1.76      33443.0    313.3     1.0      VALID
+5   curvature_dem                                6.51       2.02      33489.0    359.4     1.0      VALID
+6   z_dem + linear_xy                            6.51       2.00      33489.3    359.6     1.8      VALID
+7   curvature_dem + linear_xy                    6.59       3.36      33725.8    596.2     1.3      VALID
+8   sia + curvature_dem                          6.61       3.64      33772.4    642.8     1.0      WARNING
+9   sia + linear_xy                              6.61       3.66      33778.6    649.0     1.3      WARNING
+10  sia + z_dem                                  6.63       3.87      33811.8    682.2     1.0      WARNING
+11  sia + z_dem + curvature_dem                  6.66       4.38      33901.8    772.2     1.2      WARNING
+12  sia + z_dem + curvature_dem + linear_xy      6.72       5.30      34063.5    933.9     1.8      WARNING
+13  sia + z_dem + linear_xy                      6.74       5.72      34132.8    1003.1    1.8      WARNING
+14  sia + curvature_dem + linear_xy              6.77       6.11      34197.6    1068.0    1.3      WARNING
+15  z_dem + curvature_dem + linear_xy            6.79       6.42      34249.8    1120.2    1.8      VALID
+16  curvature_dem + quadratic_xy                 6.82       6.98      34347.7    1218.0    9.8      VALID
+17  z_dem + curvature_dem                        6.84       7.22      34380.0    1250.4    1.1      VALID
+18  quadratic_xy                                 6.85       7.35      34406.9    1277.2    9.8      VALID
+19  sia + curvature_dem + quadratic_xy           7.11       11.53     35093.9    1964.2    9.9      WARNING
+20  sia + quadratic_xy                           7.15       12.05     35176.5    2046.8    9.8      WARNING
+21  sia + z_dem + curvature_dem + quadratic_xy   6.35       -0.52     33053.1    -76.5     11.4     PENALIZED
+22  z_dem + curvature_dem + quadratic_xy         6.39       0.18      33175.5    45.9      10.8     PENALIZED
+23  z_dem + quadratic_xy                         6.53       2.44      33572.4    442.8     10.4     PENALIZED
+24  sia + z_dem + quadratic_xy                   6.97       9.30      34733.3    1603.7    10.7     PENALIZED
+----------------------------------------------------------------------------------------------------------------
+```
+
+#### Detailed Breakdown of the Ranking Dynamics
+
+1. **Hierarchical 3-Tier Sort Key**:
+   Candidates are evaluated and sorted by:
+   $$\text{Sort Key} = \left(\text{is\_penalized},\ \text{AICc},\ \text{RMSE}\right)$$
+   Any candidate that is **not penalized** (`is_penalized = False`, equivalent to 0) strictly outranks **every penalized model** (`is_penalized = True`, equivalent to 1). Within each group, models are ranked by ascending AICc (favoring parsimonious models that balance residual variance against parameter count $k$), using RMSE as the final tie-breaker.
+
+2. **Why Model #1 (`ordinary`) Wins**:
+   In Pass 2, the interpolation target is the BSS-derived product $P(x,y) = D \cdot \sin(\alpha_{\text{opt}})$. Under the Shallow Ice Approximation, basal shear stress is assumed to be roughly uniform across the glacier sole, meaning $P(x,y)$ has a constant spatial mean. Ordinary Kriging captures this stationary mean directly with zero external drift parameters ($n_{\text{drift}} = 1$), achieving the best parsimony score ($\text{AICc} = 33129.6$). Adding external drift functions increases parameter complexity without providing genuine physical signal, leading to higher AICc penalties.
+
+3. **Why Models with `WARNING` Appear (Rows 2, 8–14, 19–20)**:
+   All candidates displaying `WARNING` contain the `sia` drift ($1/\sin\alpha$). Applying an SIA slope drift to a target that is *already* scaled by $\sin\alpha$ introduces an unphysical $1/\sin^2(\alpha)$ double-scaling artifact at low-gradient glacier margins. The Drift Analyzer evaluates and ranks them objectively, but alerts the user to this physical risk.
+
+4. **The `PENALIZED` Models (Rows 21–24) and the Multicollinearity Gate**:
+   - **The Apparent Paradox**: Model #21 (`sia + z_dem + curvature_dem + quadratic_xy`) actually achieves the **lowest cross-validation RMSE ($6.35\text{ m}$ vs $6.38\text{ m}$)** and **lowest raw AICc ($33053.1$ vs $33129.6$)** of all 24 candidates ($\text{dRMSE} = -0.52\%$, $\text{dAICc} = -76.5$). Despite this seemingly superior fit, it is relegated to the bottom of the table.
+   - **The Common Denominator**: All four penalized models (#21, #22, #23, #24) combine **glacier surface elevation (`z_dem`)** with the **2D quadratic spatial polynomial (`quadratic_xy`: $X, Y, X^2, Y^2, XY$)**. In typical mountain glaciers and ice caps, valley elevation correlates strongly with a second-order polynomial surface ($R^2 > 0.90$), yielding $\text{VIF} > 10$.
+   - **Why VIF $> 10$ is Dangerous in Universal Kriging**:
+     When drift columns are highly collinear, the Universal Kriging matrix $F^T \Gamma^{-1} F$ becomes severely ill-conditioned. To minimize fitting residuals, the solver assigns enormous opposing coefficients to the redundant terms (e.g. $+50{,}000 \cdot Z_{\text{dem}}$ vs $-50{,}000 \cdot \text{quadratic}$). Near dense survey soundings, these opposing weights cancel out (giving deceptively low RMSE). However, in unmeasured sectors or near glacier margins, the terms diverge, creating unphysical runaway elevation spikes, deep craters, or numerical breakdown.
+   - **The Quality Gate**: Flagging models with $\text{VIF} > 10$ as `PENALIZED` acts as an automated protective barrier that ensures ill-conditioned drift combinations are never recommended or applied in production runs.
+
+---
+
 ### 1.6 Reading the AICc: ΔAICc, ΔRMSE % and the Role of $n$
 
 The cross-validation residuals are already out-of-sample, but the AICc still weighs them against the number of parameters. Because $\text{SS}_{\text{res}}$ is summed over $n$ points, the likelihood term of the AICc **grows with $n$** whereas the penalty $2k + 2k(k+1)/(n-k-1)$ does not. For two candidates, a complex one (more parameters, $\Delta k = k_1 - k_2$) and a simple one,

@@ -13,7 +13,7 @@ import numpy as np
 import os
 from .raster import BedrockMap, load_dem, load_outline, GridGeometry, load_survey_points, save_points_csv
 from .migration import migrate_eikonal_points, EikonalMigrator
-from .variogram import BSSOptimizer, compute_cutoff_wavelength, resolve_native_variogram_model
+from .variogram import BSSOptimizer, OptimizationResult, compute_cutoff_wavelength, resolve_native_variogram_model
 from .interpolation import (
     blend_margin_topography,
     build_drift_grids,
@@ -350,6 +350,8 @@ class Solver:
         self._traveltime_std: np.ndarray | None = None
         self.opt_kc: float | None = None
         self.opt_slope: np.ndarray | None = None
+        self.pre_opt_res: OptimizationResult | None = None
+        self.post_opt_res: OptimizationResult | None = None
         self.kriged_thickness: np.ndarray | None = None
         self.kriged_bedrock: np.ndarray | None = None
         self.kriged_variance: np.ndarray | None = None
@@ -1291,11 +1293,6 @@ class Solver:
         if pts is None:
             raise ValueError(f"No survey/migrated points available to create sample points for stage '{stage_key}'.")
 
-        if target_upper == "P" and self.opt_slope is None:
-            prefix = "01_" if stage_key == "pre_migration" else "03_"
-            is_inter = bool(interactive) and not self.is_batch_mode and sys.stdin.isatty()
-            self.optimize_bss(interactive=is_inter, prefix=prefix)
-
         val_col = 3 if pts.shape[1] >= 4 else 2
         has_prof = (pts.shape[1] >= 5)
 
@@ -1343,6 +1340,7 @@ class Solver:
         var_model: str,
         suite: list[list[str]],
         interactive: bool,
+        variogram_params: dict[str, float] | None = None,
     ) -> list[CandidateDriftResult]:
         """Runs the Drift Analyzer of one stage on the production sample points, drift grids and fitted variogram.
 
@@ -1366,6 +1364,8 @@ class Solver:
             Candidate suite (see :func:`pysole.drift.build_drift_suite`).
         interactive : bool
             Whether the analyzer may prompt on the terminal.
+        variogram_params : dict of str to float, optional
+            Fitted variogram parameters (if None, uses ``self.opt_variogram_params``).
 
         Returns
         -------
@@ -1381,6 +1381,7 @@ class Solver:
             max_memory_fraction=self.max_memory_fraction,
             show_progress=self.show_progress,
         )
+        use_var_params = variogram_params if variogram_params is not None else self.opt_variogram_params
         return analyzer.run_diagnostics(
             x_pts=sample_pts[:, 0],
             y_pts=sample_pts[:, 1],
@@ -1389,10 +1390,23 @@ class Solver:
             drift_grids=self.get_drift_grids(RASTER_DRIFT_TERMS),
             candidates=suite,
             variogram_model=resolve_native_variogram_model(var_model, warn=False),
-            variogram_params=self.opt_variogram_params,
+            variogram_params=use_var_params,
             profile_data=sample_pts[:, 3] if sample_pts.shape[1] >= 4 else None,
             interactive=interactive,
         )
+
+    def _ensure_optimized(self, stage_key: str, interactive: bool | None = None) -> None:
+        """Guarantees BSS slope optimization and variogram parameters have been resolved for the stage."""
+        stage_norm = "pre_migration" if ("pre" in stage_key.lower() or "1" in stage_key) else "post_migration"
+        is_inter = bool(interactive) and not self.is_batch_mode and sys.stdin.isatty()
+
+        if stage_norm == "pre_migration":
+            if self.pre_opt_res is None and self.opt_slope is None:
+                self.optimize_bss(stage="pre_migration", interactive=is_inter, prefix="01_")
+        else:
+            if self.post_opt_res is None:
+                if self.opt_slope is None or (self.pre_opt_res is not None and self.migrated_points is not None):
+                    self.optimize_bss(stage="post_migration", interactive=is_inter, prefix="03_")
 
     def _execute_kriging_pass(
         self,
@@ -1442,7 +1456,26 @@ class Solver:
         is_pre = "Pass 1" in pass_name
         stage_key = "pre_migration" if is_pre else "post_migration"
 
+        self._ensure_optimized(stage_key, interactive=interactive_optimization)
         sample_pts = self.get_sample_points(stage_key, target_upper, interactive=interactive_optimization)
+
+        # Build effective variogram parameters: for direct physical targets ('T' or 'D'), scale sill
+        # to the variance of the interpolated field while preserving the fitted spatial range a_0.
+        if target_upper == "P" or self.opt_variogram_params is None:
+            effective_var_params = self.opt_variogram_params
+        else:
+            z_var = float(np.var(sample_pts[:, 2])) if len(sample_pts) > 1 else 1.0
+            opt_sill = float(self.opt_variogram_params.get("sill", z_var))
+            nugget_ratio = (
+                float(self.opt_variogram_params.get("nugget", 0.0)) / opt_sill
+                if opt_sill > 0
+                else 0.0
+            )
+            effective_var_params = {
+                "range": float(self.opt_variogram_params["range"]),
+                "sill": z_var if z_var > 0 else 1.0,
+                "nugget": nugget_ratio * z_var,
+            }
 
         # The plan was validated (and its notices logged) when the Solver was built; it is re-resolved here
         # silently because ``calculate_bedrock(method=...)`` may replace the method of the stage.
@@ -1471,6 +1504,7 @@ class Solver:
                 var_model=var_model,
                 suite=plan.suite,
                 interactive=not is_batch,
+                variogram_params=effective_var_params,
             )
             # The winner decides the final method: Ordinary (no drift term) or Universal with its terms
             if not diag or diag[0].aicc >= FAILED_AICC:
@@ -1498,7 +1532,7 @@ class Solver:
             geometry=self.geometry,
             method=krig_method,
             variogram_model=var_model,
-            variogram_params=getattr(self, "opt_variogram_params", None),
+            variogram_params=effective_var_params,
             dem_grid=self.dem_grid,
             opt_slope_grid=self.opt_slope,
             drift_terms=drift_terms,
@@ -1725,6 +1759,7 @@ class Solver:
 
     def optimize_bss(
         self,
+        stage: str | None = None,
         kc_max: float | None = None,
         kc_min: float | None = None,
         n_steps: int | None = None,
@@ -1748,6 +1783,10 @@ class Solver:
 
         Parameters
         ----------
+        stage : str, optional
+            Stage to optimize: 'pre_migration' (or 'pass1') using unmigrated survey soundings,
+            or 'post_migration' (or 'pass2') using 3D migrated soundings. If None, automatically
+            inferred as 'post_migration' if migrated soundings exist, else 'pre_migration'.
         kc_max : float, optional
             Upper wavenumber bound [rad/m] for trial search. If None, derived from DEM resolution (Nyquist).
         kc_min : float, optional
@@ -1774,7 +1813,16 @@ class Solver:
         opt_kc : float
             Optimal spatial cutoff wavenumber k_c [rad/m] (lambda_c = 2*pi / opt_kc [m]).
         """
-        pts = self.migrated_points if self.migrated_points is not None else self.survey_points
+        if stage is None:
+            stage_key = "post_migration" if self.migrated_points is not None else "pre_migration"
+        else:
+            stage_key = "pre_migration" if ("pre" in str(stage).lower() or "1" in str(stage)) else "post_migration"
+
+        if stage_key == "pre_migration":
+            pts = self.survey_points if self.survey_points is not None else self.pre_kriging_points
+        else:
+            pts = self.migrated_points if self.migrated_points is not None else self.survey_points
+
         if pts is None:
             xx, yy = np.meshgrid(self.x_coords[::5], self.y_coords[::5])
             pts = np.column_stack((xx.ravel(), yy.ravel(), self.dem_grid[::5, ::5].ravel(), np.ones(xx.size) * 10.0))
@@ -1802,9 +1850,9 @@ class Solver:
             nrbins = self.nrbins
 
         if prefix is None:
-            prefix = "03_" if self.migrated_points is not None else "01_"
+            prefix = "01_" if stage_key == "pre_migration" else "03_"
 
-        stage_name = "stage2" if prefix == "03_" else "stage1"
+        stage_name = "stage1" if prefix.startswith("01") else "stage2"
 
         opt_res = self.bss_optimizer.optimize(
             survey_points=pts,
@@ -1824,9 +1872,15 @@ class Solver:
             output_prefix=self.figure_prefix,
         )
 
+        if stage_key == "pre_migration":
+            self.pre_opt_res = opt_res
+        else:
+            self.post_opt_res = opt_res
+
         self.opt_kc = opt_res.optimal_kc
         self.opt_slope = opt_res.optimal_slope_grid
         self.opt_variogram_params = opt_res.opt_variogram_params
+        self._sample_pts_cache.clear()
         # Retain strictly the optimal smoothed DEM in the solver cache to minimize memory footprint
         best_key = round(float(self.opt_kc), 6)
         if opt_res.optimal_dem_grid is not None:
@@ -1841,6 +1895,7 @@ class Solver:
         variogram_model: str | None = None,
         interactive: bool = False,
         calculate_uncertainty: bool | None = None,
+        interactive_optimization: bool | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Interpolates post-migration bedrock elevation and estimation uncertainty via Dual Kriging.
 
@@ -1863,6 +1918,8 @@ class Solver:
         calculate_uncertainty : bool or None, optional
             If True, calculates Kriging estimation variance during Pass 2. If None, uses
             post_calculate_uncertainty configuration setting.
+        interactive_optimization : bool or None, optional
+            Whether to run BSS optimization interactively if slopes have not yet been evaluated.
 
         Returns
         -------
@@ -1892,6 +1949,11 @@ class Solver:
         else:
             var_model = self.post_variogram_model
 
+        if interactive_optimization is None:
+            eff_opt_inter = bool(interactive) and not self.is_batch_mode and sys.stdin.isatty()
+        else:
+            eff_opt_inter = bool(interactive_optimization) and not self.is_batch_mode and sys.stdin.isatty()
+
         eff_calc_unc = self.post_calculate_uncertainty if calculate_uncertainty is None else bool(calculate_uncertainty)
         krig_res = self._execute_kriging_pass(
             target_type=self.post_interpolation_target,
@@ -1901,6 +1963,7 @@ class Solver:
             zero_boundary=self.post_zero_boundary,
             pass_name="Pass 2 - Constructing Depth Grid",
             return_variance=eff_calc_unc,
+            interactive_optimization=eff_opt_inter,
         )
         grid_raw = krig_res.bedrock_grid
         prod_var = krig_res.variance_grid
@@ -2423,15 +2486,36 @@ class Solver:
             production run are used.
         """
         stage_prefix = stage.split("_")[0]
+        stage_key = "pre_migration" if ("pre" in stage.lower() or "1" in stage) else "post_migration"
+        self._ensure_optimized(stage_key, interactive=interactive)
         interp_target = getattr(self, f"{stage_prefix}_interpolation_target", "P")
+        sample_pts = self.get_sample_points(stage_key, interp_target)
+
+        if interp_target.upper() == "P" or self.opt_variogram_params is None:
+            effective_var_params = self.opt_variogram_params
+        else:
+            z_var = float(np.var(sample_pts[:, 2])) if len(sample_pts) > 1 else 1.0
+            opt_sill = float(self.opt_variogram_params.get("sill", z_var))
+            nugget_ratio = (
+                float(self.opt_variogram_params.get("nugget", 0.0)) / opt_sill
+                if opt_sill > 0
+                else 0.0
+            )
+            effective_var_params = {
+                "range": float(self.opt_variogram_params["range"]),
+                "sill": z_var if z_var > 0 else 1.0,
+                "nugget": nugget_ratio * z_var,
+            }
+
         return self._run_drift_analysis(
-            stage_key=stage,
+            stage_key=stage_key,
             target_type=interp_target,
-            sample_pts=self.get_sample_points(stage, interp_target),
+            sample_pts=sample_pts,
             zero_boundary=getattr(self, f"{stage_prefix}_zero_boundary", True),
             var_model=getattr(self, f"{stage_prefix}_variogram_model", "spherical"),
             suite=build_drift_suite(None),
             interactive=interactive,
+            variogram_params=effective_var_params,
         )
 
     def plan_survey(
@@ -2583,33 +2667,37 @@ class Solver:
         logger.info(f"   Interactive Migration: {migration.get('interactive_migration', False)}")
         logger.info(f"   Plots Output Directory: {self.plots_dir}")
 
-        if self.perform_migration and self._normalize_survey_data_type() != "depth":
-            logger.info("2. Performing 3D Eikonal Ray Migration...")
-        else:
-            logger.info("2. Skipping 3D Eikonal Ray Migration...")
-
         is_batch = (not self.show_progress) or (not sys.stdin.isatty())
         opt_interactive = False if is_batch else opt.get("interactive_optimization", False)
         mig_interactive = False if is_batch else migration.get("interactive_migration", False)
         fin_interactive = False if is_batch else fin_cfg.get("interactive_finalization", False)
 
+        if self.perform_migration and self._normalize_survey_data_type() != "depth":
+            logger.info("2. Performing Pre-Migration BSS Slope Optimization & Traveltime Variogram Modeling...")
+            self.optimize_bss(stage="pre_migration", interactive=opt_interactive, plotit=True)
+            logger.info("3. Performing Pass 1 Kriging & 3D Eikonal Ray Migration...")
+        else:
+            logger.info("2. Skipping 3D Eikonal Ray Migration...")
+
         self.migrate_eikonal(
             travel_times=survey_data_path,
             velocity=migration.get("velocity"),
             interactive=mig_interactive,
+            interactive_optimization=opt_interactive,
             plotit=True,
         )
 
-        logger.info("3. Performing Post-Migration BSS Slope Optimization & Depth Interpolation (Field D(x,y))...")
+        logger.info("4. Performing Post-Migration BSS Slope Optimization & Depth Interpolation (Field D(x,y))...")
         opt_kc = self.optimize_bss(
+            stage="post_migration",
             interactive=opt_interactive,
             plotit=True,
         )
         opt_wl = compute_cutoff_wavelength(opt_kc)
         logger.info(f"   [BSS Optimization] Optimal Post-Migration Corner Frequency k_c = {opt_kc:.4f} (cutoff wavelength λ_c = {opt_wl:.2f} m)")
-        self.calculate_bedrock(interactive=opt_interactive)
+        self.calculate_bedrock(interactive=opt_interactive, interactive_optimization=opt_interactive)
 
-        logger.info("4. Finalizing Bedrock Topography...")
+        logger.info("5. Finalizing Bedrock Topography...")
         bedrock_map = self.finalize_bedrock(
             interactive=fin_interactive,
             random_forest_gap_filling=fin_cfg.get("random_forest_gap_filling", False),

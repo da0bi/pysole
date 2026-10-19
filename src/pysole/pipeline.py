@@ -212,13 +212,16 @@ def run_from_config(
         interactive_opt = not is_batch and sys.stdin.isatty() and bool(opt_cfg.get("interactive_optimization", True))
         interactive_fin = not is_batch and sys.stdin.isatty() and bool(fin_cfg.get("interactive_finalization", True))
 
+        if solver.perform_migration and solver._normalize_survey_data_type() != "depth":
+            solver.optimize_bss(stage="pre_migration", interactive=interactive_opt)
+
         solver.migrate_eikonal(
             velocity=mig_cfg.get("velocity", 0.16),
             interactive=interactive_mig,
             interactive_optimization=interactive_opt,
         )
-        solver.optimize_bss(interactive=interactive_opt)
-        solver.calculate_bedrock(interactive=interactive_opt)
+        solver.optimize_bss(stage="post_migration", interactive=interactive_opt)
+        solver.calculate_bedrock(interactive=interactive_opt, interactive_optimization=interactive_opt)
         final_raster = solver.finalize_bedrock(
             interactive=interactive_fin,
             random_forest_gap_filling=fin_cfg.get("random_forest_gap_filling"),
