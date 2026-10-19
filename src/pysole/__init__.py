@@ -25,6 +25,7 @@ from .logging import (
     get_welcome_banner,
     print_welcome_banner,
     log_section_header,
+    end_terminal_block,
     get_progress_bar,
 )
 from . import plotting
@@ -69,6 +70,7 @@ __all__ = [
     "get_welcome_banner",
     "print_welcome_banner",
     "log_section_header",
+    "end_terminal_block",
     "get_progress_bar",
     "plotting",
 ]

@@ -218,6 +218,13 @@ def log_section_header(title: str, line_char: str = "=", width: int = 80, file=N
     out.flush()
 
 
+def end_terminal_block(file=None) -> None:
+    """Emits a trailing newline after an interactive terminal block to isolate it from subsequent logs."""
+    out = file if file is not None else sys.stdout
+    out.write("\n")
+    out.flush()
+
+
 _BaseBar = tqdm if isinstance(tqdm, type) else object
 
 
@@ -329,7 +336,9 @@ def activity_indicator(desc: str, disable: bool = False, delay: float = 1.0, int
     def run() -> None:
         if stop.wait(delay):
             return
-        bar = tqdm(total=None, desc=line(), bar_format="{desc}", leave=True)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        bar = tqdm(total=None, desc=line(), bar_format="{desc}", leave=True, file=sys.stdout)
         shown.append(bar)
         while not stop.wait(interval):
             bar.set_description_str(line())
@@ -344,6 +353,8 @@ def activity_indicator(desc: str, disable: bool = False, delay: float = 1.0, int
         if shown:
             shown[0].set_description_str(line())
             shown[0].close()
+            sys.stdout.write("\n")
+            sys.stdout.flush()
 
 
 __all__ = [
@@ -353,6 +364,7 @@ __all__ = [
     "get_welcome_banner",
     "print_welcome_banner",
     "log_section_header",
+    "end_terminal_block",
     "PySoleProgressBar",
     "get_progress_bar",
     "activity_indicator",

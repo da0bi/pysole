@@ -33,7 +33,7 @@ from .drift import (
 )
 from .smoothing import compute_gradients, precompute_fft_grid, fft_gaussian_smooth_precomputed, compute_surface_curvature
 from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir, resolve_plots_dir, configured_output_dir, sanitize_config, warn_unknown_config_keys, validate_memory_fraction
-from .logging import logger, log_section_header
+from .logging import logger, log_section_header, end_terminal_block
 from .drift_analyzer import FAILED_AICC, CandidateDriftResult, DriftAnalyzer
 from .survey_planner import SurveyPlanner
 import sys
@@ -1782,7 +1782,7 @@ class Solver:
             log_section_header("INTERACTIVE 3D EIKONAL RAY MIGRATION")
             while True:
                 try:
-                    ans = input(f"\nCurrent migration velocity v = {v_eff:.4f} m/ns. Test another migration velocity? [y/N]: ").strip().lower()
+                    ans = input(f"Current migration velocity v = {v_eff:.4f} m/ns. Test another migration velocity? [y/N]: ").strip().lower()
                     if ans in ["y", "yes"]:
                         val = input("Enter new signal propagation velocity [m/ns] (e.g. 0.15): ").strip()
                         if val:
@@ -1807,6 +1807,7 @@ class Solver:
                         break
                 except Exception:
                     break
+            end_terminal_block()
 
         self.export_outputs("migration")
         return self.migrated_points
@@ -2373,6 +2374,7 @@ class Solver:
 
                 if ans_accept in ["", "y", "yes"]:
                     self.kriged_bedrock = cand_bedrock
+                    end_terminal_block()
                     break
         else:
             # Single-pass deterministic execution using configured/passed arguments

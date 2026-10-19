@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **[Terminal Output & Log Block Formatting Separation] (`src/pysole/logging.py`, `src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `src/pysole/survey_planner.py`, `src/pysole/variogram.py`, `tests/test_logging.py`)**:
+  - **Banner Spacing Fix**: Removed redundant leading newline in `DriftAnalyzer._prompt_buffer_radius()` (`print(f"[DriftAnalyzer] Fitted spatial range...")`), ensuring that exactly one empty line follows the `INTERACTIVE DRIFT MODEL SELECTION` section header. Also removed redundant leading newline in interactive migration velocity prompt (`solver.py`).
+  - **Standardized Terminal Block Delimitation (`end_terminal_block`)**: Introduced `end_terminal_block()` in `src/pysole/logging.py` to emit a trailing newline at the boundary of interactive terminal sessions. Applied across `_prompt_buffer_radius()` and `_prompt_model_selection()` in `drift_analyzer.py`, interactive migration and bedrock finalization in `solver.py`, survey planning prompts in `survey_planner.py`, and interactive BSS optimization in `variogram.py`, guaranteeing that subsequent timestamped log blocks (`[INFO]`) are cleanly separated by an empty line.
+  - **Activity Indicator Empty Line Isolation**: Updated `activity_indicator()` in `src/pysole/logging.py` to write a leading newline before display and a trailing newline upon exit (matching `PySoleProgressBar`), isolating long-running computation spinners from preceding and succeeding log messages.
+  - **Ranking Table Spacing**: Streamlined `format_ranking_table()` to start flush with top table dividers and added isolated spacing in `drift_analyzer.py` when following completion logs.
+
 - **[Drift Analyzer Dynamic RMSE Units & AICc Overflow Sentinel Fix] (`src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `tests/test_drift_analyzer_engine.py`)**:
   - **Dynamic Table Header Units (Option C)**: Added `resolve_rmse_unit(mode, interpolation_target, survey_data_type, velocity)` to dynamically determine the physical units for the candidate ranking table header `RMSE (<unit>)`:
     - **Pass 1 / Pre-Migration**:

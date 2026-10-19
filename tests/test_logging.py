@@ -222,6 +222,37 @@ class TestTerminalUI(unittest.TestCase):
         self.assertEqual(lines[1], "TEST HEADLINE TITLE")
         self.assertEqual(lines[2], "=" * 80)
 
+    def test_log_section_header_exact_spacing(self):
+        import io
+        buf = io.StringIO()
+        pysole_logging.log_section_header("TEST HEADLINE TITLE", width=80, file=buf)
+        out = buf.getvalue()
+        # Must start with newline before top divider and end with two newlines after bottom divider (1 empty line after)
+        self.assertTrue(out.startswith("\n" + "=" * 80 + "\n"))
+        self.assertTrue(out.endswith("\n" + "=" * 80 + "\n\n"))
+
+    def test_end_terminal_block(self):
+        import io
+        buf = io.StringIO()
+        pysole_logging.end_terminal_block(file=buf)
+        self.assertEqual(buf.getvalue(), "\n")
+
+    def test_activity_indicator_newline_padding(self):
+        import io
+        import sys
+        import time
+        buf = io.StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            with pysole_logging.activity_indicator("Testing spinner", disable=False, delay=0.0):
+                time.sleep(0.05)
+        finally:
+            sys.stdout = old_stdout
+        out = buf.getvalue()
+        self.assertTrue(out.startswith("\n"))
+        self.assertTrue(out.endswith("\n"))
+
 
 class TestPipelineLogging(unittest.TestCase):
     def setUp(self):

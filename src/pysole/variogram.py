@@ -20,7 +20,7 @@ from .smoothing import (
     fft_gaussian_smooth_precomputed,
 )
 from .raster import GridGeometry
-from .logging import logger, get_progress_bar, log_section_header
+from .logging import logger, get_progress_bar, log_section_header, end_terminal_block
 
 
 def compute_cutoff_wavelength(kc: float) -> float:
@@ -1114,6 +1114,7 @@ def optimize_bss_variance(
                             )
             except ValueError:
                 logger.warning(f"   [BSS Optimization Warning] Invalid corner frequency '{ans_kc}', retaining optimal k_c = {best_kc:.4f} rad/m.")
+        end_terminal_block()
 
     if best_kc is None:
         fallback_kc = float(kc_max_val)

@@ -16,7 +16,7 @@ from scipy.spatial import cKDTree
 from .drift import DRIFT_PRIMITIVES, ORDINARY_NAME, format_drift_name
 from .interpolation import DriftBasis
 from .kriging_core import KrigingSystem, LeaveBlockOut, max_pairwise_distance, resolve_variogram_params
-from .logging import activity_indicator, get_progress_bar, logger, log_section_header
+from .logging import activity_indicator, end_terminal_block, get_progress_bar, logger, log_section_header
 from .memory import plan_cv_memory
 from .raster import GridGeometry
 from .variogram import resolve_native_variogram_model
@@ -183,7 +183,7 @@ def format_ranking_table(
     rmse_hdr = f"RMSE ({rmse_unit})"
     rmse_col_w = max(10, len(rmse_hdr) + 2)
     width = max(112, 102 + rmse_col_w)
-    lines = ["", "=" * width, f"       {title}", "=" * width]
+    lines = ["=" * width, f"       {title}", "=" * width]
     lines.append(
         f"{'#':<3} {'Drift Model':<44} {rmse_hdr:<{rmse_col_w}} {'dRMSE %':<9} {'AICc':<10} {'dAICc':<9} {'VIF':<8} {'Status'}"
     )
@@ -613,21 +613,26 @@ class DriftAnalyzer:
     @staticmethod
     def _prompt_buffer_radius(a_0: float, default_radius: float) -> float:
         """Asks for the buffer radius on the terminal; invalid input is reported and the default is kept."""
-        print(f"\n[DriftAnalyzer] Fitted spatial range: a_0 = {a_0:.1f} meters.")
+        print(f"[DriftAnalyzer] Fitted spatial range: a_0 = {a_0:.1f} meters.")
         try:
             answer = input(f"[DriftAnalyzer] Enter spatial exclusion buffer radius in meters [default: {default_radius:.1f} m]: ").strip()
         except EOFError:
+            end_terminal_block()
             return default_radius
         if not answer:
+            end_terminal_block()
             return default_radius
         try:
             radius = float(answer)
         except ValueError:
             print(f"[DriftAnalyzer] '{answer}' is not a number; keeping the default radius of {default_radius:.1f} m.")
+            end_terminal_block()
             return default_radius
         if not np.isfinite(radius) or radius <= 0:
             print(f"[DriftAnalyzer] The radius must be a positive number; keeping the default of {default_radius:.1f} m.")
+            end_terminal_block()
             return default_radius
+        end_terminal_block()
         return radius
 
     @staticmethod
@@ -641,9 +646,11 @@ class DriftAnalyzer:
             try:
                 answer = input(prompt)
             except EOFError:
+                end_terminal_block()
                 return None
             chosen, error = parse_model_selection(answer, results)
             if error is None:
+                end_terminal_block()
                 return chosen
             print(f"[DriftAnalyzer] {error}")
 
@@ -748,6 +755,9 @@ class DriftAnalyzer:
         if show_prompts and eval_results:
             if not banner_shown:
                 log_section_header("INTERACTIVE DRIFT MODEL SELECTION")
+            else:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
             print(format_ranking_table(eval_results, f"DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS ({self.pass_label.upper()})", rmse_unit=self.rmse_unit))
             print(f"   [Drift Analyzer] Recommended model: #1 '{eval_results[0].name}'")
             chosen = self._prompt_model_selection(eval_results)

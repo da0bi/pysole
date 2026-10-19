@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from .config import resolve_plots_dir
-from .logging import logger, log_section_header
+from .logging import logger, log_section_header, end_terminal_block
 from .plotting import _save_figure
 from .raster import BedrockMap, load_dem, load_outline
 from .smoothing import compute_gradients, fft_gaussian_smooth
@@ -521,6 +521,9 @@ class SurveyPlanner:
                 max_length_km = _prompt_survey_parameter("Maximum survey track length budget", DEFAULT_SURVEY_MAX_KM, "km")
             else:
                 max_length_km = DEFAULT_SURVEY_MAX_KM
+
+        if is_interactive:
+            end_terminal_block()
         raw_prefix = (output_prefix or "").strip()
         prefix_path = Path(raw_prefix).expanduser() if raw_prefix else None
         if output_dir:
