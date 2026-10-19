@@ -182,7 +182,7 @@ Example (Wuk, pre-migration, product target `"P"`, N = 982, default suite of 24 
 
 ```
 ================================================================================================================
-       DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS (PRE_MIGRATION)
+       DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS (PASS 1)
 ================================================================================================================
 #   Drift Model                                  RMSE (m)   dRMSE %   AICc       dAICc     VIF      Status
 ----------------------------------------------------------------------------------------------------------------

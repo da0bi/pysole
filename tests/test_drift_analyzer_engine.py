@@ -355,6 +355,12 @@ class TestInteractiveSelection(AnalyzerFixture):
         results, _, _ = self.run_interactive([EOFError(), EOFError()])
         self.assertEqual(len(results), 3)
 
+    def test_banner_and_table_header(self):
+        with patch("pysole.drift_analyzer.log_section_header") as mock_banner:
+            results, mocked, printed = self.run_interactive(["", ""])
+            mock_banner.assert_called_once_with("INTERACTIVE DRIFT MODEL SELECTION")
+            self.assertIn("DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS (PASS 1)", printed)
+
 
 class TestProgressDisplay(AnalyzerFixture):
     """The spinner and the loop bar only report: same ranking, right totals, nothing created when disabled."""
@@ -419,6 +425,37 @@ class TestProgressDisplay(AnalyzerFixture):
 
     def test_default_is_to_show_progress(self):
         self.assertTrue(DriftAnalyzer().show_progress)
+
+    def test_pass_1_and_pass_2_labels_in_progress(self):
+        for mode, expected_pass in [("pre_migration", "Pass 1"), ("post_migration", "Pass 2")]:
+            analyzer = DriftAnalyzer(mode=mode, interpolation_target="D", show_progress=True)
+            self.assertEqual(analyzer.pass_label, expected_pass)
+            bars, spinners = [], []
+
+            class RecordingBar:
+                def __init__(self, **bar_kwargs):
+                    self.kwargs = bar_kwargs
+                    bars.append(self)
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    return False
+                def update(self, n=1):
+                    pass
+
+            @contextlib.contextmanager
+            def recording_spinner(desc, disable=False, **spinner_kwargs):
+                spinners.append((desc, disable))
+                yield
+
+            with patch("pysole.drift_analyzer.get_progress_bar", RecordingBar), \
+                    patch("pysole.drift_analyzer.activity_indicator", recording_spinner):
+                analyzer.evaluate_spatial_cv(
+                    self.x, self.y, self.z, self.geom, self.grids, self.SUITE, "spherical", dict(VARIOGRAM),
+                    cv_mode="buffer", buffer_radius_m=60.0
+                )
+            self.assertIn(f"[Drift Analyzer] {expected_pass}: factorising kriging system", spinners[0][0])
+            self.assertIn(f"[Drift Analyzer] {expected_pass}: leave-block-out CV", bars[0].kwargs["desc"])
 
 
 class TestSolverUsesFittedVariogram(unittest.TestCase):

@@ -258,6 +258,16 @@ class DriftAnalyzer:
         self.max_memory_fraction = max_memory_fraction
         self.show_progress = show_progress
 
+    @property
+    def pass_label(self) -> str:
+        """Returns clean user-facing pass label ('Pass 1' or 'Pass 2') derived from mode."""
+        m = str(self.mode).lower().replace("-", "_").replace(" ", "_")
+        if "pre" in m or "pass_1" in m or "pass1" in m or m == "1":
+            return "Pass 1"
+        if "post" in m or "pass_2" in m or "pass2" in m or m == "2":
+            return "Pass 2"
+        return self.mode.replace("_", " ").title()
+
     def calculate_vif(self, X_drift: np.ndarray) -> tuple[float, list[float]]:
         """
         Calculates Variance Inflation Factor (VIF) for each column in a drift basis matrix.
@@ -462,7 +472,7 @@ class DriftAnalyzer:
             columns_list.append(x_drift if basis.n_columns else None)
             meta.append((name, drift_terms, basis.n_columns, vif_max, vif_max > self.vif_threshold, warning_msg))
 
-        label = self.mode.replace("_", " ").title()
+        label = self.pass_label
         with activity_indicator(
             f"   [Drift Analyzer] {label}: factorising kriging system (N = {n_points})",
             disable=not self.show_progress,
@@ -616,7 +626,7 @@ class DriftAnalyzer:
         """
         t_char = "T" if "travel" in str(self.target_name).lower() else "D"
         target_descr = f"Product P(x,y) = {t_char}*sin(alpha)" if self.interpolation_target == "P" else f"Direct Field {self.interpolation_target}(x,y)"
-        logger.info(f"   [Drift Analyzer] Initialized (Mode: {self.mode.title()}, Target: {self.target_name} [{target_descr}], Boundary Conditions: {self.include_zero_boundary}).")
+        logger.info(f"   [Drift Analyzer] Initialized (Mode: {self.pass_label}, Target: {self.target_name} [{target_descr}], Boundary Conditions: {self.include_zero_boundary}).")
         logger.info(f"   [Drift Analyzer] Extracting spatial covariates (Z_dem, C_kc, sin(alpha_opt)^-1, X, Y) at N = {len(z_values)} sample locations...")
 
         x_pts = np.asarray(x_pts, dtype=np.float64)
@@ -631,6 +641,7 @@ class DriftAnalyzer:
         buffer_radius_m = a_0 / 2.0
         profile_ids = None
         show_prompts = interactive and sys.stdin.isatty()
+        banner_shown = False
 
         if self.survey_profile_column and profile_data is not None:
             profile_ids = np.asarray(profile_data)
@@ -643,6 +654,8 @@ class DriftAnalyzer:
 
         if cv_mode == "buffer":
             if show_prompts:
+                log_section_header("INTERACTIVE DRIFT MODEL SELECTION")
+                banner_shown = True
                 buffer_radius_m = self._prompt_buffer_radius(a_0, buffer_radius_m)
             logger.info(f"   [Drift Analyzer] Fitted spatial range: a_0 = {a_0:.1f} meters. Spatial exclusion buffer radius set to r_buffer = {buffer_radius_m:.1f} meters.")
 
@@ -659,8 +672,9 @@ class DriftAnalyzer:
 
         # Interactive Terminal Ranking & Selection Table
         if show_prompts and eval_results:
-            log_section_header("INTERACTIVE DRIFT MODEL SELECTION")
-            print(format_ranking_table(eval_results, f"DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS ({self.mode.upper()})"))
+            if not banner_shown:
+                log_section_header("INTERACTIVE DRIFT MODEL SELECTION")
+            print(format_ranking_table(eval_results, f"DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS ({self.pass_label.upper()})"))
             print(f"   [Drift Analyzer] Recommended model: #1 '{eval_results[0].name}'")
             chosen = self._prompt_model_selection(eval_results)
             if chosen is not None:
