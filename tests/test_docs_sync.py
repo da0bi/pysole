@@ -137,7 +137,7 @@ class TestSuiteCountsAndRulesMatchCode(unittest.TestCase):
             "ONE multi-drift model",
             "24 candidates",
             "An empty list `[]` at the top level is rejected",
-            "only available through PyKrige",
+            "only available through `PyKrige`",
         ):
             self.assertIn(phrase, text)
 

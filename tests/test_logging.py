@@ -148,7 +148,7 @@ class TestTerminalUI(unittest.TestCase):
 
     def test_welcome_banner_content(self):
         banner = pysole_logging.get_welcome_banner(version="0.5.2", term_width=80)
-        self.assertIn("/ ___/____  / /__", banner)
+        self.assertIn("/ ___/ __   / /_", banner)
         self.assertIn("The soul of the sole", banner)
         self.assertIn("v0.5.2", banner)
         self.assertIn("Released under the MIT License.", banner)
