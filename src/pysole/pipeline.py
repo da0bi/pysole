@@ -166,7 +166,8 @@ def run_from_config(
 
     try:
         survey_data_path = inputs_cfg.get("survey_data_path")
-        if survey_data_path is None:
+        is_unprobed = (survey_data_path is None) or (isinstance(survey_data_path, str) and not survey_data_path.strip())
+        if is_unprobed:
             logger.info("=" * 80)
             logger.info(f"        STARTING PYSOLE UNPROBED GLACIER SURVEY PLANNER ({config_file.resolve()})")
             logger.info("=" * 80)
@@ -211,6 +212,9 @@ def run_from_config(
         interactive_mig = not is_batch and sys.stdin.isatty() and bool(mig_cfg.get("interactive_migration", True))
         interactive_opt = not is_batch and sys.stdin.isatty() and bool(opt_cfg.get("interactive_optimization", True))
         interactive_fin = not is_batch and sys.stdin.isatty() and bool(fin_cfg.get("interactive_finalization", True))
+
+        if solver.survey_points is None and solver.survey_data_path is not None:
+            solver.load_survey_points()
 
         if solver.perform_migration and solver._normalize_survey_data_type() != "depth":
             solver.optimize_bss(stage="pre_migration", interactive=interactive_opt)

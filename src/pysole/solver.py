@@ -1235,6 +1235,11 @@ class Solver:
         )
         solver.config = cfg
         solver.config_path = cfg_path_str
+        if solver.survey_data_path:
+            try:
+                solver.load_survey_points()
+            except Exception as e:
+                logger.debug(f"Deferred survey points loading: {e}")
         return solver
 
     def get_sample_points(
@@ -1291,7 +1296,14 @@ class Solver:
                 pts = self.survey_points
 
         if pts is None:
-            raise ValueError(f"No survey/migrated points available to create sample points for stage '{stage_key}'.")
+            if self.survey_points is None and self.survey_data_path and str(self.survey_data_path).strip():
+                self.load_survey_points()
+                pts = self.survey_points
+        if pts is None:
+            raise ValueError(
+                "Cannot run BSS variogram optimization or Kriging, because no survey data was configured. "
+                "Call solver.plan_survey() to model synthetic SIA thickness and design a survey track layout for an unprobed glacier."
+            )
 
         val_col = 3 if pts.shape[1] >= 4 else 2
         has_prof = (pts.shape[1] >= 5)
@@ -1573,6 +1585,69 @@ class Solver:
                 f"because {reason}; nothing will be exported for it."
             )
 
+    def load_survey_points(
+        self,
+        survey_data: str | Path | os.PathLike | np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Loads, validates, and normalizes survey soundings from file or array.
+
+        Parameters
+        ----------
+        survey_data : str, Path, os.PathLike, np.ndarray, or None, optional
+            Path to survey points file (CSV) or pre-loaded coordinate array.
+            If None, defaults to ``self.survey_data_path``.
+
+        Returns
+        -------
+        survey_points : np.ndarray
+            (N, 4+) coordinate array [X, Y, Z_dem, Traveltime_or_Depth, ...] in projected metric units.
+        """
+        if survey_data is None:
+            survey_data = self.survey_data_path
+        if survey_data is None:
+            raise ValueError("No survey_data_path or survey_data provided to load survey points.")
+
+        if isinstance(survey_data, np.ndarray):
+            pts = survey_data.copy()
+        else:
+            if not self.survey_data_path:
+                self.survey_data_path = str(survey_data)
+            pts = load_survey_points(
+                self.resolve_input_path(survey_data),
+                bounds=self.bounds,
+                dem_grid=self.dem_grid,
+                x_coords=self.x_coords,
+                y_coords=self.y_coords,
+                profile_column=self.survey_profile_column or self._cfg_get("inputs", "survey_profile_column"),
+            )
+
+        pts_minx, pts_miny = float(pts[:, 0].min()), float(pts[:, 1].min())
+        pts_maxx, pts_maxy = float(pts[:, 0].max()), float(pts[:, 1].max())
+        if (self.bounds[0] == 0.0 and self.bounds[1] == 0.0) and (pts_minx > 10000.0 or pts_miny > 10000.0):
+            err_msg = (
+                f"\n[Spatial Coordinate Origin Mismatch Error] Survey points use projected metric coordinates "
+                f"(X in [{pts_minx:.1f}, {pts_maxx:.1f}], Y in [{pts_miny:.1f}, {pts_maxy:.1f}]), "
+                f"but DEM bounding box defaults to origin (0.0, 0.0)!\n"
+                f"For headerless CSV/NPY DEMs, you must define 'spatial_parameters.origin': [xll, yll] or "
+                f"'spatial_parameters.bounds': [minx, miny, maxx, maxy] in pysole.json so the DEM aligns with survey points."
+            )
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        dtype_str = self._normalize_survey_data_type()
+
+        if dtype_str == "two_way_traveltime":
+            logger.info("   [Survey Data Type] two_way_traveltime detected. Converting to one_way_traveltime (one_way_traveltime = two_way_traveltime / 2.0)...")
+            pts[:, 3] = pts[:, 3] / 2.0
+        elif dtype_str == "one_way_traveltime":
+            logger.info("   [Survey Data Type] one_way_traveltime detected.")
+        elif dtype_str == "depth":
+            logger.info("   [Survey Data Type] depth detected. Skipping 3D Eikonal ray migration.")
+
+        self.survey_points = pts
+        self._sample_pts_cache.clear()
+        return pts
+
     def migrate_eikonal(
         self,
         travel_times: str | Path | os.PathLike | np.ndarray | None = None,
@@ -1610,49 +1685,24 @@ class Solver:
             (N, 4+) NumPy array of migrated sounding coordinates [X_mig, Y_mig, Z_mig, Depth_mig]
             in projected metric coordinates [m].
         """
-        if travel_times is None:
-            travel_times = self.survey_data_path
-        if travel_times is None:
-            raise ValueError("No survey_data_path or travel_times provided for Eikonal migration.")
-
-        if not self.survey_data_path and isinstance(travel_times, (str, Path, os.PathLike)):
-            self.survey_data_path = str(travel_times)
-
-        pts = load_survey_points(
-            self.resolve_input_path(travel_times),
-            bounds=self.bounds,
-            dem_grid=self.dem_grid,
-            x_coords=self.x_coords,
-            y_coords=self.y_coords,
-            profile_column=self.survey_profile_column or self._cfg_get("inputs", "survey_profile_column"),
-        )
-
-        pts_minx, pts_miny = float(pts[:, 0].min()), float(pts[:, 1].min())
-        pts_maxx, pts_maxy = float(pts[:, 0].max()), float(pts[:, 1].max())
-        if (self.bounds[0] == 0.0 and self.bounds[1] == 0.0) and (pts_minx > 10000.0 or pts_miny > 10000.0):
-            err_msg = (
-                f"\n[Spatial Coordinate Origin Mismatch Error] Survey points use projected metric coordinates "
-                f"(X in [{pts_minx:.1f}, {pts_maxx:.1f}], Y in [{pts_miny:.1f}, {pts_maxy:.1f}]), "
-                f"but DEM bounding box defaults to origin (0.0, 0.0)!\n"
-                f"For headerless CSV/NPY DEMs, you must define 'spatial_parameters.origin': [xll, yll] or "
-                f"'spatial_parameters.bounds': [minx, miny, maxx, maxy] in pysole.json so the DEM aligns with survey points."
-            )
-            logger.error(err_msg)
-            raise ValueError(err_msg)
+        if travel_times is not None:
+            if isinstance(travel_times, np.ndarray):
+                pts = self.load_survey_points(travel_times)
+            else:
+                resolved_tt = str(travel_times)
+                if self.survey_points is None or self.survey_data_path != resolved_tt:
+                    pts = self.load_survey_points(travel_times)
+                else:
+                    pts = self.survey_points
+        else:
+            if self.survey_points is None:
+                pts = self.load_survey_points()
+            else:
+                pts = self.survey_points
 
         dtype_str = self._normalize_survey_data_type()
 
-        if dtype_str == "two_way_traveltime":
-            logger.info("   [Survey Data Type] two_way_traveltime detected. Converting to one_way_traveltime (one_way_traveltime = two_way_traveltime / 2.0)...")
-            pts[:, 3] = pts[:, 3] / 2.0
-        elif dtype_str == "one_way_traveltime":
-            logger.info("   [Survey Data Type] one_way_traveltime detected.")
-
-        self.survey_points = pts
-        self._sample_pts_cache.clear()  # cached sample points refer to the previous survey/migrated arrays
-
         if dtype_str == "depth":
-            logger.info("   [Survey Data Type] depth detected. Skipping 3D Eikonal ray migration.")
             self.migrated_points = pts.copy()
             if self.outputs_config.get("save_migrated_points", False):
                 logger.info("   [3D Ray Migration] Migration is disabled. Skipping 'save_migrated_points' output.")
@@ -1819,13 +1869,22 @@ class Solver:
             stage_key = "pre_migration" if ("pre" in str(stage).lower() or "1" in str(stage)) else "post_migration"
 
         if stage_key == "pre_migration":
+            if self.survey_points is None and self.survey_data_path is not None:
+                self.load_survey_points()
             pts = self.survey_points if self.survey_points is not None else self.pre_kriging_points
         else:
-            pts = self.migrated_points if self.migrated_points is not None else self.survey_points
+            if self.migrated_points is not None:
+                pts = self.migrated_points
+            else:
+                if self.survey_points is None and self.survey_data_path is not None:
+                    self.load_survey_points()
+                pts = self.survey_points
 
         if pts is None:
-            xx, yy = np.meshgrid(self.x_coords[::5], self.y_coords[::5])
-            pts = np.column_stack((xx.ravel(), yy.ravel(), self.dem_grid[::5, ::5].ravel(), np.ones(xx.size) * 10.0))
+            raise ValueError(
+                "Cannot run BSS variogram optimization or Kriging, because no survey data was configured. "
+                "Call solver.plan_survey() to model synthetic SIA thickness and design a survey track layout for an unprobed glacier."
+            )
 
         opt_cfg = self.config.get("optimization_parameters", {}) if isinstance(self.config, dict) else {}
         if kc_max is None:
@@ -2521,6 +2580,7 @@ class Solver:
     def plan_survey(
         self,
         kc: float | None = None,
+        lambda_c: float | None = None,
         tau_0: float | None = None,
         max_length_km: float | None = None,
         output_prefix: str | None = None,
@@ -2540,7 +2600,9 @@ class Solver:
         Parameters
         ----------
         kc : float, optional
-            Spatial cutoff wavenumber k_c [rad/m] for filtering surface slopes (default: 0.0314 rad/m, lambda_c = 200 m).
+            Spatial cutoff wavenumber k_c [rad/m] for filtering surface slopes.
+        lambda_c : float, optional
+            Spatial cutoff wavelength lambda_c [m] for filtering surface slopes (default: 200.0 m).
         tau_0 : float, optional
             Assumed target basal shear stress threshold [Pa] (default: 100 kPa = 100,000 Pa).
         max_length_km : float, optional
@@ -2600,6 +2662,7 @@ class Solver:
         )
         return planner.plan_survey(
             kc=kc,
+            lambda_c=lambda_c,
             tau_0=tau_0,
             max_length_km=max_length_km,
             output_prefix=prefix,
@@ -2671,6 +2734,8 @@ class Solver:
         opt_interactive = False if is_batch else opt.get("interactive_optimization", False)
         mig_interactive = False if is_batch else migration.get("interactive_migration", False)
         fin_interactive = False if is_batch else fin_cfg.get("interactive_finalization", False)
+        if self.survey_points is None and (survey_data_path is not None or self.survey_data_path is not None):
+            self.load_survey_points(survey_data_path)
 
         if self.perform_migration and self._normalize_survey_data_type() != "depth":
             logger.info("2. Performing Pre-Migration BSS Slope Optimization & Traveltime Variogram Modeling...")

@@ -156,6 +156,102 @@ class TestUniversalBSSOptimization(unittest.TestCase):
             self.assertEqual(mock_opt.call_args.kwargs["prefix"], "03_")
             self.assertIsNotNone(solver.post_opt_res)
 
+    def test_optimize_bss_auto_loads_survey_points_from_path(self):
+        """optimize_bss auto-loads survey points from survey_data_path when survey_points is None."""
+        csv_file = self.output_dir / "test_survey.csv"
+        np.savetxt(
+            csv_file,
+            self.pts,
+            delimiter=",",
+            header="X,Y,Z,T",
+            comments="",
+        )
+
+        solver = Solver(
+            dem=self.dem,
+            bounds=self.geom.bounds,
+            survey_data_type="one_way_traveltime",
+            survey_data_path=str(csv_file),
+            pre_interpolation_target="T",
+            post_interpolation_target="D",
+            output_dir=str(self.output_dir / "out"),
+            plots_dir=str(self.output_dir / "plots"),
+        )
+        self.assertIsNone(solver.survey_points)
+
+        fake_res = OptimizationResult(
+            optimal_kc=0.02,
+            optimal_slope_grid=np.full((12, 12), 0.1),
+            all_kc_variances=np.array([[0.02, 5.0]]),
+            all_smoothed_slopes={0.02: np.full((12, 12), 0.1)},
+            optimal_dem_grid=self.dem,
+            all_smoothed_dems={0.02: self.dem},
+            opt_variogram_params={"range": 250.0, "sill": 10.0, "nugget": 0.0},
+            dx=10.0,
+            dy=10.0,
+        )
+
+        with patch.object(solver.bss_optimizer, "optimize", return_value=fake_res) as mock_opt:
+            kc = solver.optimize_bss(stage="pre_migration")
+            self.assertEqual(kc, 0.02)
+            self.assertIsNotNone(solver.survey_points)
+            self.assertEqual(len(solver.survey_points), len(self.pts))
+            # Verify optimize received the loaded survey points, not a synthetic DEM meshgrid
+            passed_pts = mock_opt.call_args.kwargs["survey_points"]
+            self.assertEqual(passed_pts.shape, (len(self.pts), 4))
+            np.testing.assert_allclose(passed_pts[:, :2], self.pts[:, :2])
+
+    def test_optimize_bss_raises_when_no_points_available(self):
+        """optimize_bss raises ValueError instead of generating a synthetic DEM meshgrid when no points exist."""
+        solver = Solver(
+            dem=self.dem,
+            bounds=self.geom.bounds,
+            survey_data_type="one_way_traveltime",
+            output_dir=str(self.output_dir / "out"),
+            plots_dir=str(self.output_dir / "plots"),
+        )
+        solver.survey_points = None
+        solver.migrated_points = None
+        solver.survey_data_path = None
+
+        with self.assertRaises(ValueError) as ctx:
+            solver.optimize_bss(stage="pre_migration")
+        self.assertIn("Cannot run BSS variogram optimization or Kriging, because no survey data was configured", str(ctx.exception))
+        self.assertIn("Call solver.plan_survey()", str(ctx.exception))
+
+    def test_pipeline_unprobed_empty_string_triggers_survey_planner(self):
+        """pipeline.run_from_config dispatches survey planner when survey_data_path is empty string or None."""
+        from pysole.pipeline import run_from_config
+        import json
+
+        dem_file = self.output_dir / "dem.npy"
+        np.save(dem_file, self.dem)
+
+        cfg = {
+            "inputs": {
+                "dem_path": str(dem_file),
+                "survey_data_path": "",  # Empty string should trigger survey planner
+            },
+            "spatial_parameters": {
+                "bounds": list(self.geom.bounds),
+                "dx": 10.0,
+                "dy": 10.0,
+            },
+            "outputs": {
+                "output_dir": str(self.output_dir / "unprobed_test"),
+                "output_prefix": "unprobed",
+            },
+        }
+        cfg_file = self.output_dir / "unprobed_cfg.json"
+        with open(cfg_file, "w") as f:
+            json.dump(cfg, f)
+
+        with patch("pysole.solver.Solver.plan_survey") as mock_plan:
+            mock_plan.return_value = {"sia_modelled_depth": np.zeros((12, 12))}
+            res = run_from_config(cfg_file, is_batch=True)
+            mock_plan.assert_called_once()
+            self.assertEqual(res.name, "SIA Modelled Ice Thickness")
+
 
 if __name__ == "__main__":
     unittest.main()

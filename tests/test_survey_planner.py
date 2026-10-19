@@ -109,7 +109,7 @@ class TestSurveyPlanner(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(tmp_dir, "figures", "unprobed_wuk_survey_plan_map.png")))
 
     def test_interactive_survey_planner_defaults(self):
-        """Interactive survey planner prompts for tau_0, kc, and max_km; empty input adopts defaults."""
+        """Interactive survey planner prompts for tau_0, lambda_c, and max_km; empty input adopts defaults."""
         from unittest.mock import patch
         import sys
 
@@ -118,13 +118,15 @@ class TestSurveyPlanner(unittest.TestCase):
             planner = SurveyPlanner(
                 dem=model.dem_grid, outline=model.outline_mask, dx=model.dx, dy=model.dy, bounds=model.bounds
             )
-            # Empty strings simulate pressing Enter for tau_0, kc, and max_km
+            # Empty strings simulate pressing Enter for tau_0, lambda_c, and max_km
             with patch("builtins.input", side_effect=["", "", ""]) as mock_input, \
                  patch.object(sys.stdin, "isatty", return_value=True):
                 res = planner.plan_survey(output_dir=tmp_dir, interactive=True)
                 self.assertEqual(mock_input.call_count, 3)
                 self.assertIn("tracks", res)
                 self.assertIn("sia_modelled_depth", res)
+                self.assertAlmostEqual(res["lambda_c"], 200.0)
+                self.assertAlmostEqual(res["kc"], (2.0 * np.pi) / 200.0)
 
     def test_interactive_survey_planner_custom_values(self):
         """Interactive survey planner applies custom user-entered values."""
@@ -133,12 +135,14 @@ class TestSurveyPlanner(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             planner = SurveyPlanner(dem=self.wuk_dem, outline=self.wuk_outline)
-            # User enters 120 kPa for tau, 0.05 for kc, and 8.0 for max_km
-            with patch("builtins.input", side_effect=["120", "0.05", "8.0"]) as mock_input, \
+            # User enters 120 kPa for tau, 250 m for lambda_c, and 8.0 for max_km
+            with patch("builtins.input", side_effect=["120", "250", "8.0"]) as mock_input, \
                  patch.object(sys.stdin, "isatty", return_value=True):
                 res = planner.plan_survey(output_dir=tmp_dir, interactive=True)
                 self.assertEqual(mock_input.call_count, 3)
                 self.assertIn("tracks", res)
+                self.assertAlmostEqual(res["lambda_c"], 250.0)
+                self.assertAlmostEqual(res["kc"], (2.0 * np.pi) / 250.0)
 
     def test_interactive_survey_planner_partial_inputs(self):
         """Interactive survey planner prompts only for parameters not passed programmatically."""
@@ -147,12 +151,14 @@ class TestSurveyPlanner(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             planner = SurveyPlanner(dem=self.wuk_dem, outline=self.wuk_outline)
-            # tau_0 is passed programmatically (80 kPa = 80,000 Pa), so input is only called for kc and max_km
-            with patch("builtins.input", side_effect=["0.04", "3.5"]) as mock_input, \
+            # tau_0 is passed programmatically (80 kPa = 80,000 Pa), so input is only called for lambda_c and max_km
+            with patch("builtins.input", side_effect=["150.0", "3.5"]) as mock_input, \
                  patch.object(sys.stdin, "isatty", return_value=True):
                 res = planner.plan_survey(tau_0=80e3, output_dir=tmp_dir, interactive=True)
                 self.assertEqual(mock_input.call_count, 2)
                 self.assertIn("tracks", res)
+                self.assertAlmostEqual(res["lambda_c"], 150.0)
+                self.assertAlmostEqual(res["kc"], (2.0 * np.pi) / 150.0)
 
     def test_interactive_survey_planner_retry_on_invalid_input(self):
         """Interactive survey planner warns and re-prompts on non-numeric or non-positive input."""
@@ -194,20 +200,20 @@ class TestSurveyPlanner(unittest.TestCase):
         from pysole.config import main_cli
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            # 1. User passes all parameters on CLI: no interactive prompt needed
+            # 1. User passes all parameters on CLI with --lambda-c: no interactive prompt needed
             with patch("builtins.input", side_effect=AssertionError("input() should not be called")):
                 with patch.object(
                     sys,
                     "argv",
                     ["pysole", "plan-survey", "--dem", self.wuk_dem, "--outline", self.wuk_outline,
-                     "--tau", "120", "--kc", "0.04", "--max-km", "4.0", "--out-dir", tmp_dir],
+                     "--tau", "120", "--lambda-c", "250", "--max-km", "4.0", "--out-dir", tmp_dir],
                 ):
                     with self.assertRaises(SystemExit) as ctx:
                         main_cli()
                     self.assertEqual(ctx.exception.code, 0)
 
             # 2. User omits parameters on CLI and runs in interactive terminal: prompts for omitted parameters
-            with patch("builtins.input", side_effect=["110", "0.035", "6.0"]) as mock_input, \
+            with patch("builtins.input", side_effect=["110", "180.0", "6.0"]) as mock_input, \
                  patch.object(sys.stdin, "isatty", return_value=True):
                 with patch.object(
                     sys,

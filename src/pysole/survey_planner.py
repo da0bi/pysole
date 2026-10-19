@@ -19,9 +19,10 @@ from .raster import BedrockMap, load_dem, load_outline
 from .smoothing import compute_gradients, fft_gaussian_smooth
 
 
-DEFAULT_SURVEY_TAU_KPA: float = 100.0  # 100 kPa = 100,000 Pa
-DEFAULT_SURVEY_KC: float = 0.0314      # rad/m (lambda_c ≈ 200 m)
-DEFAULT_SURVEY_MAX_KM: float = 5.0     # km
+DEFAULT_SURVEY_TAU_KPA: float = 100.0      # 100 kPa = 100,000 Pa
+DEFAULT_SURVEY_LAMBDA_C: float = 200.0     # m (cutoff wavelength)
+DEFAULT_SURVEY_KC: float = (2.0 * np.pi) / DEFAULT_SURVEY_LAMBDA_C  # rad/m ≈ 0.0314159
+DEFAULT_SURVEY_MAX_KM: float = 5.0         # km
 
 
 def _prompt_survey_parameter(
@@ -202,15 +203,17 @@ class SurveyPlanner:
 
     def compute_synthetic_sia_depth(
         self,
-        kc: float = 0.0314,
+        kc: float | None = None,
+        lambda_c: float | None = None,
         tau_0: float = 100e3,
         slope_floor_deg: float = 5.0,
     ) -> np.ndarray:
         """
         Computes synthetic Shallow Ice Approximation (SIA) ice thickness grid D_SIA(x,y).
 
-        Applies Gaussian spectral smoothing at wavenumber :math:`k_c` to the surface DEM
-        to isolate the regional driving slope, then applies the classical SIA equation:
+        Applies Gaussian spectral smoothing at cutoff wavelength :math:`\\lambda_c` (or
+        wavenumber :math:`k_c`) to the surface DEM to isolate the regional driving slope,
+        then applies the classical SIA equation:
         .. math::
             D_{\\text{SIA}} = \\frac{\\tau_0}{\\rho_{\\text{ice}} g \\sin\\alpha}
 
@@ -220,9 +223,11 @@ class SurveyPlanner:
 
         Parameters
         ----------
-        kc : float, default 0.0314
-            Corner frequency cutoff wavenumber [rad/m] for surface DEM smoothing
-            (:math:`\\approx 0.0314\\text{ rad/m}` corresponds to :math:`\\lambda_c \\approx 200\\text{ m}`).
+        kc : float, optional
+            Corner frequency cutoff wavenumber [rad/m] for surface DEM smoothing.
+            If None and lambda_c is None, defaults to DEFAULT_SURVEY_KC.
+        lambda_c : float, optional
+            Corner frequency cutoff wavelength [m]. If provided, converts to kc = 2*pi / lambda_c.
         tau_0 : float, default 100e3
             Characteristic basal shear stress target in Pascals [Pa] (100 kPa = 100,000 Pa).
         slope_floor_deg : float, default 5.0
@@ -233,8 +238,15 @@ class SurveyPlanner:
         d_sia : np.ndarray
             2D synthetic ice thickness raster grid [m] with shape identical to ``dem``.
         """
+        if lambda_c is not None:
+            eff_kc = (2.0 * np.pi) / float(lambda_c)
+        elif kc is not None:
+            eff_kc = float(kc)
+        else:
+            eff_kc = DEFAULT_SURVEY_KC
+
         # Smooth surface DEM
-        smoothed_dem, _, _ = fft_gaussian_smooth(self.dem, self.dx, self.dy, kc)
+        smoothed_dem, _, _ = fft_gaussian_smooth(self.dem, self.dx, self.dy, eff_kc)
         grads = compute_gradients(smoothed_dem, self.dx, self.dy)
         slope_rad = grads["slope_rad"]
         slope_floor_rad = np.radians(slope_floor_deg)
@@ -428,6 +440,7 @@ class SurveyPlanner:
     def plan_survey(
         self,
         kc: float | None = None,
+        lambda_c: float | None = None,
         tau_0: float | None = None,
         max_length_km: float | None = None,
         output_prefix: str = "",
@@ -446,8 +459,10 @@ class SurveyPlanner:
         Parameters
         ----------
         kc : float, optional
-            Corner frequency cutoff wavenumber [rad/m] for DEM surface smoothing. If None,
-            prompts interactively (default: 0.0314 rad/m, lambda_c ≈ 200 m).
+            Corner frequency cutoff wavenumber [rad/m] for DEM surface smoothing.
+        lambda_c : float, optional
+            Corner frequency cutoff wavelength [m] for DEM surface smoothing. If neither kc
+            nor lambda_c is specified, prompts interactively (default: 200.0 m).
         tau_0 : float, optional
             Characteristic basal shear stress target in Pascals [Pa]. If None, prompts
             interactively in kPa (default: 100 kPa = 100,000 Pa).
@@ -475,9 +490,11 @@ class SurveyPlanner:
             - ``'saved_geojson'``: Path of exported GeoJSON track lines.
             - ``'saved_gpx'``: Path of exported GPX track lines.
             - ``'saved_plot'``: Path of saved diagnostic survey plan map figure.
+            - ``'kc'``: Corner wavenumber [rad/m].
+            - ``'lambda_c'``: Cutoff wavelength [m].
         """
         is_interactive = bool(interactive and sys.stdin.isatty())
-        if is_interactive and (tau_0 is None or kc is None or max_length_km is None):
+        if is_interactive and (tau_0 is None or (kc is None and lambda_c is None) or max_length_km is None):
             log_section_header("INTERACTIVE UNPROBED GLACIER SURVEY PLANNER")
 
         if tau_0 is None:
@@ -487,10 +504,16 @@ class SurveyPlanner:
             else:
                 tau_0 = DEFAULT_SURVEY_TAU_KPA * 1000.0
 
-        if kc is None:
+        if lambda_c is not None:
+            kc = (2.0 * np.pi) / float(lambda_c)
+        elif kc is not None:
+            lambda_c = (2.0 * np.pi) / float(kc) if kc > 0 else float("inf")
+        else:
             if is_interactive:
-                kc = _prompt_survey_parameter("Corner frequency cutoff wavenumber k_c", DEFAULT_SURVEY_KC, "rad/m")
+                lambda_c = _prompt_survey_parameter("Corner frequency cutoff wavelength lambda_c", DEFAULT_SURVEY_LAMBDA_C, "m")
+                kc = (2.0 * np.pi) / lambda_c
             else:
+                lambda_c = DEFAULT_SURVEY_LAMBDA_C
                 kc = DEFAULT_SURVEY_KC
 
         if max_length_km is None:
@@ -513,7 +536,7 @@ class SurveyPlanner:
         logger.info("================================================================================")
         logger.info("       STARTING PYSOLE UNPROBED GLACIER SURVEY PLANNER")
         logger.info("================================================================================")
-        logger.info(f"1. Computing synthetic SIA ice thickness target (tau_0 = {tau_0/1e3:.1f} kPa, k_c = {kc})...")
+        logger.info(f"1. Computing synthetic SIA ice thickness target (tau_0 = {tau_0/1e3:.1f} kPa, lambda_c = {lambda_c:.1f} m, k_c = {kc:.4f} rad/m)...")
 
         d_sia = self.compute_synthetic_sia_depth(kc=kc, tau_0=tau_0)
 
@@ -574,4 +597,6 @@ class SurveyPlanner:
             "saved_geojson": saved_geojson,
             "saved_gpx": saved_gpx,
             "saved_plot": plot_path,
+            "kc": kc,
+            "lambda_c": lambda_c,
         }

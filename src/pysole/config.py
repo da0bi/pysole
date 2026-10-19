@@ -757,7 +757,8 @@ def main_cli() -> None:
     plan_parser = argparse.ArgumentParser(prog="pysole plan-survey", description="Run the unprobed glacier survey planner.")
     plan_parser.add_argument("--dem", required=True, help="Path to surface DEM raster.")
     plan_parser.add_argument("--outline", default=None, help="Path to glacier boundary outline.")
-    plan_parser.add_argument("--kc", type=float, default=None, help="FFT corner wavenumber cutoff k_c [rad/m] (default: 0.0314 rad/m, cutoff wavelength lambda_c ≈ 200m).")
+    plan_parser.add_argument("--lambda-c", "--wavelength", type=float, default=None, dest="lambda_c", help="Corner frequency cutoff wavelength lambda_c [m] (default: 200.0 m).")
+    plan_parser.add_argument("--kc", type=float, default=None, help="FFT corner wavenumber cutoff k_c [rad/m] (e.g. 0.0314 rad/m).")
     plan_parser.add_argument("--tau", type=float, default=None, help="Target basal shear stress tau_0 in kPa (default: 100.0 kPa).")
     plan_parser.add_argument("--max-km", type=float, default=None, help="Maximum total survey length budget in km (default: 5.0 km).")
     plan_parser.add_argument("--batch", action="store_true", help="Non-interactive batch mode (accept defaults for omitted parameters without prompting).")
@@ -791,6 +792,7 @@ def main_cli() -> None:
             tau_0_pa = plan_args.tau * 1000.0 if plan_args.tau is not None else None
             planner.plan_survey(
                 kc=plan_args.kc,
+                lambda_c=getattr(plan_args, "lambda_c", None),
                 tau_0=tau_0_pa,
                 max_length_km=plan_args.max_km,
                 output_prefix=plan_args.prefix,
