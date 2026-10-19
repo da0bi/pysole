@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **[Drift Analyzer Dynamic RMSE Units & AICc Overflow Sentinel Fix] (`src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `tests/test_drift_analyzer_engine.py`)**:
+  - **Dynamic Table Header Units (Option C)**: Added `resolve_rmse_unit(mode, interpolation_target, survey_data_type, velocity)` to dynamically determine the physical units for the candidate ranking table header `RMSE (<unit>)`:
+    - **Pass 1 / Pre-Migration**:
+      - For target `'T'`: Inferred time unit from radar/seismic velocity (`<= 1.0 m/ns` $\to$ `ns`, `>= 100 m/s` $\to$ `ms`, default `ns`) $\implies$ `RMSE (ns)` or `RMSE (ms)` (fallback `RMSE (traveltime units)`). If survey data is already depth/thickness $\implies$ `RMSE (m)`.
+      - For target `'P'`: `RMSE (<time_unit> x rad)` (or `RMSE (m x rad)` for depth survey data).
+    - **Pass 2 / Post-Migration**:
+      - For target `'D'`: `RMSE (m)`.
+      - For target `'P'`: `RMSE (m x rad)`.
+  - **Dynamic Table Column Formatting**: Updated `format_ranking_table()` with dynamic column width `max(10, len(rmse_hdr) + 2)` and adaptive table borders to ensure perfect column alignment for compound units like `RMSE (one_way_traveltime units x rad)`.
+  - **AICc Overflow Bug Fix**: Replaced hardcoded sentinel `FAILED_AICC = 99999.0` with `float("inf")`. In large datasets (such as Apo Glacier with $N=8939$ soundings), $N \ln(\text{MSE}) > 99,999$ in $\text{ns}^2$ caused valid candidate models (e.g. $\text{AICc} \approx 103,808$) to exceed the sentinel threshold, erroneously triggering failure penalties and marking all candidate models as `PENALIZED` with `n/a` deltas.
+  - **Solver Integration**: Updated `Solver._run_drift_analysis()` to pass `survey_data_type` and `velocity` into `DriftAnalyzer`, and updated fallback validation checks to handle infinite AICc values.
+
 - **[Survey Planner Cutoff Wavelength $\lambda_c$ Interactive Prompt & Conversion] (`src/pysole/survey_planner.py`, `src/pysole/solver.py`, `src/pysole/config.py`, `tests/test_survey_planner.py`)**:
   - **Intuitive Interactive Parameter**: Replaced the angular wavenumber prompt with physical spatial cutoff wavelength:
     `[SurveyPlanner] Corner frequency cutoff wavelength lambda_c [m] [default: 200.0]: `

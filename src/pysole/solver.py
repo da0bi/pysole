@@ -1384,6 +1384,8 @@ class Solver:
         results : list of CandidateDriftResult
             Ranked candidates, best first.
         """
+        mig_cfg = self.config.get("migration_parameters", {}) if hasattr(self, "config") and isinstance(self.config, dict) else {}
+        velocity = float(mig_cfg.get("velocity", 0.16)) if mig_cfg.get("velocity") is not None else 0.16
         analyzer = DriftAnalyzer(
             mode=stage_key,
             target_name="traveltime" if stage_key == "pre_migration" else "depth",
@@ -1392,6 +1394,8 @@ class Solver:
             survey_profile_column=self.survey_profile_column or self.config.get("inputs", {}).get("survey_profile_column"),
             max_memory_fraction=self.max_memory_fraction,
             show_progress=self.show_progress,
+            survey_data_type=self.survey_data_type,
+            velocity=velocity,
         )
         use_var_params = variogram_params if variogram_params is not None else self.opt_variogram_params
         return analyzer.run_diagnostics(
@@ -1519,7 +1523,7 @@ class Solver:
                 variogram_params=effective_var_params,
             )
             # The winner decides the final method: Ordinary (no drift term) or Universal with its terms
-            if not diag or diag[0].aicc >= FAILED_AICC:
+            if not diag or not np.isfinite(diag[0].aicc) or diag[0].aicc >= FAILED_AICC:
                 logger.warning(
                     f"   [Dual Kriging Engine] [{pass_name}] The Drift Analyzer could not cross-validate any candidate; "
                     "falling back to Ordinary Kriging."

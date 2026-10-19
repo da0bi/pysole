@@ -24,7 +24,7 @@ from .variogram import resolve_native_variogram_model
 FAILED_RMSE = 9999.0
 """Placeholder RMSE of a candidate whose cross-validation failed numerically."""
 
-FAILED_AICC = 99999.0
+FAILED_AICC = float("inf")
 """Placeholder AICc of a candidate whose cross-validation failed numerically (it is ranked last)."""
 
 SIA_PRODUCT_WARNING = "SIA slope drift on Product P target causes 1/sin^2(alpha) double-scaling margin artifacts."
@@ -110,24 +110,82 @@ def add_ranking_deltas(results: list[CandidateDriftResult]) -> None:
     """
     if not results:
         return
-    usable = [r for r in results if r.aicc < FAILED_AICC]
+    usable = [r for r in results if np.isfinite(r.aicc) and r.aicc < FAILED_AICC]
     pool = [r for r in usable if not r.is_penalized] or usable
     best_aicc = min((r.aicc for r in pool), default=float("nan"))
-    best_rmse = results[0].cv_rmse if results[0].aicc < FAILED_AICC else float("nan")
+    best_rmse = results[0].cv_rmse if np.isfinite(results[0].aicc) and results[0].aicc < FAILED_AICC else float("nan")
     for r in results:
-        if r.aicc >= FAILED_AICC:
+        if not np.isfinite(r.aicc) or r.aicc >= FAILED_AICC:
             r.delta_aicc = r.delta_rmse_pct = float("nan")
             continue
         r.delta_aicc = float(r.aicc - best_aicc)
         r.delta_rmse_pct = float(100.0 * (r.cv_rmse / best_rmse - 1.0)) if best_rmse and best_rmse > 0 else 0.0
 
 
-def format_ranking_table(results: list[CandidateDriftResult], title: str) -> str:
+def resolve_rmse_unit(
+    mode: str = "pass_1",
+    interpolation_target: str = "P",
+    survey_data_type: str | None = None,
+    velocity: float | None = None,
+) -> str:
+    """
+    Resolves the user-facing RMSE unit string for Drift Analyzer reporting.
+
+    Parameters
+    ----------
+    mode : str
+        Stage name (e.g. 'pass_1', 'pre_migration', 'pass_2', 'post_migration').
+    interpolation_target : str
+        Target variable ('P', 'T', or 'D').
+    survey_data_type : str, optional
+        Canonical survey data type ('one_way_traveltime', 'two_way_traveltime', 'depth').
+    velocity : float, optional
+        Effective propagation velocity (e.g. 0.160 m/ns for GPR radar, > 100 m/s for seismics).
+
+    Returns
+    -------
+    unit_str : str
+        Descriptive physical unit string (e.g. 'm', 'm x rad', 'ns', 'ns x rad', 'ms', etc.).
+    """
+    target = str(interpolation_target or "P").upper().strip()
+    dtype = str(survey_data_type or "one_way_traveltime").lower().strip()
+    m = str(mode).lower().replace("-", "_").replace(" ", "_")
+    is_pre = "pre" in m or "pass_1" in m or "pass1" in m or m == "1"
+
+    # If post-migration, or if pre-migration input is already direct depth
+    if not is_pre or dtype == "depth":
+        return "m x rad" if target == "P" else "m"
+
+    # Pre-migration with traveltime data:
+    # Option C: infer time unit from velocity if available
+    if velocity is not None and velocity > 0:
+        if velocity <= 1.0:  # GPR radar: velocity in m/ns (typically 0.15 - 0.18 m/ns)
+            time_unit = "ns"
+        elif velocity >= 100.0:  # Reflection seismics: velocity in m/s (typically 3000 - 4000 m/s)
+            time_unit = "ms" if velocity < 10000.0 else "s"
+        elif 1.0 < velocity < 100.0:  # e.g. velocity in m/ms (typically 3.0 - 4.0 m/ms)
+            time_unit = "ms"
+        else:
+            time_unit = "traveltime units"
+    else:
+        # Default radar traveltime in glaciology is nanoseconds (ns)
+        time_unit = "ns"
+
+    return f"{time_unit} x rad" if target == "P" else time_unit
+
+
+def format_ranking_table(
+    results: list[CandidateDriftResult],
+    title: str,
+    rmse_unit: str = "m",
+) -> str:
     """Formats the ranked candidate list (RMSE, dRMSE %, AICc, dAICc, VIF, status) as console text."""
-    width = 112
+    rmse_hdr = f"RMSE ({rmse_unit})"
+    rmse_col_w = max(10, len(rmse_hdr) + 2)
+    width = max(112, 102 + rmse_col_w)
     lines = ["", "=" * width, f"       {title}", "=" * width]
     lines.append(
-        f"{'#':<3} {'Drift Model':<44} {'RMSE (m)':<10} {'dRMSE %':<9} {'AICc':<10} {'dAICc':<9} {'VIF':<8} {'Status'}"
+        f"{'#':<3} {'Drift Model':<44} {rmse_hdr:<{rmse_col_w}} {'dRMSE %':<9} {'AICc':<10} {'dAICc':<9} {'VIF':<8} {'Status'}"
     )
     lines.append("-" * width)
 
@@ -136,9 +194,11 @@ def format_ranking_table(results: list[CandidateDriftResult], title: str) -> str
 
     for idx, res in enumerate(results, 1):
         status = "PENALIZED" if res.is_penalized else ("WARNING" if res.warning_msg else "VALID")
+        rmse_val_str = _fmt(res.cv_rmse, f"<{rmse_col_w - 2}.2f") if np.isfinite(res.cv_rmse) and res.cv_rmse < FAILED_RMSE else "n/a"
+        aicc_val_str = _fmt(res.aicc, "<10.1f") if np.isfinite(res.aicc) and res.aicc < FAILED_AICC else "n/a"
         lines.append(
-            f"{idx:<3} {res.name:<44} {_fmt(res.cv_rmse, '<10.2f') if res.cv_rmse < FAILED_RMSE else 'n/a':<10} "
-            f"{_fmt(res.delta_rmse_pct, '<9.2f'):<9} {_fmt(res.aicc, '<10.1f') if res.aicc < FAILED_AICC else 'n/a':<10} "
+            f"{idx:<3} {res.name:<44} {rmse_val_str:<{rmse_col_w}} "
+            f"{_fmt(res.delta_rmse_pct, '<9.2f'):<9} {aicc_val_str:<10} "
             f"{_fmt(res.delta_aicc, '<9.1f'):<9} {res.vif_max:<8.1f} {status}"
         )
     lines.append("-" * width)
@@ -247,6 +307,8 @@ class DriftAnalyzer:
         slope_floor_deg: float = 5.0,
         max_memory_fraction: float = 0.5,
         show_progress: bool = True,
+        survey_data_type: str = "one_way_traveltime",
+        velocity: float | None = None,
     ):
         self.mode = mode
         self.target_name = target_name
@@ -257,6 +319,18 @@ class DriftAnalyzer:
         self.slope_floor_deg = slope_floor_deg
         self.max_memory_fraction = max_memory_fraction
         self.show_progress = show_progress
+        self.survey_data_type = survey_data_type
+        self.velocity = velocity
+
+    @property
+    def rmse_unit(self) -> str:
+        """Returns the physical unit string for RMSE reporting."""
+        return resolve_rmse_unit(
+            mode=self.mode,
+            interpolation_target=self.interpolation_target,
+            survey_data_type=self.survey_data_type,
+            velocity=self.velocity,
+        )
 
     @property
     def pass_label(self) -> str:
@@ -529,7 +603,7 @@ class DriftAnalyzer:
             results.append(CandidateDriftResult(
                 name=name, terms=drift_terms, n_terms=n_drift, vif_max=vif_max,
                 is_multicollinear=is_multicollinear, cv_rmse=rmse, cv_mae=mae, cv_r2=r2, aicc=aicc,
-                is_penalized=is_multicollinear or aicc >= FAILED_AICC, warning_msg=warning_msg,
+                is_penalized=is_multicollinear or (not np.isfinite(aicc)) or aicc >= FAILED_AICC, warning_msg=warning_msg,
             ))
 
         results.sort(key=lambda r: (r.is_penalized, r.aicc, r.cv_rmse))
@@ -668,13 +742,13 @@ class DriftAnalyzer:
 
         top_model = eval_results[0] if eval_results else None
         if top_model:
-            logger.info(f"   [Drift Analyzer] Ranking complete. Top model: '{top_model.name}' (RMSE = {top_model.cv_rmse:.2f}m, AICc = {top_model.aicc:.1f}).")
+            logger.info(f"   [Drift Analyzer] Ranking complete. Top model: '{top_model.name}' (RMSE = {top_model.cv_rmse:.2f} {self.rmse_unit}, AICc = {top_model.aicc:.1f}).")
 
         # Interactive Terminal Ranking & Selection Table
         if show_prompts and eval_results:
             if not banner_shown:
                 log_section_header("INTERACTIVE DRIFT MODEL SELECTION")
-            print(format_ranking_table(eval_results, f"DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS ({self.pass_label.upper()})"))
+            print(format_ranking_table(eval_results, f"DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS ({self.pass_label.upper()})", rmse_unit=self.rmse_unit))
             print(f"   [Drift Analyzer] Recommended model: #1 '{eval_results[0].name}'")
             chosen = self._prompt_model_selection(eval_results)
             if chosen is not None:

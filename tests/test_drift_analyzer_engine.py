@@ -24,6 +24,7 @@ from pysole.drift_analyzer import (
     farthest_point_indices,
     format_ranking_table,
     parse_model_selection,
+    resolve_rmse_unit,
 )
 from pysole.interpolation import DriftBasis
 from pysole.kriging_core import KrigingSystem
@@ -187,6 +188,40 @@ class TestRankingDeltas(unittest.TestCase):
         self.assertIn("PENALIZED", rows["bad"])
         self.assertIn("n/a", rows["bad"])
         self.assertIn("WARNING: margin artifact", table)
+
+    def test_table_custom_units_and_large_aicc(self):
+        """Large AICc (> 100,000) does not get falsely marked as penalized or n/a."""
+        results = [
+            make_result("sia", ["sia"], 336.62, 103808.0),
+            make_result("ordinary", [], 404.23, 107000.0),
+            make_result("bad", ["quadratic_xy"], 9999.0, FAILED_AICC, penalized=True),
+        ]
+        add_ranking_deltas(results)
+        table = format_ranking_table(results, "TITLE", rmse_unit="ns")
+        self.assertIn("RMSE (ns)", table)
+        rows = {line.split()[1]: line for line in table.splitlines() if line[:1].isdigit()}
+        self.assertIn("VALID", rows["sia"])
+        self.assertIn("103808.0", rows["sia"])
+        self.assertIn("336.62", rows["sia"])
+        self.assertIn("0.00", rows["sia"])  # dRMSE %
+        self.assertIn("PENALIZED", rows["bad"])
+
+    def test_resolve_rmse_unit(self):
+        # Pass 1 with traveltime (radar velocity)
+        self.assertEqual(resolve_rmse_unit(mode="pass_1", interpolation_target="T", survey_data_type="one_way_traveltime", velocity=0.16), "ns")
+        self.assertEqual(resolve_rmse_unit(mode="pass_1", interpolation_target="P", survey_data_type="one_way_traveltime", velocity=0.16), "ns x rad")
+        # Pass 1 with seismic velocity
+        self.assertEqual(resolve_rmse_unit(mode="pass_1", interpolation_target="T", survey_data_type="one_way_traveltime", velocity=3800.0), "ms")
+        self.assertEqual(resolve_rmse_unit(mode="pass_1", interpolation_target="P", survey_data_type="one_way_traveltime", velocity=3800.0), "ms x rad")
+        # Pass 1 with unknown velocity fallback
+        self.assertEqual(resolve_rmse_unit(mode="pass_1", interpolation_target="T", survey_data_type="one_way_traveltime", velocity=None), "ns")
+        # Pass 1 with depth survey data
+        self.assertEqual(resolve_rmse_unit(mode="pass_1", interpolation_target="T", survey_data_type="depth"), "m")
+        self.assertEqual(resolve_rmse_unit(mode="pass_1", interpolation_target="P", survey_data_type="depth"), "m x rad")
+        # Pass 2 with depth and product targets
+        self.assertEqual(resolve_rmse_unit(mode="pass_2", interpolation_target="D"), "m")
+        self.assertEqual(resolve_rmse_unit(mode="pass_2", interpolation_target="P"), "m x rad")
+
 
 
 class TestParseModelSelection(unittest.TestCase):
