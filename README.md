@@ -748,11 +748,11 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
 
 * **Survey Planner (no survey data required):**
   ```bash
-  # Interactive mode: prompts for omitted parameters (tau_0, k_c, max-km)
+  # Interactive mode: prompts for omitted parameters (tau_0, lambda_c, max-km)
   pysole plan-survey --dem dem.tif --outline outline.geojson
 
   # Non-interactive mode: fully defined flags (or pass --batch)
-  pysole plan-survey --dem dem.tif --outline outline.geojson --kc 0.0314 --tau 100 --max-km 5 --out-dir results --format tif
+  pysole plan-survey --dem dem.tif --outline outline.geojson --lambda-c 200 --tau 100 --max-km 5 --out-dir results --format tif
   ```
   *Computes a synthetic SIA thickness model and proposes optimal GPR/seismic survey tracks within a length budget. If parameters are omitted, PySole interactively prompts with defaults in the terminal (or applies defaults in batch mode).*
 

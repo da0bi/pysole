@@ -449,7 +449,7 @@ When optional parameters are omitted, `SurveyPlanner` enforces the following def
 
 | Parameter | Identifier / Argument | Default Value | Physical / Technical Description |
 | :--- | :--- | :--- | :--- |
-| **FFT DEM Cutoff Wavelength** | `kc` / `--kc` | **`0.0314`** rad/m | Corner wavenumber frequency cutoff ($k_c = 0.0314\text{ rad/m}$, corresponding to cutoff wavelength $\lambda_c = 2\pi / k_c \approx 200\text{ m}$) applied during frequency-domain Gaussian DEM surface smoothing. |
+| **FFT DEM Cutoff Wavelength** | `lambda_c` / `--lambda-c` (alias `--wavelength`) or `kc` / `--kc` | **`200.0`** m ($k_c \approx 0.0314\text{ rad/m}$) | Physical spatial corner cutoff wavelength ($\lambda_c = 200.0\text{ m}$, corresponding to angular corner wavenumber frequency $k_c = 2\pi / \lambda_c \approx 0.0314\text{ rad/m}$) applied during 2D Fourier frequency-domain Gaussian DEM surface smoothing. |
 | **Nominal Basal Shear Stress** | `tau_0` / `tau_p` / `--tau` | **`100`** kPa ($100,000\text{ Pa}$) | Target nominal basal shear stress ($\tau_0 = 100\text{ kPa}$) used in Shallow Ice Approximation (SIA) ice thickness depth modeling $D_{\text{SIA}}(x,y) = \frac{\tau_0}{\rho g \sin \alpha}$. |
 | **Total Survey Track Budget** | `max_length_km` / `max_km` / `--max-km` | **`5.0`** km ($5,000\text{ m}$) | Maximum total survey length budget ($L_{\text{max}} = 5.0\text{ km}$) allocated across longitudinal flowlines and transverse cross-profiles. |
 | **Minimum Surface Slope Floor** | `slope_floor_deg` | `5.0`° | Minimum surface slope angle threshold ($\alpha_{\text{floor}} = 5^\circ$) to prevent numerical division singularities in low-gradient accumulation basins. |
@@ -587,11 +587,11 @@ pysole pysole.json --drift-analyzer --profile-col line_id
 # Force non-interactive batch mode
 pysole pysole.json --batch
 
-# Interactive Survey Planning (prompts for omitted parameters: tau_0, k_c, max-km)
+# Interactive Survey Planning (prompts for omitted parameters: tau_0, lambda_c, max-km)
 pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp
 
 # Fully specified non-interactive execution (or using --batch)
-pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 0.0314 --tau 100 --max-km 5.0 --out-dir results --format tif
+pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --lambda-c 200 --tau 100 --max-km 5.0 --out-dir results --format tif
 ```
 
 #### `pysole plan-survey` CLI Options & Path Resolution
@@ -599,12 +599,13 @@ pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --kc 0.03
 Computes the shallow-ice-approximation (SIA) thickness model and proposes survey tracks within a length budget.
 
 - **Interactive Parameter Configuration**:
-  When running via the Python API (`SurveyPlanner.plan_survey()`, `Solver.plan_survey()`, or automated dispatch when `inputs.survey_data_path` is `null`/omitted) or the CLI (`pysole plan-survey`), PySole interactively prompts for any omitted parameters (`tau_0`, `k_c`, `max_length_km`) via terminal `input()`. Each prompt displays the default value in brackets (e.g. `[default: 100.0]`). Pressing <kbd>Enter</kbd> (empty response) automatically adopts the default value. Non-numeric or negative entries trigger a helpful warning and re-prompt. In non-TTY environments (CI, background scripts, pipes) or when `--batch` / `interactive=False` is passed, prompts are bypassed and defaults are used automatically.
+  When running via the Python API (`SurveyPlanner.plan_survey()`, `Solver.plan_survey()`, or automated dispatch when `inputs.survey_data_path` is `null`/omitted) or the CLI (`pysole plan-survey`), PySole interactively prompts for any omitted parameters (`tau_0`, `lambda_c`, `max_length_km`) via terminal `input()`. Each prompt displays the default value in brackets (e.g. `[default: 200.0]`). Pressing <kbd>Enter</kbd> (empty response) automatically adopts the default value. Non-numeric or negative entries trigger a helpful warning and re-prompt. In non-TTY environments (CI, background scripts, pipes) or when `--batch` / `interactive=False` is passed, prompts are bypassed and defaults are used automatically.
 
 - **Options:**
   - `--dem`: File path to surface DEM raster (required).
   - `--outline`: File path to creeping body / glacier boundary polygon (optional).
-  - `--kc`: FFT corner wavenumber in rad/m (default `0.0314`).
+  - `--lambda-c`, `--wavelength`: Corner frequency cutoff wavelength $\lambda_c$ in meters (default `200.0` m).
+  - `--kc`: FFT corner wavenumber $k_c$ in rad/m (default `0.0314` rad/m, retained for backwards compatibility).
   - `--tau`: Target basal shear stress $\tau_0$ in kPa (default `100`).
   - `--max-km`: Survey length budget in km (default `5.0`).
   - `--batch`: Force non-interactive batch mode (accept defaults for omitted parameters without terminal prompts).
