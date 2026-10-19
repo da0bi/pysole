@@ -600,6 +600,7 @@ The Kriging parameters `method` and `drift_analyzer` decide what the `drift_term
 **Candidate suite vs. single-model rules:**
 - **In an analyzer suite (`drift_analyzer: true`)**: Candidates never combine `linear_xy` and `quadratic_xy` *within the same candidate* (to prevent collinearity), but all models featuring `linear_xy` alone (8 candidates) and `quadratic_xy` alone (8 candidates) are fully and independently evaluated. A suite of exactly one candidate (e.g. `["sia"]`) overrides the analyzer and that model is applied.
 - **In a single model (`drift_analyzer: false`)**: If `drift_terms: ["linear_xy", "quadratic_xy"]` is passed, `"linear_xy"` is dropped with a warning, falling back to `["quadratic_xy"]`.
+- An empty list `[]` at the top level is rejected (use `null` instead).
 - For the `interpolation_target: "P"`, the `drift_analyzer` also ranks every candidate containing the `sia` drift model but logs a warning due to the `1/sin²(α)` double scaling.
 
 **Note on the Speed of `engine: "pykrige"` with `method: "universal"`:**<br>

@@ -40,8 +40,8 @@
         "max_memory_fraction": 0.5,
         "pre_migration": {
             "interpolation_target": "P",
-            "method": "ordinary",
-            "drift_analyzer": false,
+            "method": "universal",
+            "drift_analyzer": true,
             "drift_terms": null,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true,
@@ -49,8 +49,8 @@
         },
         "post_migration": {
             "interpolation_target": "P",
-            "method": "ordinary",
-            "drift_analyzer": false,
+            "method": "universal",
+            "drift_analyzer": true,
             "drift_terms": null,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true,
