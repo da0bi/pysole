@@ -1490,7 +1490,11 @@ class Solver:
         )
         use_var_params = variogram_params if variogram_params is not None else self.opt_variogram_params
         krig_cfg = self.config.get("kriging_parameters", {}).get(stage_key, {}) if hasattr(self, "config") and isinstance(self.config, dict) else {}
-        is_predefined = bool(krig_cfg.get("drift_terms"))
+        stage_norm = "pre_migration" if ("pre" in stage_key.lower() or "1" in stage_key) else "post_migration"
+        terms = self.pre_drift_terms if stage_norm == "pre_migration" else self.post_drift_terms
+        is_predefined = bool(krig_cfg.get("drift_terms")) or (
+            isinstance(terms, (list, tuple)) and any(isinstance(elem, (list, tuple)) for elem in terms)
+        )
         eval_results = analyzer.run_diagnostics(
             x_pts=sample_pts[:, 0],
             y_pts=sample_pts[:, 1],
@@ -1609,8 +1613,13 @@ class Solver:
         logger.info(f"   [Dual Kriging Engine] [{pass_name}] Performing {krig_method.capitalize()} Kriging Interpolation for {target_desc}...")
 
         if plan.analyze:
-            is_batch = self.is_batch_mode or not sys.stdin.isatty()
-            if is_batch:
+            is_interactive = plan.interactive and not self.is_batch_mode and sys.stdin.isatty()
+            if not plan.interactive:
+                logger.info(
+                    f"   [Drift Analyzer] [{pass_name}] Non-interactive multi-model suite run (drift_analyzer: false). "
+                    "Using default spatial exclusion buffer radius."
+                )
+            elif not is_interactive:
                 logger.info("   [INFO] Non-interactive environment detected (TTY disabled or --batch flag set). Automatically overriding interactive options to False.")
 
             diag = self._run_drift_analysis(
@@ -1620,7 +1629,7 @@ class Solver:
                 zero_boundary=zero_boundary,
                 var_model=var_model,
                 suite=plan.suite,
-                interactive=not is_batch,
+                interactive=is_interactive,
                 variogram_params=effective_var_params,
             )
             # The winner decides the final method: Ordinary (no drift term) or Universal with its terms

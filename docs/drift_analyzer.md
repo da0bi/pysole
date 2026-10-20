@@ -69,7 +69,7 @@ The configuration interaction between Kriging `method`, `drift_analyzer`, and `d
 | `"ordinary"` | `false` or `true` | any or omitted | Ordinary Kriging (drift terms ignored) | `false` |
 | `"universal"` | `false` | flat list, e.g. `["sia", "z_dem"]` | Single multi-drift model applied directly | `false` |
 | `"universal"` | `false` | single non-flat, e.g. `[["sia", "z_dem"]]` | Unwrapped to single model `["sia", "z_dem"]` | `false` |
-| `"universal"` | `false` | multi-model suite, e.g. `[["sia", "z_dem"], ["sia"]]` | Raises `ConfigError` (must set `drift_analyzer: true`) | `false` |
+| `"universal"` | `false` | multi-model suite, e.g. `[["sia", "z_dem"], ["sia"]]` | Non-interactive multi-model run with default CV exclusion buffer radius | `false` |
 | `"universal"` | `true` | flat single primitive, e.g. `["sia"]` | Single model applied directly; analyzer auto-disabled | `false` (auto-disabled) |
 | `"universal"` | `true` | flat list $\ge 2$ terms, e.g. `["sia", "z_dem"]` | Combinatorial candidate suite evaluated and ranked | `true` |
 | `"universal"` | `true` | flat list with `[]`, e.g. `[[], "sia", "z_dem"]` | Combinatorial candidate suite + Ordinary evaluated | `true` |

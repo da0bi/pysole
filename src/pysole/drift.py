@@ -314,6 +314,7 @@ class DriftPlan:
     suite: list[list[str]] = field(default_factory=list)
     terms: list[str] = field(default_factory=list)
     notices: list[tuple[str, str]] = field(default_factory=list)
+    interactive: bool = True
 
     def describe(self) -> str:
         """Short human-readable description for log headers."""
@@ -322,7 +323,8 @@ class DriftPlan:
         if self.method == "regression":
             return f"Regression Kriging (covariates: {format_drift_name(self.terms)})"
         if self.analyze:
-            return f"Universal Kriging (drift analyzer on {len(self.suite)} candidate models)"
+            mode_desc = "non-interactive multi-model suite" if not self.interactive else "drift analyzer"
+            return f"Universal Kriging ({mode_desc} on {len(self.suite)} candidate models)"
         return f"Universal Kriging (drift: {format_drift_name(self.terms)})"
 
 
@@ -386,10 +388,28 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
             if len(drift_terms) == 1 and isinstance(drift_terms[0], (list, tuple)):
                 effective_terms = list(drift_terms[0])
             else:
-                raise ConfigError(
-                    f"drift_terms specifies a candidate suite of multiple models ({len(drift_terms)} candidates), "
-                    "but drift_analyzer is false. Set drift_analyzer: true to evaluate a candidate suite, "
-                    "or specify a flat list of drift terms for a single model."
+                suite = build_drift_suite(drift_terms)
+                if len(suite) == 1:
+                    only = suite[0]
+                    return DriftPlan(
+                        method="universal" if only else "ordinary",
+                        terms=list(only),
+                        notices=[(
+                            "info",
+                            f"Multi-model candidate suite contains only 1 unique model "
+                            f"('{format_drift_name(only)}'): applied directly.",
+                        )] + (slow_universal if only else []),
+                    )
+                return DriftPlan(
+                    method="universal",
+                    analyze=True,
+                    suite=suite,
+                    interactive=False,
+                    notices=[(
+                        "info",
+                        f"Multi-model candidate suite configured with drift_analyzer: false ({len(suite)} models). "
+                        "Executing non-interactive multi-model run using default exclusion buffer radius.",
+                    )] + list(slow_universal),
                 )
         else:
             effective_terms = drift_terms

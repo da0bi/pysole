@@ -691,11 +691,19 @@ class TestSingleModelAutoDisableAndNonFlatSuites(unittest.TestCase):
         self.out = os.path.join(self._tmp.name, "out")
         os.makedirs(self.out, exist_ok=True)
 
-    def test_non_flat_suite_with_analyzer_false_raises_config_error(self):
-        with self.assertRaises(ConfigError) as ctx:
-            resolve_drift_plan("universal", False, [["sia", "z_dem"], ["sia"], []])
-        self.assertIn("specifies a candidate suite of multiple models", str(ctx.exception))
-        self.assertIn("Set drift_analyzer: true", str(ctx.exception))
+    def test_non_flat_suite_with_analyzer_false_resolves_non_interactive_plan(self):
+        plan = resolve_drift_plan("universal", False, [["sia", "z_dem"], ["sia"], []])
+        self.assertEqual(plan.method, "universal")
+        self.assertTrue(plan.analyze)
+        self.assertFalse(plan.interactive)
+        self.assertEqual(plan.suite, [["sia", "z_dem"], ["sia"], []])
+        self.assertTrue(any("drift_analyzer: false" in msg for _, msg in plan.notices))
+
+    def test_duplicate_non_flat_suite_with_analyzer_false_unwraps(self):
+        plan = resolve_drift_plan("universal", False, [["sia"], ["sia"]])
+        self.assertEqual(plan.method, "universal")
+        self.assertFalse(plan.analyze)
+        self.assertEqual(plan.terms, ["sia"])
 
     def test_single_non_flat_candidate_with_analyzer_false_unwraps(self):
         plan = resolve_drift_plan("universal", False, [["sia", "z_dem"]])

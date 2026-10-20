@@ -904,6 +904,52 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
         # Verify NO thickness raster in root results
         self.assertFalse(os.path.exists(os.path.join(self.output_dir, "thickness.tif")))
 
+    def test_multi_model_suite_with_drift_analyzer_false_executes_non_interactively(self):
+        # Create solver with drift_analyzer explicitly set to False, but with multi-model suites
+        geom, dem, slope, _, _ = make_asymmetric_fixture()
+        x, y, z = make_points(geom, dem)
+        plots = os.path.join(self._tmp.name, "figures_da_false")
+        outputs = os.path.join(self._tmp.name, "results_da_false")
+        os.makedirs(plots, exist_ok=True)
+        os.makedirs(outputs, exist_ok=True)
+
+        solver = Solver(
+            dem=dem,
+            bounds=geom.bounds,
+            survey_data_type="one_way_traveltime",
+            pre_kriging_method="universal",
+            post_kriging_method="universal",
+            pre_drift_terms=[["z_dem"], []],
+            post_drift_terms=[["z_dem"], []],
+            pre_drift_analyzer=False,
+            post_drift_analyzer=False,
+            output_dir=outputs,
+            plots_dir=plots,
+            show_progress=False,
+        )
+        solver.opt_slope = slope
+        solver.opt_kc = 0.03
+        solver.survey_points = np.column_stack((x, y, np.zeros_like(x), z))
+
+        # Run pipeline with interactive=False
+        mig_pts = solver.migrate_eikonal(interactive=False)
+        self.assertIsNotNone(mig_pts)
+        self.assertEqual(len(solver.pre_selected_drift_models), 2)
+
+        solver.calculate_bedrock(interactive=False)
+        bed_map = solver.finalize_bedrock(interactive=False)
+        self.assertIsNotNone(bed_map)
+        self.assertEqual(len(solver.post_selected_drift_models), 2)
+
+        # Unified comparison files exist and contain both passes
+        for ext in ["txt", "csv", "md"]:
+            comp_file = os.path.join(plots, f"drift_model_comparison.{ext}")
+            self.assertTrue(os.path.exists(comp_file), f"Missing {comp_file}")
+
+        md_text = Path(plots, "drift_model_comparison.md").read_text(encoding="utf-8")
+        self.assertIn("Pass 1: Traveltime Field Interpolation", md_text)
+        self.assertIn("Pass 2: Ice Thickness & Bedrock Topography Interpolation", md_text)
+
 
 if __name__ == "__main__":
     unittest.main()
