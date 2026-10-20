@@ -196,7 +196,7 @@ For observed values $y_i$ and cross-validated predictions $\hat{y}_i$ of the $n$
 Candidates are ranked by (1) **not penalized first** (penalized: VIF above 10 or a numerical failure), (2) **AICc ascending** and (3) CV-RMSE as the tie-break. The primary ranking key is therefore the AICc, not the RMSE: models with almost identical RMSE can swap places because of their different number of parameters (rows 5 and 6 below). Two columns show the distance to the best model:
 
 - **ΔAICc** = AICc − AICc of the best non-penalized model.
-- **ΔRMSE %** = $100 \cdot (\text{RMSE} / \text{RMSE}_{\#1} - 1)$, relative to the best-ranked model.
+- **ΔRMSE %** = $`100 \cdot (\text{RMSE} / \text{RMSE}_{\#1} - 1)`$, relative to the best-ranked model.
 
 Example (Wuk, pre-migration, product target `"P"`, N = 982, default suite of 24 candidates, as printed by the Drift Analyzer; rows 9-15 and 17-24 are omitted here):
 
@@ -265,7 +265,7 @@ The following complete 24-candidate ranking table was generated for the **APO** 
 
 1. **Hierarchical 3-Tier Sort Key**:
    Candidates are evaluated and sorted by:
-   $$\text{Sort Key} = \left(\text{is\_penalized},\ \text{AICc},\ \text{RMSE}\right)$$
+   $$\text{Sort Key} = \left(\text{penalized},\ \text{AICc},\ \text{RMSE}\right)$$
    Any candidate that is **not penalized** (`is_penalized = False`, equivalent to 0) strictly outranks **every penalized model** (`is_penalized = True`, equivalent to 1). Within each group, models are ranked by ascending AICc (favoring parsimonious models that balance residual variance against parameter count $k$), using RMSE as the final tie-breaker.
 
 2. **Why Model #1 (`ordinary`) Wins**:
@@ -478,12 +478,9 @@ To keep output repositories clean and avoid collision between competing models, 
     ├── 03_3d_migration.png
     ├── 04_pass2_variogram.png
     ├── 05_pass2_kc_variogram_optimization.png
-    ├── drift_model_comparison_pass1.txt
-    ├── drift_model_comparison_pass1.csv
-    ├── drift_model_comparison_pass1.md
-    ├── drift_model_comparison_pass2.txt
-    ├── drift_model_comparison_pass2.csv
-    ├── drift_model_comparison_pass2.md
+    ├── drift_model_comparison.txt
+    ├── drift_model_comparison.csv
+    ├── drift_model_comparison.md
     ├── sia_z_dem/
     │   ├── 06_bedrock_elevation_and_uncertainty_sia_z_dem.png
     │   ├── 07_final_embedded_bedrock_sia_z_dem.png
@@ -500,16 +497,16 @@ To keep output repositories clean and avoid collision between competing models, 
   - Global survey observation soundings and migration coordinate tables (`migrated_points.csv`) remain in root `results/`.
 
 #### 4. Cross-Model Comparison Tables
-At the conclusion of each interpolation pass, `PySole` formats and exports comprehensive comparison files in three synchronized formats:
-1. `.txt`: ASCII console table printed directly to stdout and saved to disk.
-2. `.csv`: Machine-readable tabular file for downstream data science workflows.
-3. `.md`: GitHub-Flavored Markdown table with KaTeX math support.
+When multiple drift models are evaluated or selected for production comparison, `PySole` formats and exports comprehensive comparison files in three synchronized formats under `figures/`:
+1. `.txt`: ASCII console table (`drift_model_comparison.txt`) combining Pass 1 and Pass 2 interpolation results.
+2. `.csv`: Machine-readable tabular file (`drift_model_comparison.csv`) with a unified RFC 4180 schema and a `stage` column identifying "Pass 1" vs. "Pass 2".
+3. `.md`: GitHub-Flavored Markdown document (`drift_model_comparison.md`) with clean, perfectly-aligned tables and KaTeX math support.
 
-- **Pass 1 (`drift_model_comparison_pass1.*`)**:
-  Contrasts cross-validation rankings (Rank, Drift Model, CV RMSE, $\Delta$RMSE %, AICc, $\Delta$AICc, VIF, Status) with full domain traveltime distribution metrics $T(x,y)$ (Mean, Median, Std, Max in `ns` or `m`). If `pre_migration.calculate_uncertainty: true`, an additional column `Mean Unc` is dynamically appended, reporting the spatial mean traveltime Kriging uncertainty $\sigma_T$ in traveltime units over all glaciated cells within the glacier outline (`outline_mask & (traveltime > 0)`).
-- **Pass 2 (`drift_model_comparison_pass2.*`)**:
-  Contrasts cross-validation rankings with both ice thickness distribution metrics $H(x,y)$ (Mean, Median, Std, Max in meters) and basal shear stress distribution metrics $\tau_b(x,y)$ (Mean, Median, Std, Max in kPa). If `post_migration.calculate_uncertainty: true`, an additional column `Mean Unc` is dynamically appended under the Ice Thickness section, reporting the spatial mean ice thickness Kriging uncertainty $\sigma_D$ in meters over all glaciated cells within the glacier outline (`outline_mask & (thickness > 0)`).
-- **Uncertainty Toggle**: When `calculate_uncertainty: false` (the default setting to avoid unnecessary $O(N^2 \cdot m)$ operations), the `Mean Unc` column is omitted, keeping comparison tables concise and performant.
+- **Pass 1 Section**:
+  Contrasts cross-validation rankings (Rank, Drift Model, CV RMSE, $\Delta$RMSE %, AICc, $\Delta$AICc, VIF, Status) with full domain traveltime distribution metrics $T(x,y)$ (Mean, Median, Std, Max in `ns` or `m`). If `pre_migration.calculate_uncertainty: true`, an additional column `Mean Uncertainty` is dynamically appended, reporting the spatial mean traveltime Kriging uncertainty $\sigma_T$ in traveltime units over all glaciated cells within the glacier outline (`outline_mask & (traveltime > 0)`).
+- **Pass 2 Section**:
+  Contrasts cross-validation rankings with both ice thickness distribution metrics $H(x,y)$ (Mean, Median, Std, Max in meters) and basal shear stress distribution metrics $\tau_b(x,y)$ (Mean, Median, Std, Max in kPa). If `post_migration.calculate_uncertainty: true`, an additional column `Mean Unc (m)` is dynamically appended under the Ice Thickness section, reporting the spatial mean ice thickness Kriging uncertainty $\sigma_D$ in meters over all glaciated cells within the glacier outline (`outline_mask & (thickness > 0)`).
+- **Uncertainty Toggle**: When `calculate_uncertainty: false` (the default setting to avoid unnecessary $O(N^2 \cdot m)$ operations), the uncertainty column is omitted, keeping comparison tables concise and performant.
 - **Graceful Error Handling**: If any candidate model fails numerical matrix inversion or regularized Cholesky decomposition, it is marked `FAILED` in the table with safe zeroed metrics, allowing the remaining candidates in the suite to complete cleanly.
 
 ---

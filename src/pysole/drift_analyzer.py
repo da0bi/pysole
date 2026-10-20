@@ -442,135 +442,373 @@ def format_drift_comparison_table(
     return "\n".join(lines)
 
 
+def _format_markdown_table(
+    headers: list[str],
+    rows: list[list[str]],
+    alignments: list[str],
+) -> str:
+    """Formats a clean, properly-padded GitHub-Flavored Markdown table with aligned columns."""
+    col_widths = [max(len(h), 3) for h in headers]
+    for row in rows:
+        for idx, val in enumerate(row):
+            if idx < len(col_widths):
+                col_widths[idx] = max(col_widths[idx], len(val), 3)
+            else:
+                col_widths.append(max(len(val), 3))
+
+    # Pad headers
+    header_cells = []
+    for h, w, align in zip(headers, col_widths, alignments):
+        if align == "right":
+            header_cells.append(f"{h:>{w}}")
+        elif align == "center":
+            header_cells.append(f"{h:^{w}}")
+        else:
+            header_cells.append(f"{h:<{w}}")
+    header_line = "| " + " | ".join(header_cells) + " |"
+
+    # Build aligned separator line
+    sep_cells = []
+    for w, align in zip(col_widths, alignments):
+        if align == "right":
+            sep_cells.append("-" * (w - 1) + ":")
+        elif align == "center":
+            sep_cells.append(":" + "-" * (w - 2) + ":")
+        else:  # left
+            sep_cells.append(":" + "-" * (w - 1))
+    sep_line = "| " + " | ".join(sep_cells) + " |"
+
+    # Pad data rows
+    row_lines = []
+    for row in rows:
+        cells = []
+        for val, w, align in zip(row, col_widths, alignments):
+            if align == "right":
+                cells.append(f"{val:>{w}}")
+            elif align == "center":
+                cells.append(f"{val:^{w}}")
+            else:
+                cells.append(f"{val:<{w}}")
+        row_lines.append("| " + " | ".join(cells) + " |")
+
+    return "\n".join([header_line, sep_line] + row_lines)
+
+
+def format_drift_comparison_markdown(
+    pre_records: list[DriftComparisonRecord] | None = None,
+    post_records: list[DriftComparisonRecord] | None = None,
+) -> str:
+    """Builds a formatted GitHub-Flavored Markdown comparison document with clean tables."""
+    md_sections = ["# Drift Model Interpolation Comparison", ""]
+
+    if pre_records:
+        sorted_p1 = sorted(pre_records, key=lambda r: r.rank)
+        has_unc_p1 = any(r.unc_mean is not None for r in sorted_p1)
+        md_sections.append("## Pass 1: Traveltime Field Interpolation (Pre-Migration)")
+        md_sections.append("")
+
+        headers = [
+            "#",
+            "Drift Model",
+            "RMSE",
+            "ΔRMSE %",
+            "AICc",
+            "ΔAICc",
+            "VIF",
+            "Status",
+            "Mean Traveltime",
+            "Median Traveltime",
+            "Std Dev",
+            "Max Traveltime",
+        ]
+        alignments = [
+            "right",
+            "left",
+            "right",
+            "right",
+            "right",
+            "right",
+            "right",
+            "left",
+            "right",
+            "right",
+            "right",
+            "right",
+        ]
+        if has_unc_p1:
+            headers.append("Mean Uncertainty")
+            alignments.append("right")
+
+        rows = []
+        for r in sorted_p1:
+            d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+            d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+            aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+            if r.is_failed:
+                stats = ["FAILED", "FAILED", "FAILED", "FAILED"]
+                if has_unc_p1:
+                    stats.append("FAILED")
+            else:
+                stats = [
+                    f"{r.target_mean:.2f} {r.target_unit}",
+                    f"{r.target_median:.2f} {r.target_unit}",
+                    f"{r.target_std:.2f} {r.target_unit}",
+                    f"{r.target_max:.2f} {r.target_unit}",
+                ]
+                if has_unc_p1:
+                    unc_str = f"{r.unc_mean:.2f} {r.target_unit}" if r.unc_mean is not None else "n/a"
+                    stats.append(unc_str)
+            row = [
+                str(r.rank),
+                f"`{r.model_name}`",
+                f"{r.cv_rmse:.2f} {r.rmse_unit}",
+                d_rmse,
+                aicc_str,
+                d_aicc,
+                f"{r.vif_max:.1f}",
+                r.status,
+            ] + stats
+            rows.append(row)
+
+        md_sections.append(_format_markdown_table(headers, rows, alignments))
+        md_sections.append("")
+
+    if post_records:
+        sorted_p2 = sorted(post_records, key=lambda r: r.rank)
+        has_unc_p2 = any(r.unc_mean is not None for r in sorted_p2)
+        md_sections.append("## Pass 2: Ice Thickness & Bedrock Topography Interpolation (Post-Migration)")
+        md_sections.append("")
+
+        headers = [
+            "#",
+            "Drift Model",
+            "RMSE",
+            "ΔRMSE %",
+            "AICc",
+            "ΔAICc",
+            "VIF",
+            "Status",
+            "Mean Thick (m)",
+            "Median Thick (m)",
+            "Std Thick (m)",
+            "Max Thick (m)",
+        ]
+        alignments = [
+            "right",
+            "left",
+            "right",
+            "right",
+            "right",
+            "right",
+            "right",
+            "left",
+            "right",
+            "right",
+            "right",
+            "right",
+        ]
+        if has_unc_p2:
+            headers.append("Mean Unc (m)")
+            alignments.append("right")
+        headers.extend(["Mean BSS (kPa)", "Median BSS (kPa)", "Std BSS (kPa)", "Max BSS (kPa)"])
+        alignments.extend(["right", "right", "right", "right"])
+
+        rows = []
+        for r in sorted_p2:
+            d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+            d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+            aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+            if r.is_failed:
+                th_stats = ["FAILED", "FAILED", "FAILED", "FAILED"]
+                if has_unc_p2:
+                    th_stats.append("FAILED")
+                bss_stats = ["FAILED", "FAILED", "FAILED", "FAILED"]
+            else:
+                th_stats = [
+                    f"{r.thick_mean:.2f}",
+                    f"{r.thick_median:.2f}",
+                    f"{r.thick_std:.2f}",
+                    f"{r.thick_max:.2f}",
+                ]
+                if has_unc_p2:
+                    unc_str = f"{r.unc_mean:.2f}" if r.unc_mean is not None else "n/a"
+                    th_stats.append(unc_str)
+                bss_stats = [
+                    f"{r.bss_mean:.2f}",
+                    f"{r.bss_median:.2f}",
+                    f"{r.bss_std:.2f}",
+                    f"{r.bss_max:.2f}",
+                ]
+            row = [
+                str(r.rank),
+                f"`{r.model_name}`",
+                f"{r.cv_rmse:.2f} {r.rmse_unit}",
+                d_rmse,
+                aicc_str,
+                d_aicc,
+                f"{r.vif_max:.1f}",
+                r.status,
+            ] + th_stats + bss_stats
+            rows.append(row)
+
+        md_sections.append(_format_markdown_table(headers, rows, alignments))
+        md_sections.append("")
+
+    return "\n".join(md_sections).rstrip() + "\n"
+
+
+def format_drift_comparison_csv(
+    pre_records: list[DriftComparisonRecord] | None = None,
+    post_records: list[DriftComparisonRecord] | None = None,
+) -> str:
+    """Builds a unified machine-readable RFC 4180 CSV comparison table."""
+    p1 = sorted(pre_records, key=lambda r: r.rank) if pre_records else []
+    p2 = sorted(post_records, key=lambda r: r.rank) if post_records else []
+    has_p1_unc = any(r.unc_mean is not None for r in p1)
+    has_p2_unc = any(r.unc_mean is not None for r in p2)
+
+    cols = ["stage", "rank", "drift_model", "slug", "rmse", "delta_rmse_pct", "aicc", "delta_aicc", "vif", "status"]
+    cols.extend(["traveltime_mean", "traveltime_median", "traveltime_std", "traveltime_max"])
+    if has_p1_unc:
+        cols.append("traveltime_unc_mean")
+    cols.extend(["thickness_mean_m", "thickness_median_m", "thickness_std_m", "thickness_max_m"])
+    if has_p2_unc:
+        cols.append("thickness_unc_mean_m")
+    cols.extend(["bss_mean_kpa", "bss_median_kpa", "bss_std_kpa", "bss_max_kpa"])
+    cols.extend(["unit", "is_failed"])
+
+    csv_lines = [",".join(cols)]
+
+    for r in p1:
+        d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
+        d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
+        aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
+        row = [
+            "Pass 1",
+            str(r.rank),
+            f'"{r.model_name}"',
+            r.model_slug,
+            f"{r.cv_rmse:.4f}",
+            d_rmse,
+            aicc_val,
+            d_aicc,
+            f"{r.vif_max:.2f}",
+            r.status,
+            f"{r.target_mean:.4f}",
+            f"{r.target_median:.4f}",
+            f"{r.target_std:.4f}",
+            f"{r.target_max:.4f}",
+        ]
+        if has_p1_unc:
+            row.append(f"{r.unc_mean:.4f}" if r.unc_mean is not None else "")
+        row.extend(["", "", "", ""])  # thickness mean, median, std, max
+        if has_p2_unc:
+            row.append("")  # thickness unc
+        row.extend(["", "", "", ""])  # bss mean, median, std, max
+        row.extend([r.target_unit, str(r.is_failed)])
+        csv_lines.append(",".join(row))
+
+    for r in p2:
+        d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
+        d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
+        aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
+        row = [
+            "Pass 2",
+            str(r.rank),
+            f'"{r.model_name}"',
+            r.model_slug,
+            f"{r.cv_rmse:.4f}",
+            d_rmse,
+            aicc_val,
+            d_aicc,
+            f"{r.vif_max:.2f}",
+            r.status,
+            "",
+            "",
+            "",
+            "",  # traveltime mean, median, std, max
+        ]
+        if has_p1_unc:
+            row.append("")  # traveltime unc
+        row.extend([
+            f"{r.thick_mean:.4f}",
+            f"{r.thick_median:.4f}",
+            f"{r.thick_std:.4f}",
+            f"{r.thick_max:.4f}",
+        ])
+        if has_p2_unc:
+            row.append(f"{r.unc_mean:.4f}" if r.unc_mean is not None else "")
+        row.extend([
+            f"{r.bss_mean:.4f}",
+            f"{r.bss_median:.4f}",
+            f"{r.bss_std:.4f}",
+            f"{r.bss_max:.4f}",
+        ])
+        row.extend([r.rmse_unit, str(r.is_failed)])
+        csv_lines.append(",".join(row))
+
+    return "\n".join(csv_lines) + "\n"
+
+
+def format_drift_comparison_txt(
+    pre_records: list[DriftComparisonRecord] | None = None,
+    post_records: list[DriftComparisonRecord] | None = None,
+) -> str:
+    """Builds plaintext ASCII table representation for comparison files."""
+    sections = []
+    if pre_records:
+        sections.append(format_drift_comparison_table(pre_records, "Pass 1"))
+    if post_records:
+        sections.append(format_drift_comparison_table(post_records, "Pass 2"))
+    return "\n\n".join(sections) + "\n"
+
+
 def save_drift_comparison_files(
-    records: list[DriftComparisonRecord],
-    plots_dir: str | Path,
+    records: list[DriftComparisonRecord] | str | Path | None = None,
+    plots_dir: str | Path | None = None,
     stage_label: str = "pass2",
+    *,
+    pre_records: list[DriftComparisonRecord] | None = None,
+    post_records: list[DriftComparisonRecord] | None = None,
 ) -> list[Path]:
-    """Saves comparison tables in .txt, .csv, and .md formats into plots_dir."""
+    """Saves unified comparison tables in .txt, .csv, and .md formats into plots_dir."""
+    if isinstance(records, (str, Path)) and plots_dir is None:
+        plots_dir = records
+        records = None
+
+    if plots_dir is None:
+        raise ValueError("plots_dir must be provided.")
+
     p_dir = Path(plots_dir).expanduser().resolve()
-    stage_norm = stage_label.lower().replace(" ", "").replace("_", "")
-    is_p1 = "pass1" in stage_norm or "pre" in stage_norm or stage_norm == "1"
-    base_name = "drift_model_comparison_pass1" if is_p1 else "drift_model_comparison_pass2"
-    sorted_records = sorted(records, key=lambda r: r.rank)
-    has_unc = any(r.unc_mean is not None for r in sorted_records)
+
+    p1_list = list(pre_records) if pre_records else []
+    p2_list = list(post_records) if post_records else []
+
+    if isinstance(records, list) and records:
+        stage_norm = stage_label.lower().replace(" ", "").replace("_", "")
+        if "pass1" in stage_norm or "pre" in stage_norm or stage_norm == "1":
+            if not p1_list:
+                p1_list = records
+        else:
+            if not p2_list:
+                p2_list = records
+
+    base_name = "drift_model_comparison"
 
     # 1. Plaintext ASCII table (.txt)
     txt_path = p_dir / f"{base_name}.txt"
-    txt_content = format_drift_comparison_table(sorted_records, stage_label)
-    txt_path.write_text(txt_content + "\n", encoding="utf-8")
+    txt_content = format_drift_comparison_txt(p1_list, p2_list)
+    txt_path.write_text(txt_content, encoding="utf-8")
 
     # 2. Machine-readable CSV (.csv)
     csv_path = p_dir / f"{base_name}.csv"
-    csv_lines = []
-    if is_p1:
-        if has_unc:
-            csv_lines.append("rank,drift_model,slug,rmse,delta_rmse_pct,aicc,delta_aicc,vif,status,traveltime_mean,traveltime_median,traveltime_std,traveltime_max,traveltime_unc_mean,unit,is_failed")
-            for r in sorted_records:
-                d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
-                d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
-                aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
-                unc_val = f"{r.unc_mean:.4f}" if r.unc_mean is not None else ""
-                csv_lines.append(
-                    f'{r.rank},"{r.model_name}",{r.model_slug},{r.cv_rmse:.4f},{d_rmse},{aicc_val},{d_aicc},{r.vif_max:.2f},{r.status},'
-                    f'{r.target_mean:.4f},{r.target_median:.4f},{r.target_std:.4f},{r.target_max:.4f},{unc_val},{r.target_unit},{r.is_failed}'
-                )
-        else:
-            csv_lines.append("rank,drift_model,slug,rmse,delta_rmse_pct,aicc,delta_aicc,vif,status,traveltime_mean,traveltime_median,traveltime_std,traveltime_max,unit,is_failed")
-            for r in sorted_records:
-                d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
-                d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
-                aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
-                csv_lines.append(
-                    f'{r.rank},"{r.model_name}",{r.model_slug},{r.cv_rmse:.4f},{d_rmse},{aicc_val},{d_aicc},{r.vif_max:.2f},{r.status},'
-                    f'{r.target_mean:.4f},{r.target_median:.4f},{r.target_std:.4f},{r.target_max:.4f},{r.target_unit},{r.is_failed}'
-                )
-    else:
-        if has_unc:
-            csv_lines.append("rank,drift_model,slug,rmse,delta_rmse_pct,aicc,delta_aicc,vif,status,thickness_mean_m,thickness_median_m,thickness_std_m,thickness_max_m,thickness_unc_mean_m,bss_mean_kpa,bss_median_kpa,bss_std_kpa,bss_max_kpa,is_failed")
-            for r in sorted_records:
-                d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
-                d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
-                aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
-                unc_val = f"{r.unc_mean:.4f}" if r.unc_mean is not None else ""
-                csv_lines.append(
-                    f'{r.rank},"{r.model_name}",{r.model_slug},{r.cv_rmse:.4f},{d_rmse},{aicc_val},{d_aicc},{r.vif_max:.2f},{r.status},'
-                    f'{r.thick_mean:.4f},{r.thick_median:.4f},{r.thick_std:.4f},{r.thick_max:.4f},{unc_val},'
-                    f'{r.bss_mean:.4f},{r.bss_median:.4f},{r.bss_std:.4f},{r.bss_max:.4f},{r.is_failed}'
-                )
-        else:
-            csv_lines.append("rank,drift_model,slug,rmse,delta_rmse_pct,aicc,delta_aicc,vif,status,thickness_mean_m,thickness_median_m,thickness_std_m,thickness_max_m,bss_mean_kpa,bss_median_kpa,bss_std_kpa,bss_max_kpa,is_failed")
-            for r in sorted_records:
-                d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
-                d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
-                aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
-                csv_lines.append(
-                    f'{r.rank},"{r.model_name}",{r.model_slug},{r.cv_rmse:.4f},{d_rmse},{aicc_val},{d_aicc},{r.vif_max:.2f},{r.status},'
-                    f'{r.thick_mean:.4f},{r.thick_median:.4f},{r.thick_std:.4f},{r.thick_max:.4f},'
-                    f'{r.bss_mean:.4f},{r.bss_median:.4f},{r.bss_std:.4f},{r.bss_max:.4f},{r.is_failed}'
-                )
-    csv_path.write_text("\n".join(csv_lines) + "\n", encoding="utf-8")
+    csv_content = format_drift_comparison_csv(p1_list, p2_list)
+    csv_path.write_text(csv_content, encoding="utf-8")
 
     # 3. Markdown table (.md)
     md_path = p_dir / f"{base_name}.md"
-    md_lines = []
-    if is_p1:
-        md_lines.append("# Drift Model Interpolation Comparison Table (Pass 1)")
-        md_lines.append("")
-        if has_unc:
-            md_lines.append("| # | Drift Model | RMSE | ΔRMSE % | AICc | ΔAICc | VIF | Status | Mean Traveltime | Median Traveltime | Std Dev | Max Traveltime | Mean Uncertainty |")
-            md_lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | ---: | ---: | ---: |")
-            for r in sorted_records:
-                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
-                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
-                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
-                if r.is_failed:
-                    stats = "FAILED | FAILED | FAILED | FAILED | FAILED"
-                else:
-                    unc_md = f"{r.unc_mean:.2f} {r.target_unit}" if r.unc_mean is not None else "n/a"
-                    stats = f"{r.target_mean:.2f} {r.target_unit} | {r.target_median:.2f} {r.target_unit} | {r.target_std:.2f} {r.target_unit} | {r.target_max:.2f} {r.target_unit} | {unc_md}"
-                md_lines.append(f"| {r.rank} | `{r.model_name}` | {r.cv_rmse:.2f} {r.rmse_unit} | {d_rmse} | {aicc_str} | {d_aicc} | {r.vif_max:.1f} | {r.status} | {stats} |")
-        else:
-            md_lines.append("| # | Drift Model | RMSE | ΔRMSE % | AICc | ΔAICc | VIF | Status | Mean Traveltime | Median Traveltime | Std Dev | Max Traveltime |")
-            md_lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | ---: | ---: |")
-            for r in sorted_records:
-                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
-                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
-                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
-                if r.is_failed:
-                    stats = "FAILED | FAILED | FAILED | FAILED"
-                else:
-                    stats = f"{r.target_mean:.2f} {r.target_unit} | {r.target_median:.2f} {r.target_unit} | {r.target_std:.2f} {r.target_unit} | {r.target_max:.2f} {r.target_unit}"
-                md_lines.append(f"| {r.rank} | `{r.model_name}` | {r.cv_rmse:.2f} {r.rmse_unit} | {d_rmse} | {aicc_str} | {d_aicc} | {r.vif_max:.1f} | {r.status} | {stats} |")
-    else:
-        md_lines.append("# Drift Model Interpolation Comparison Table (Pass 2)")
-        md_lines.append("")
-        if has_unc:
-            md_lines.append("| # | Drift Model | RMSE | ΔRMSE % | AICc | ΔAICc | VIF | Status | Mean Thick (m) | Median Thick (m) | Max Thick (m) | Mean Unc (m) | Mean BSS (kPa) | Median BSS (kPa) | Max BSS (kPa) |")
-            md_lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-            for r in sorted_records:
-                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
-                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
-                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
-                if r.is_failed:
-                    stats = "FAILED | FAILED | FAILED | FAILED | FAILED | FAILED | FAILED"
-                else:
-                    unc_md = f"{r.unc_mean:.2f}" if r.unc_mean is not None else "n/a"
-                    stats = f"{r.thick_mean:.2f} | {r.thick_median:.2f} | {r.thick_max:.2f} | {unc_md} | {r.bss_mean:.2f} | {r.bss_median:.2f} | {r.bss_max:.2f}"
-                md_lines.append(f"| {r.rank} | `{r.model_name}` | {r.cv_rmse:.2f} {r.rmse_unit} | {d_rmse} | {aicc_str} | {d_aicc} | {r.vif_max:.1f} | {r.status} | {stats} |")
-        else:
-            md_lines.append("| # | Drift Model | RMSE | ΔRMSE % | AICc | ΔAICc | VIF | Status | Mean Thick (m) | Median Thick (m) | Max Thick (m) | Mean BSS (kPa) | Median BSS (kPa) | Max BSS (kPa) |")
-            md_lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
-            for r in sorted_records:
-                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
-                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
-                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
-                if r.is_failed:
-                    stats = "FAILED | FAILED | FAILED | FAILED | FAILED | FAILED"
-                else:
-                    stats = f"{r.thick_mean:.2f} | {r.thick_median:.2f} | {r.thick_max:.2f} | {r.bss_mean:.2f} | {r.bss_median:.2f} | {r.bss_max:.2f}"
-                md_lines.append(f"| {r.rank} | `{r.model_name}` | {r.cv_rmse:.2f} {r.rmse_unit} | {d_rmse} | {aicc_str} | {d_aicc} | {r.vif_max:.1f} | {r.status} | {stats} |")
-    md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+    md_content = format_drift_comparison_markdown(p1_list, p2_list)
+    md_path.write_text(md_content, encoding="utf-8")
 
     logger.info(f"   Saved comparison tables to: {txt_path.name}, {csv_path.name}, {md_path.name}")
     return [txt_path, csv_path, md_path]

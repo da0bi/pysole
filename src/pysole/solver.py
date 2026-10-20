@@ -418,6 +418,8 @@ class Solver:
         self.opt_variogram_params: dict[str, float] | None = None
         self.pre_selected_drift_models: list[CandidateDriftResult] = []
         self.post_selected_drift_models: list[CandidateDriftResult] = []
+        self.pre_drift_comparison_records: list[DriftComparisonRecord] = []
+        self.post_drift_comparison_records: list[DriftComparisonRecord] = []
         if config is not None:
             # Unknown (e.g. outdated) keys are dropped with one warning; see config.sanitize_config
             self.config, _unknown_keys = sanitize_config(config)
@@ -872,7 +874,9 @@ class Solver:
         )
         return False
 
-    def export_outputs(self, stage: str | None = None, subfolder: str | None = None) -> list[str]:
+    def export_outputs(
+        self, stage: str | None = None, subfolder: str | None = None, export_points: bool = True
+    ) -> list[str]:
         """
         Exports optional spatial datasets according to configured boolean output flags.
 
@@ -882,6 +886,9 @@ class Solver:
             Workflow stage name ('migration', 'finalization', or None to export all stages).
         subfolder : str or None, optional
             Optional subdirectory within results/ to store exported raster datasets.
+        export_points : bool, optional
+            If True (default), exports optional point datasets (such as migrated survey points).
+            If False, point dataset export is skipped (e.g. during secondary candidate comparison runs).
 
         Returns
         -------
@@ -905,7 +912,7 @@ class Solver:
                     )
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
-            if cfg_out.save_migrated_points and self.migrated_points is not None:
+            if export_points and cfg_out.save_migrated_points and self.migrated_points is not None:
                 # Migrated points are always saved to root results/
                 res = self._export_optional_points_csv(self.migrated_points, suffix="migrated_points")
                 if res:
@@ -1920,7 +1927,7 @@ class Solver:
                     t_mean, t_median, t_std, t_max = _compute_distribution_stats(cand_tt, self.outline_mask)
                     failed = False
                 else:
-                    logger.info(f"   [Drift Analyzer] Drift model '{cand.name}' selected for the production Kriging run.")
+                    logger.info(f"   [Drift Comparison] Evaluating candidate model '{cand.name}'...")
                     ext_drifts = self.get_drift_grids(cand.terms)
                     cand_method = "universal" if cand.terms else "ordinary"
                     try:
@@ -1960,7 +1967,7 @@ class Solver:
                         orig_std = self._traveltime_std
                         self._traveltime_grid = cand_tt
                         self._traveltime_std = cand_std
-                        self.export_outputs("migration", subfolder=cand_slug)
+                        self.export_outputs("migration", subfolder=cand_slug, export_points=False)
                         self._traveltime_grid = orig_tt
                         self._traveltime_std = orig_std
 
@@ -2002,8 +2009,13 @@ class Solver:
                     )
                 )
 
+            self.pre_drift_comparison_records = records
             if self.plots_dir:
-                save_drift_comparison_files(records, self.plots_dir, "Pass 1")
+                save_drift_comparison_files(
+                    self.plots_dir,
+                    pre_records=self.pre_drift_comparison_records,
+                    post_records=self.post_drift_comparison_records,
+                )
             print(format_drift_comparison_table(records, "Pass 1"))
         else:
             self.export_outputs("migration")
@@ -2787,7 +2799,7 @@ class Solver:
             for idx, cand in enumerate(self.post_selected_drift_models[1:], start=2):
                 cand_slug = slugify_drift_name(cand.terms)
                 cand_rank = cand.rank or idx
-                logger.info(f"   [Drift Analyzer] Drift model '{cand.name}' selected for the production Kriging run.")
+                logger.info(f"   [Drift Comparison] Evaluating candidate model '{cand.name}'...")
                 ext_drifts = self.get_drift_grids(cand.terms)
                 cand_method = "universal" if cand.terms else "ordinary"
                 try:
@@ -3009,8 +3021,13 @@ class Solver:
             self.kriged_std = orig_std
             self.bss_std = orig_bss_std
 
+            self.post_drift_comparison_records = records
             if self.plots_dir:
-                save_drift_comparison_files(records, self.plots_dir, "Pass 2")
+                save_drift_comparison_files(
+                    self.plots_dir,
+                    pre_records=self.pre_drift_comparison_records,
+                    post_records=self.post_drift_comparison_records,
+                )
             print(format_drift_comparison_table(records, "Pass 2"))
         else:
             self.export_outputs("finalization")

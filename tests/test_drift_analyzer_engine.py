@@ -404,10 +404,10 @@ class TestDriftComparisonFormatting(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             p1_saved = save_drift_comparison_files([p1_rec], tmp_dir, "Pass 1")
             self.assertEqual(len(p1_saved), 3)
-            csv_content = (Path(tmp_dir) / "drift_model_comparison_pass1.csv").read_text(encoding="utf-8")
+            csv_content = (Path(tmp_dir) / "drift_model_comparison.csv").read_text(encoding="utf-8")
             self.assertIn("traveltime_unc_mean", csv_content)
             self.assertIn("4.5000", csv_content)
-            md_content = (Path(tmp_dir) / "drift_model_comparison_pass1.md").read_text(encoding="utf-8")
+            md_content = (Path(tmp_dir) / "drift_model_comparison.md").read_text(encoding="utf-8")
             self.assertIn("Mean Uncertainty", md_content)
             self.assertIn("4.50 ns", md_content)
 
@@ -442,12 +442,38 @@ class TestDriftComparisonFormatting(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             p2_saved = save_drift_comparison_files([p2_rec], tmp_dir, "Pass 2")
             self.assertEqual(len(p2_saved), 3)
-            csv_content = (Path(tmp_dir) / "drift_model_comparison_pass2.csv").read_text(encoding="utf-8")
+            csv_content = (Path(tmp_dir) / "drift_model_comparison.csv").read_text(encoding="utf-8")
             self.assertIn("thickness_unc_mean_m", csv_content)
             self.assertIn("3.2000", csv_content)
-            md_content = (Path(tmp_dir) / "drift_model_comparison_pass2.md").read_text(encoding="utf-8")
+            md_content = (Path(tmp_dir) / "drift_model_comparison.md").read_text(encoding="utf-8")
             self.assertIn("Mean Unc (m)", md_content)
             self.assertIn("3.20", md_content)
+            self.assertIn("Std Thick (m)", md_content)
+            self.assertIn("Std BSS (kPa)", md_content)
+
+        # Unified both Pass 1 and Pass 2
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            saved = save_drift_comparison_files(
+                tmp_dir,
+                pre_records=[p1_rec],
+                post_records=[p2_rec],
+            )
+            self.assertEqual(len(saved), 3)
+            txt_content = (Path(tmp_dir) / "drift_model_comparison.txt").read_text(encoding="utf-8")
+            self.assertIn("PASS 1", txt_content)
+            self.assertIn("PASS 2", txt_content)
+
+            csv_content = (Path(tmp_dir) / "drift_model_comparison.csv").read_text(encoding="utf-8")
+            self.assertIn("Pass 1", csv_content)
+            self.assertIn("Pass 2", csv_content)
+            self.assertIn("traveltime_unc_mean", csv_content)
+            self.assertIn("thickness_unc_mean_m", csv_content)
+
+            md_content = (Path(tmp_dir) / "drift_model_comparison.md").read_text(encoding="utf-8")
+            self.assertIn("Pass 1: Traveltime Field Interpolation", md_content)
+            self.assertIn("Pass 2: Ice Thickness & Bedrock Topography Interpolation", md_content)
+            self.assertIn("Mean Uncertainty", md_content)
+            self.assertIn("Mean Unc (m)", md_content)
 
     def test_format_and_save_comparison_tables_without_uncertainty(self):
         p1_rec = DriftComparisonRecord(
@@ -475,9 +501,9 @@ class TestDriftComparisonFormatting(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             save_drift_comparison_files([p1_rec], tmp_dir, "Pass 1")
-            csv_content = (Path(tmp_dir) / "drift_model_comparison_pass1.csv").read_text(encoding="utf-8")
+            csv_content = (Path(tmp_dir) / "drift_model_comparison.csv").read_text(encoding="utf-8")
             self.assertNotIn("traveltime_unc_mean", csv_content)
-            md_content = (Path(tmp_dir) / "drift_model_comparison_pass1.md").read_text(encoding="utf-8")
+            md_content = (Path(tmp_dir) / "drift_model_comparison.md").read_text(encoding="utf-8")
             self.assertNotIn("Mean Uncertainty", md_content)
 
 
@@ -811,20 +837,24 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
 
     def test_multi_model_pipeline_execution_and_exports(self):
         # 1. Pass 1: migrate_eikonal()
-        mig_pts = self.solver.migrate_eikonal(interactive=False)
+        with patch.object(self.solver, "_export_optional_points_csv", wraps=self.solver._export_optional_points_csv) as mock_pts_export:
+            mig_pts = self.solver.migrate_eikonal(interactive=False)
+            # Verify migrated points are exported only ONCE for the production model, not per candidate
+            self.assertEqual(mock_pts_export.call_count, 1)
+
         self.assertIsNotNone(mig_pts)
         self.assertEqual(len(self.solver.pre_selected_drift_models), 2)
 
         # Check Pass 1 comparison files
         for ext in ["txt", "csv", "md"]:
-            comp_file = os.path.join(self.plots_dir, f"drift_model_comparison_pass1.{ext}")
+            comp_file = os.path.join(self.plots_dir, f"drift_model_comparison.{ext}")
             self.assertTrue(os.path.exists(comp_file), f"Missing {comp_file}")
 
-        p1_txt = Path(self.plots_dir, "drift_model_comparison_pass1.txt").read_text(encoding="utf-8")
+        p1_txt = Path(self.plots_dir, "drift_model_comparison.txt").read_text(encoding="utf-8")
         self.assertIn("Mean Unc", p1_txt)
-        p1_csv = Path(self.plots_dir, "drift_model_comparison_pass1.csv").read_text(encoding="utf-8")
+        p1_csv = Path(self.plots_dir, "drift_model_comparison.csv").read_text(encoding="utf-8")
         self.assertIn("traveltime_unc_mean", p1_csv)
-        p1_md = Path(self.plots_dir, "drift_model_comparison_pass1.md").read_text(encoding="utf-8")
+        p1_md = Path(self.plots_dir, "drift_model_comparison.md").read_text(encoding="utf-8")
         self.assertIn("Mean Uncertainty", p1_md)
 
         # Check subfolders for Pass 1 rasters
@@ -841,17 +871,19 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
         self.assertIsNotNone(bed_map)
         self.assertEqual(len(self.solver.post_selected_drift_models), 2)
 
-        # Check Pass 2 comparison files
+        # Check Pass 2 comparison files (unified files now contain both Pass 1 and Pass 2)
         for ext in ["txt", "csv", "md"]:
-            comp_file = os.path.join(self.plots_dir, f"drift_model_comparison_pass2.{ext}")
+            comp_file = os.path.join(self.plots_dir, f"drift_model_comparison.{ext}")
             self.assertTrue(os.path.exists(comp_file), f"Missing {comp_file}")
 
-        p2_txt = Path(self.plots_dir, "drift_model_comparison_pass2.txt").read_text(encoding="utf-8")
+        p2_txt = Path(self.plots_dir, "drift_model_comparison.txt").read_text(encoding="utf-8")
         self.assertIn("Mean Unc", p2_txt)
-        p2_csv = Path(self.plots_dir, "drift_model_comparison_pass2.csv").read_text(encoding="utf-8")
+        p2_csv = Path(self.plots_dir, "drift_model_comparison.csv").read_text(encoding="utf-8")
         self.assertIn("thickness_unc_mean_m", p2_csv)
-        p2_md = Path(self.plots_dir, "drift_model_comparison_pass2.md").read_text(encoding="utf-8")
+        self.assertIn("traveltime_unc_mean", p2_csv)
+        p2_md = Path(self.plots_dir, "drift_model_comparison.md").read_text(encoding="utf-8")
         self.assertIn("Mean Unc (m)", p2_md)
+        self.assertIn("Mean Uncertainty", p2_md)
 
         # Check Pass 2 plots in subfolders
         for slug in ["z_dem", "ordinary"]:
