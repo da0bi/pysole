@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **[Non-Interactive Multi-Model Suite Execution (`drift_analyzer: false`)] (`src/pysole/drift.py`, `src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_rules.py`, `tests/test_drift_analyzer_engine.py`)**:
+  - **Automated Non-Interactive Plan Resolution**: When `method: "universal"` and `drift_analyzer: false` (or omitted) are configured with an explicit multi-model suite (e.g. `drift_terms: [["sia", "z_dem"], ["sia"]]`), `PySole` no longer raises a `ConfigError`. Instead, `resolve_drift_plan()` resolves to a multi-model execution plan (`analyze=True`, `interactive=False`) with an informative notice. If duplicate candidate entries collapse to a single unique model, it unwraps directly to a single-model run without cross-validation.
+  - **Default Exclusion Buffer Radius**: `Solver._execute_kriging_pass()` respects `plan.interactive`, executing leave-block-out cross-validation without prompting for buffer radius or candidate selection, using the default spatial exclusion buffer radius ($r_{\text{buffer}} = a_0 / 2$).
+  - **Automated Comparison Suite**: Automatically evaluates and compares all candidate models in the suite, isolates raster and plot deliverables into model subdirectories (`results/<model_slug>/`, `figures/<model_slug>/`), and outputs unified cross-model comparison tables without requiring interactive terminal intervention.
+
+### Changed
+- **[Unified Pass 1 & Pass 2 Drift Model Comparison Files] (`src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `tests/test_drift_analyzer_engine.py`)**:
+  - **Combined Multi-Pass Deliverables**: Merged the previously separate `drift_model_comparison_pass1.{txt,csv,md}` and `drift_model_comparison_pass2.{txt,csv,md}` files into single, unified cross-stage deliverables: `figures/drift_model_comparison.txt`, `figures/drift_model_comparison.csv`, and `figures/drift_model_comparison.md`.
+  - **Structured Markdown Tables**: Formatted markdown comparison exports (`drift_model_comparison.md`) into clean GitHub Flavored Markdown tables with structured headers and column divider bars for both Pass 1 (Traveltime Field Interpolation) and Pass 2 (Ice Thickness & Bedrock Topography Interpolation).
+  - **Suppressed Redundant Sounding Export**: Suppressed redundant exports of `migrated_points.csv` during candidate multi-model evaluation runs in Pass 1, writing migrated survey soundings exclusively once for the primary (winning) model.
+
+### Fixed
+- **[Mathematical Notation & Typographical Rendering in Documentation] (`README.md`, `docs/drift_analyzer.md`)**:
+  - Corrected unrendered math expressions ($O(N \cdot m)$, $O(N^2 \cdot m)$, inline KaTeX blocks) in `README.md`.
+  - Escaped LaTeX macro parameter `#` characters in math mode (`\text{RMSE}_{\text{top}}` instead of `\text{RMSE}_{#1}`) and escaped underscores in sort keys (`\text{is\_penalized}`) in `docs/drift_analyzer.md` to prevent KaTeX rendering syntax errors.
+
 ## [0.5.3] - 2026-10-20
 
 Universal Kriging Drift Analyzer candidate suite expansion & auto-disable for single models, multi-model comparison pipeline with isolated subfolder exports & comparison tables, dynamic RMSE ranking table units, interactive $\lambda_c$ survey planning prompt, dedicated Drift Analyzer & Survey Planner documentation guides, and codebase streamlining.
