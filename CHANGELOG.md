@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Combined Multi-Pass Deliverables**: Merged the previously separate `drift_model_comparison_pass1.{txt,csv,md}` and `drift_model_comparison_pass2.{txt,csv,md}` files into single, unified cross-stage deliverables: `figures/drift_model_comparison.txt`, `figures/drift_model_comparison.csv`, and `figures/drift_model_comparison.md`.
   - **Structured Markdown Tables**: Formatted markdown comparison exports (`drift_model_comparison.md`) into clean GitHub Flavored Markdown tables with structured headers and column divider bars for both Pass 1 (Traveltime Field Interpolation) and Pass 2 (Ice Thickness & Bedrock Topography Interpolation).
   - **Suppressed Redundant Sounding Export**: Suppressed redundant exports of `migrated_points.csv` during candidate multi-model evaluation runs in Pass 1, writing migrated survey soundings exclusively once for the primary (winning) model.
+- **[Continuous Black Outline in Diagnostic Plots] (`src/pysole/plotting.py`, `tests/test_audit_regressions.py`)**:
+  - Changed the glacier boundary outline in `##_<output_prefix>_final_thickness_and_uncertainty*.png` and `##_<output_prefix>_final_basal_shear_stress_and_uncertainty*.png` from dashed (`linewidths=1.5, linestyles="--"`) to a continuous solid black contour (`linewidths=0.8, linestyles="solid"`), standardizing outline styling across all diagnostic spatial figures to match `##_<output_prefix>_3d_migration.png`.
 
 ### Removed
 - **[Dead Code Removal & Codebase Streamlining] (`src/pysole/survey_planner.py`, `src/pysole/plotting.py`, `src/pysole/logging.py`, `src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `tests/test_drift_analyzer_engine.py`, `tests/test_logging.py`)**:

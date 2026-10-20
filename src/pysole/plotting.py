@@ -968,8 +968,8 @@ def plot_final_ice_thickness_and_uncertainty(
                 extent=plot_extent,
                 origin="lower",
                 colors="black",
-                linewidths=1.5,
-                linestyles="--",
+                linewidths=0.8,
+                linestyles="solid",
             )
         ax1.set_title(f"Mean Thickness: {int(round(mean_thick))} m")
         ax1.set_xlabel("X [m]")
@@ -995,8 +995,8 @@ def plot_final_ice_thickness_and_uncertainty(
                     extent=plot_extent,
                     origin="lower",
                     colors="black",
-                    linewidths=1.5,
-                    linestyles="--",
+                    linewidths=0.8,
+                    linestyles="solid",
                 )
             ax2.set_title(f"Mean Kriging Uncertainty: \u00b1{int(round(mean_unc))} m")
             ax2.set_xlabel("X [m]")
@@ -1182,8 +1182,8 @@ def plot_final_basal_shear_stress_and_uncertainty(
                 extent=plot_extent,
                 origin="lower",
                 colors="black",
-                linewidths=1.5,
-                linestyles="--",
+                linewidths=0.8,
+                linestyles="solid",
             )
         ax1.set_title(f"Mean Basal Shear Stress: {mean_bss:.1f} kPa")
         ax1.set_xlabel("X [m]")
@@ -1209,8 +1209,8 @@ def plot_final_basal_shear_stress_and_uncertainty(
                     extent=plot_extent,
                     origin="lower",
                     colors="black",
-                    linewidths=1.5,
-                    linestyles="--",
+                    linewidths=0.8,
+                    linestyles="solid",
                 )
             ax2.set_title(f"Mean Basal Shear Stress Uncertainty: \u00b1{mean_bss_unc:.1f} kPa")
             ax2.set_xlabel("X [m]")

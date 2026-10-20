@@ -948,6 +948,64 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertTrue(expected_fig.exists())
         self.assertGreater(expected_fig.stat().st_size, 1000)
 
+    def test_diagnostic_plots_continuous_outline_contour(self):
+        """Verifies that thickness and basal shear stress diagnostic plots render continuous solid black outline contours."""
+        import matplotlib.pyplot as plt
+        from pysole.plotting import (
+            plot_final_ice_thickness_and_uncertainty,
+            plot_final_basal_shear_stress_and_uncertainty,
+        )
+
+        n = 20
+        grid = np.ones((n, n), dtype=float) * 50.0
+        unc = np.ones((n, n), dtype=float) * 5.0
+        mask = np.zeros((n, n), dtype=bool)
+        mask[5:15, 5:15] = True
+        extent = [0.0, 100.0, 0.0, 100.0]
+
+        contour_styles = []
+        orig_subplots = plt.subplots
+
+        def spy_subplots(*args, **kwargs):
+            fig, axes = orig_subplots(*args, **kwargs)
+            for ax in axes:
+                orig_ax_contour = ax.contour
+                def make_wrapper(orig_fn):
+                    def wrapper(*c_args, **c_kwargs):
+                        contour_styles.append(c_kwargs)
+                        return orig_fn(*c_args, **c_kwargs)
+                    return wrapper
+                ax.contour = make_wrapper(orig_ax_contour)
+            return fig, axes
+
+        with patch.object(plt, "subplots", side_effect=spy_subplots):
+            plot_final_ice_thickness_and_uncertainty(
+                final_thickness=grid,
+                kriged_std=unc,
+                outline_mask=mask,
+                plot_extent=extent,
+                mean_thick=50.0,
+                mean_unc=5.0,
+                plots_dir=self.output_dir,
+                interactive=False,
+            )
+            plot_final_basal_shear_stress_and_uncertainty(
+                final_bss=grid,
+                bss_std=unc,
+                outline_mask=mask,
+                plot_extent=extent,
+                mean_bss=50.0,
+                mean_bss_unc=5.0,
+                plots_dir=self.output_dir,
+                interactive=False,
+            )
+
+        self.assertEqual(len(contour_styles), 4)
+        for s in contour_styles:
+            self.assertEqual(s.get("colors"), "black")
+            self.assertEqual(s.get("linestyles"), "solid")
+            self.assertEqual(s.get("linewidths"), 0.8)
+
 
 if __name__ == "__main__":
     unittest.main()
