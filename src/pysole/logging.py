@@ -10,21 +10,7 @@ from contextlib import contextmanager
 import shutil
 from pathlib import Path
 import sys
-try:
-    from tqdm import tqdm
-except ImportError:
-    def tqdm(iterable=None, total=None, desc="", unit="", ascii=None, bar_format=None, disable=False, leave=True, **kwargs):
-        if iterable is not None:
-            return iterable
-        class DummyBar:
-            def __enter__(self): return self
-            def __exit__(self, *args): pass
-            def update(self, n=1): pass
-            def refresh(self): pass
-            def close(self): pass
-            def set_description(self, desc=None, refresh=True): pass
-            def set_description_str(self, desc=None, refresh=True): pass
-        return DummyBar()
+from tqdm import tqdm
 
 # Global PySole logger
 logger = logging.getLogger("pysole")
@@ -276,12 +262,9 @@ def get_progress_bar(
 
     Returns
     -------
-    progress_bar : PySoleProgressBar or DummyBar
+    progress_bar : PySoleProgressBar
         Configured progress bar instance.
     """
-    if not isinstance(tqdm, type):
-        return tqdm(iterable=iterable, total=total, desc=desc, unit=unit, disable=disable)
-
     bar_format = "{desc} {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} {unit} [{elapsed}<{remaining}, {rate_fmt}]"
     return PySoleProgressBar(
         iterable=iterable,

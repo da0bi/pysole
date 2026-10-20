@@ -367,7 +367,7 @@ class TestDriftComparisonFormatting(unittest.TestCase):
         self.assertIn("FAILED", table_str)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            saved_paths = save_drift_comparison_files([rec1, rec2], tmp_dir, "Pass 2")
+            saved_paths = save_drift_comparison_files(tmp_dir, post_records=[rec1, rec2])
             self.assertEqual(len(saved_paths), 3)
             for p in saved_paths:
                 self.assertTrue(p.exists())
@@ -402,7 +402,7 @@ class TestDriftComparisonFormatting(unittest.TestCase):
         self.assertIn("4.50", p1_str)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            p1_saved = save_drift_comparison_files([p1_rec], tmp_dir, "Pass 1")
+            p1_saved = save_drift_comparison_files(tmp_dir, pre_records=[p1_rec])
             self.assertEqual(len(p1_saved), 3)
             csv_content = (Path(tmp_dir) / "drift_model_comparison.csv").read_text(encoding="utf-8")
             self.assertIn("traveltime_unc_mean", csv_content)
@@ -440,7 +440,7 @@ class TestDriftComparisonFormatting(unittest.TestCase):
         self.assertIn("3.20", p2_str)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            p2_saved = save_drift_comparison_files([p2_rec], tmp_dir, "Pass 2")
+            p2_saved = save_drift_comparison_files(tmp_dir, post_records=[p2_rec])
             self.assertEqual(len(p2_saved), 3)
             csv_content = (Path(tmp_dir) / "drift_model_comparison.csv").read_text(encoding="utf-8")
             self.assertIn("thickness_unc_mean_m", csv_content)
@@ -500,7 +500,7 @@ class TestDriftComparisonFormatting(unittest.TestCase):
         self.assertNotIn("Mean Unc", p1_str)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            save_drift_comparison_files([p1_rec], tmp_dir, "Pass 1")
+            save_drift_comparison_files(tmp_dir, pre_records=[p1_rec])
             csv_content = (Path(tmp_dir) / "drift_model_comparison.csv").read_text(encoding="utf-8")
             self.assertNotIn("traveltime_unc_mean", csv_content)
             md_content = (Path(tmp_dir) / "drift_model_comparison.md").read_text(encoding="utf-8")

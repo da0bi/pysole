@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[Non-Interactive Multi-Model Suite Execution (`drift_analyzer: false`)] (`src/pysole/drift.py`, `src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_rules.py`, `tests/test_drift_analyzer_engine.py`)**:
   - **Automated Non-Interactive Plan Resolution**: When `method: "universal"` and `drift_analyzer: false` (or omitted) are configured with an explicit multi-model suite (e.g. `drift_terms: [["sia", "z_dem"], ["sia"]]`), `PySole` no longer raises a `ConfigError`. Instead, `resolve_drift_plan()` resolves to a multi-model execution plan (`analyze=True`, `interactive=False`) with an informative notice. If duplicate candidate entries collapse to a single unique model, it unwraps directly to a single-model run without cross-validation.
   - **Default Exclusion Buffer Radius**: `Solver._execute_kriging_pass()` respects `plan.interactive`, executing leave-block-out cross-validation without prompting for buffer radius or candidate selection, using the default spatial exclusion buffer radius ($r_{\text{buffer}} = a_0 / 2$).
-  - **Automated Comparison Suite**: Automatically evaluates and compares all candidate models in the suite, isolates raster and plot deliverables into model subdirectories (`results/<model_slug>/`, `figures/<model_slug>/`), and outputs unified cross-model comparison tables without requiring interactive terminal intervention.
+  - **Automated Comparison Suite**: Automatically evaluates and compares all candidate models in the suite, saves raster deliverables directly to `<output_dir>` with the applied model slug suffix, organizes diagnostic plots into `figures/<model_slug>/`, and outputs unified cross-model comparison tables without requiring interactive terminal intervention.
 
 ### Changed
 - **[Flat Output Directory & Applied Drift Model Slug in Grid Filenames] (`src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_analyzer_engine.py`, `tests/test_optional_outputs.py`, `tests/test_config.py`)**:
@@ -24,10 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Structured Markdown Tables**: Formatted markdown comparison exports (`drift_model_comparison.md`) into clean GitHub Flavored Markdown tables with structured headers and column divider bars for both Pass 1 (Traveltime Field Interpolation) and Pass 2 (Ice Thickness & Bedrock Topography Interpolation).
   - **Suppressed Redundant Sounding Export**: Suppressed redundant exports of `migrated_points.csv` during candidate multi-model evaluation runs in Pass 1, writing migrated survey soundings exclusively once for the primary (winning) model.
 
+### Removed
+- **[Dead Code Removal & Codebase Streamlining] (`src/pysole/survey_planner.py`, `src/pysole/plotting.py`, `src/pysole/logging.py`, `src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `tests/test_drift_analyzer_engine.py`, `tests/test_logging.py`)**:
+  - Removed uncalled redundant module-level `_transform_coords_to_wgs84` function from `src/pysole/survey_planner.py`, standardizing on `SurveyPlanner._transform_coords_to_wgs84`.
+  - Removed uncalled legacy `plot_calculated_bedrock_map` function from `src/pysole/plotting.py`.
+  - Removed legacy `ImportError` fallback shim and `DummyBar` for `tqdm` from `src/pysole/logging.py`, importing `tqdm` directly and streamlining `get_progress_bar`. Removed obsolete `test_works_with_the_fallback_stub` from `tests/test_logging.py`.
+  - Removed backward compatibility argument sniffing and polymorphism in `save_drift_comparison_files` (`src/pysole/drift_analyzer.py`), enforcing a clean `(plots_dir: str | Path, *, pre_records=None, post_records=None)` signature. Updated all test callers in `tests/test_drift_analyzer_engine.py`.
+  - Refined type annotation of `Solver.recommend_drift_model()` in `src/pysole/solver.py` from `list[Any]` to `list[CandidateDriftResult]`.
+
 ### Fixed
-- **[Mathematical Notation & Typographical Rendering in Documentation] (`README.md`, `docs/drift_analyzer.md`)**:
-  - Corrected unrendered math expressions ($O(N \cdot m)$, $O(N^2 \cdot m)$, inline KaTeX blocks) in `README.md`.
+- **[Documentation Alignment & Typographical Rendering] (`README.md`, `docs/drift_analyzer.md`, `docs/survey_planner.md`)**:
+  - Corrected unrendered math expressions ($O(N \cdot m)$, $O(N^2 \cdot m)$, inline KaTeX blocks) and aligned Multi-Model Comparison Suite output structure with flat `<output_dir>` in `README.md`.
   - Escaped LaTeX macro parameter `#` characters in math mode (`\text{RMSE}_{\text{top}}` instead of `\text{RMSE}_{#1}`) and escaped underscores in sort keys (`\text{is\_penalized}`) in `docs/drift_analyzer.md` to prevent KaTeX rendering syntax errors.
+  - Corrected `--prefix` CLI option default description in `docs/survey_planner.md` from `final` to `""` to match `plan_parser` argument defaults, and updated `--kc` description to clarify it as an alternative cutoff wavenumber parameter ($k_c = 2\pi / \lambda_c$).
 
 ## [0.5.3] - 2026-10-20
 

@@ -764,34 +764,15 @@ def format_drift_comparison_txt(
 
 
 def save_drift_comparison_files(
-    records: list[DriftComparisonRecord] | str | Path | None = None,
-    plots_dir: str | Path | None = None,
-    stage_label: str = "pass2",
+    plots_dir: str | Path,
     *,
     pre_records: list[DriftComparisonRecord] | None = None,
     post_records: list[DriftComparisonRecord] | None = None,
 ) -> list[Path]:
     """Saves unified comparison tables in .txt, .csv, and .md formats into plots_dir."""
-    if isinstance(records, (str, Path)) and plots_dir is None:
-        plots_dir = records
-        records = None
-
-    if plots_dir is None:
-        raise ValueError("plots_dir must be provided.")
-
     p_dir = Path(plots_dir).expanduser().resolve()
-
     p1_list = list(pre_records) if pre_records else []
     p2_list = list(post_records) if post_records else []
-
-    if isinstance(records, list) and records:
-        stage_norm = stage_label.lower().replace(" ", "").replace("_", "")
-        if "pass1" in stage_norm or "pre" in stage_norm or stage_norm == "1":
-            if not p1_list:
-                p1_list = records
-        else:
-            if not p2_list:
-                p2_list = records
 
     base_name = "drift_model_comparison"
 

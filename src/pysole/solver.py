@@ -3063,7 +3063,7 @@ class Solver:
         self,
         stage: str = "post_migration",
         interactive: bool = False,
-    ) -> list[Any]:
+    ) -> list[CandidateDriftResult]:
         """Runs Universal Kriging Drift Analyzer diagnostics to recommend optimal drift functions.
 
         Evaluates the complete default suite - Ordinary Kriging plus all 23 drift models built from SIA,

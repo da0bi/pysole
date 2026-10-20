@@ -128,20 +128,6 @@ class TestActivityIndicator(unittest.TestCase):
         self.assertEqual(_format_clock(125), "02:05")
         self.assertEqual(_format_clock(3725), "1:02:05")
 
-    def test_works_with_the_fallback_stub(self):
-        """Without tqdm the stub must accept the spinner's calls (the stub is the module-level fallback)."""
-        namespace = {}
-        source = inspect.getsource(pysole_logging).split("try:\n    from tqdm import tqdm\nexcept ImportError:\n")[1]
-        stub_source = textwrap.dedent(source.split("\n\n# Global PySole logger")[0])
-        exec(stub_source, namespace)
-        bar = namespace["tqdm"](total=None, desc="x", bar_format="{desc}", leave=True)
-        with bar:
-            bar.update(3)
-            bar.refresh()
-            bar.set_description_str("y")
-        bar.close()
-        self.assertEqual(list(namespace["tqdm"]([1, 2, 3], total=3, desc="x", unit="u", ascii=" #", disable=True)), [1, 2, 3])
-
 
 class TestTerminalUI(unittest.TestCase):
     """Test suite for Terminal UI enhancements: banner centering, section headers, and progress bar spacing."""

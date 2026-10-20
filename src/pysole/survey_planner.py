@@ -73,35 +73,6 @@ class PlannedProfileTrack:
     max_depth_m: float
 
 
-def _transform_coords_to_wgs84(coords: np.ndarray, crs: Any) -> np.ndarray:
-    """
-    Converts projected metric coordinates [X, Y] to geographic WGS84 coordinates [lon, lat].
-
-    Parameters
-    ----------
-    coords : np.ndarray
-        2D coordinate array of shape ``(N, 2)`` in projected meters.
-    crs : Any
-        Coordinate Reference System identifier (e.g. EPSG code or PROJ string).
-
-    Returns
-    -------
-    wgs_coords : np.ndarray
-        2D array of coordinates in decimal degrees ``[longitude, latitude]``.
-    """
-    if crs is None:
-        logger.warning("No CRS metadata provided for survey tracks. Exporting projected metric coordinates.")
-        return coords
-    try:
-        from pyproj import Transformer
-        transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
-        lon, lat = transformer.transform(coords[:, 0], coords[:, 1])
-        return np.column_stack([lon, lat])
-    except Exception as e:
-        logger.warning(f"Failed to transform coordinates to WGS84 (EPSG:4326): {e}. Exporting raw coordinates.")
-        return coords
-
-
 class SurveyPlanner:
     """
     Forward campaign survey planning engine for unprobed glaciers.

@@ -172,11 +172,11 @@ Computes the shallow-ice-approximation (SIA) thickness model and proposes survey
   - `--dem`: File path to surface DEM raster (required).
   - `--outline`: File path to creeping body / glacier boundary polygon (optional).
   - `--lambda-c`, `--wavelength`: Corner frequency cutoff wavelength $\lambda_c$ in meters (default `200.0` m).
-  - `--kc`: FFT corner wavenumber $k_c$ in rad/m (default `0.0314` rad/m, retained for backwards compatibility).
+  - `--kc`: FFT corner wavenumber $k_c$ in rad/m (alternative to $\lambda_c$, where $k_c = 2\pi / \lambda_c$).
   - `--tau`: Target basal shear stress $\tau_0$ in kPa (default `100`).
   - `--max-km`: Survey length budget in km (default `5.0`).
   - `--batch`: Force non-interactive batch mode (accept defaults for omitted parameters without terminal prompts).
-  - `--prefix`: Output prefix (default `final`).
+  - `--prefix`: Output prefix (default `""`).
   - `--out-dir`: Output directory for generated deliverables.
   - `--plots-dir`: Output directory for diagnostic figures.
   - `--format`: Export raster format (`tif` or `asc`, default `tif`).
