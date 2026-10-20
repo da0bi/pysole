@@ -85,14 +85,14 @@ class TestOptionalOutputs(unittest.TestCase):
         solver.run_pipeline()
 
         # Check that bedrock and optional output files were created on disk
-        self.assertTrue(os.path.exists(f"{output_stem}_bedrock.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_traveltime.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_traveltime_uncertainty.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_bedrock_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_traveltime_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_traveltime_uncertainty_ordinary.tif"))
         self.assertTrue(os.path.exists(f"{output_stem}_migrated_points.csv"))
-        self.assertTrue(os.path.exists(f"{output_stem}_thickness.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_thickness_uncertainty.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_basal_shear_stress.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_basal_shear_stress_uncertainty.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_thickness_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_thickness_uncertainty_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_basal_shear_stress_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_basal_shear_stress_uncertainty_ordinary.tif"))
 
         # Check properties on solver
         self.assertIsNotNone(solver.traveltime_grid)
@@ -143,15 +143,15 @@ class TestOptionalOutputs(unittest.TestCase):
             solver.run_pipeline()
 
         # Regular grids are created
-        self.assertTrue(os.path.exists(f"{output_stem}_bedrock.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_traveltime.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_thickness.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_basal_shear_stress.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_bedrock_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_traveltime_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_thickness_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_basal_shear_stress_ordinary.tif"))
 
         # Uncertainty files are NOT created because calculation was disabled
-        self.assertFalse(os.path.exists(f"{output_stem}_traveltime_uncertainty.tif"))
-        self.assertFalse(os.path.exists(f"{output_stem}_thickness_uncertainty.tif"))
-        self.assertFalse(os.path.exists(f"{output_stem}_basal_shear_stress_uncertainty.tif"))
+        self.assertFalse(os.path.exists(f"{output_stem}_traveltime_uncertainty_ordinary.tif"))
+        self.assertFalse(os.path.exists(f"{output_stem}_thickness_uncertainty_ordinary.tif"))
+        self.assertFalse(os.path.exists(f"{output_stem}_basal_shear_stress_uncertainty_ordinary.tif"))
 
         # Notice/warning logged for skipped exports
         export_skipped_logs = [m for m in cm.output if "[Export Skipped]" in m]
@@ -182,8 +182,8 @@ class TestOptionalOutputs(unittest.TestCase):
         solver.run_pipeline()
 
         # Thickness raster should be created, but migrated_points CSV should NOT be created
-        self.assertTrue(os.path.exists(f"{output_stem}_bedrock.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_thickness.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_bedrock_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem}_thickness_ordinary.tif"))
         self.assertFalse(os.path.exists(f"{output_stem}_migrated_points.csv"))
 
     def test_save_bedrock_grid_flag(self):
@@ -207,8 +207,8 @@ class TestOptionalOutputs(unittest.TestCase):
         }
         solver_disabled = Solver.from_config(cfg_disabled)
         solver_disabled.run_pipeline()
-        self.assertFalse(os.path.exists(f"{output_stem_disabled}_bedrock.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem_disabled}_thickness.tif"))
+        self.assertFalse(os.path.exists(f"{output_stem_disabled}_bedrock_ordinary.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem_disabled}_thickness_ordinary.tif"))
 
         output_stem_enabled = os.path.join(self.temp_dir, "output_withbed")
         cfg_enabled = {
@@ -229,7 +229,7 @@ class TestOptionalOutputs(unittest.TestCase):
         }
         solver_enabled = Solver.from_config(cfg_enabled)
         solver_enabled.run_pipeline()
-        self.assertTrue(os.path.exists(f"{output_stem_enabled}_bedrock.tif"))
+        self.assertTrue(os.path.exists(f"{output_stem_enabled}_bedrock_ordinary.tif"))
 
     def _write_pipeline_config(self, tag, outputs, n=16, survey_data_type="depth", extra_cfg=None):
         """Small survey pipeline config in <temp>/<tag>; returns (config_path, work_dir)."""
@@ -321,7 +321,7 @@ class TestOptionalOutputs(unittest.TestCase):
 
                 msg = f"{survey_type}/flag={flag}: {saves} {points_exports}"
                 self.assertEqual(len([s for s in saves if "_bedrock" in s]), 1 if flag else 0, msg)
-                self.assertEqual((out / "r_bedrock.tif").exists(), flag, msg)
+                self.assertEqual((out / "r_bedrock_ordinary.tif").exists(), flag, msg)
                 expected_once = 1 if survey_type != "depth" else 0
                 self.assertEqual(len([s for s in saves if "_traveltime" in s]), expected_once, msg)
                 self.assertEqual(points_exports.count("migrated_points"), expected_once, msg)
@@ -341,7 +341,7 @@ class TestOptionalOutputs(unittest.TestCase):
             )
             data_dir.mkdir(parents=True, exist_ok=True)
             run_from_config(config_path=cfg_file, is_batch=True)
-            self.assertTrue((data_dir / "run_bedrock.tif").exists())
+            self.assertTrue((data_dir / "run_bedrock_ordinary.tif").exists())
             figs = list((data_dir / "figures").glob("*.png"))
             self.assertGreater(len(figs), 0, f"no figures in {data_dir / 'figures'}")
             self.assertFalse((work / "pysole").exists(), "stray default pysole/ folder was created")

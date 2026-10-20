@@ -857,13 +857,11 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
         p1_md = Path(self.plots_dir, "drift_model_comparison.md").read_text(encoding="utf-8")
         self.assertIn("Mean Uncertainty", p1_md)
 
-        # Check subfolders for Pass 1 rasters
-        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "z_dem", "traveltime.tif")))
-        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "ordinary", "traveltime.tif")))
-        # Check migrated points in root results
+        # Check Pass 1 rasters with model slug in flat output_dir
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "traveltime_z_dem.tif")))
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "traveltime_ordinary.tif")))
+        # Check migrated points in root results without model slug
         self.assertTrue(os.path.exists(os.path.join(self.output_dir, "migrated_points.csv")))
-        # Verify NO traveltime in root results
-        self.assertFalse(os.path.exists(os.path.join(self.output_dir, "traveltime.tif")))
 
         # 2. Pass 2: calculate_bedrock() & finalize_bedrock()
         self.solver.calculate_bedrock(interactive=False)
@@ -898,11 +896,14 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
                 p = os.path.join(self.plots_dir, slug, f"{fig_num}_{fig_name}_{slug}.png")
                 self.assertTrue(os.path.exists(p), f"Missing figure: {p}")
 
-        # Check Pass 2 rasters in subfolders
-        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "z_dem", "thickness.tif")))
-        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "ordinary", "thickness.tif")))
-        # Verify NO thickness raster in root results
-        self.assertFalse(os.path.exists(os.path.join(self.output_dir, "thickness.tif")))
+        # Check Pass 2 rasters with model slug in flat output_dir
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "thickness_z_dem.tif")))
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "thickness_ordinary.tif")))
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "bedrock_z_dem.tif")))
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "bedrock_ordinary.tif")))
+        # Verify no subdirectories in output_dir
+        subdirs = [d for d in os.listdir(self.output_dir) if os.path.isdir(os.path.join(self.output_dir, d))]
+        self.assertEqual(len(subdirs), 0, f"Expected no subdirectories in output_dir, found: {subdirs}")
 
     def test_multi_model_suite_with_drift_analyzer_false_executes_non_interactively(self):
         # Create solver with drift_analyzer explicitly set to False, but with multi-model suites
@@ -941,6 +942,26 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
         self.assertIsNotNone(bed_map)
         self.assertEqual(len(solver.post_selected_drift_models), 2)
 
+        # Verify rasters with drift model suffix in flat results
+        for slug in ["z_dem", "ordinary"]:
+            self.assertTrue(
+                os.path.exists(os.path.join(outputs, f"bedrock_{slug}.tif")),
+                f"Missing bedrock_{slug}.tif in {outputs}",
+            )
+
+        # Verify no subdirectories in outputs
+        subdirs = [d for d in os.listdir(outputs) if os.path.isdir(os.path.join(outputs, d))]
+        self.assertEqual(len(subdirs), 0, f"Expected no subdirectories in outputs, found: {subdirs}")
+
+        # Verify drift model specific subfolder structure in plots
+        for slug in ["z_dem", "ordinary"]:
+            slug_plots = os.path.join(plots, slug)
+            self.assertTrue(os.path.isdir(slug_plots), f"Missing model plot directory {slug_plots}")
+            self.assertTrue(
+                os.path.exists(os.path.join(slug_plots, f"06_bedrock_elevation_and_uncertainty_{slug}.png")),
+                f"Missing figure 06 in {slug_plots}",
+            )
+
         # Unified comparison files exist and contain both passes
         for ext in ["txt", "csv", "md"]:
             comp_file = os.path.join(plots, f"drift_model_comparison.{ext}")
@@ -949,6 +970,8 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
         md_text = Path(plots, "drift_model_comparison.md").read_text(encoding="utf-8")
         self.assertIn("Pass 1: Traveltime Field Interpolation", md_text)
         self.assertIn("Pass 2: Ice Thickness & Bedrock Topography Interpolation", md_text)
+        self.assertIn("`ordinary`", md_text)
+        self.assertIn("`z_dem`", md_text)
 
 
 if __name__ == "__main__":

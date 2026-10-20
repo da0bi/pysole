@@ -733,8 +733,19 @@ class Solver:
                 stem = stem[:-len(ext)]
         return stem
 
-    def _get_output_filepath(self, suffix: str, ext: str = "", subfolder: str | None = None) -> str:
-        """Constructs an output filepath incorporating optional prefix, clean suffix, and subfolder.
+    def _get_applied_drift_slug(self, stage_key: str) -> str:
+        """Resolves the canonical filesystem slug for the applied drift model of a stage."""
+        stage_norm = "pre_migration" if ("pre" in stage_key.lower() or "1" in stage_key) else "post_migration"
+        selected = self.pre_selected_drift_models if stage_norm == "pre_migration" else self.post_selected_drift_models
+        if selected:
+            return slugify_drift_name(selected[0].terms)
+        plan = self._drift_plan(stage_norm)
+        if plan.method == "universal":
+            return slugify_drift_name(plan.terms)
+        return "ordinary"
+
+    def _get_output_filepath(self, suffix: str, ext: str = "", model_slug: str | None = None) -> str:
+        """Constructs an output filepath incorporating optional prefix, clean suffix, and applied drift model slug.
 
         Parameters
         ----------
@@ -742,8 +753,8 @@ class Solver:
             Dataset identifier (e.g. 'bedrock', 'thickness', 'migrated_points').
         ext : str, optional
             File extension (e.g. '.csv'). If omitted, no extension is appended (suitable for raster save).
-        subfolder : str or None, optional
-            Optional subdirectory within the results folder (e.g. model slug).
+        model_slug : str or None, optional
+            Applied drift model slug appended to the filename (e.g. 'sia', 'z_dem', 'ordinary').
 
         Returns
         -------
@@ -752,11 +763,10 @@ class Solver:
         """
         raw_prefix = (self.outputs_config_obj.output_prefix or "").strip()
         ext_clean = f".{ext.lstrip('.')}" if ext else ""
+        full_suffix = f"{suffix}_{model_slug}" if model_slug else suffix
+
         if not raw_prefix:
-            base_rel = f"{suffix}{ext_clean}"
-            if subfolder:
-                base_rel = str(Path(subfolder) / base_rel)
-            return self.resolve_path(base_rel)
+            return self.resolve_path(f"{full_suffix}{ext_clean}")
 
         prefix_path = Path(raw_prefix)
         for e in [".tif", ".tiff", ".asc", ".csv", ".npy", ".geotiff"]:
@@ -765,12 +775,9 @@ class Solver:
                 break
 
         parent = prefix_path.parent
-        stem = prefix_path.name
-        filename = f"{stem}_{suffix}{ext_clean}"
-        if subfolder:
-            target = parent / subfolder / filename if str(parent) != "." else Path(subfolder) / filename
-        else:
-            target = parent / filename if str(parent) != "." else Path(filename)
+        stem = prefix_path.name.rstrip("_")
+        filename = f"{stem}_{full_suffix}{ext_clean}" if stem else f"{full_suffix}{ext_clean}"
+        target = parent / filename if str(parent) != "." else Path(filename)
         return self.resolve_path(str(target))
 
     def _get_resolved_output_prefix(self) -> str:
@@ -795,7 +802,7 @@ class Solver:
         return self.resolve_path(str(prefix_path))
 
     def _export_optional_raster(
-        self, grid: np.ndarray | None, suffix: str, name: str, subfolder: str | None = None
+        self, grid: np.ndarray | None, suffix: str, name: str, model_slug: str | None = None
     ) -> str | list[str] | None:
         """Exports a 2D spatial grid to raster files if the grid is populated.
 
@@ -807,8 +814,8 @@ class Solver:
             Filename suffix appended to base output prefix (e.g. 'thickness', 'bedrock').
         name : str
             Human-readable dataset name for logging.
-        subfolder : str or None, optional
-            Optional subdirectory within results/ for model-specific raster storage.
+        model_slug : str or None, optional
+            Applied drift model slug appended to the filename.
 
         Returns
         -------
@@ -817,7 +824,7 @@ class Solver:
         """
         if grid is None:
             return None
-        filepath = self._get_output_filepath(suffix, subfolder=subfolder)
+        filepath = self._get_output_filepath(suffix, model_slug=model_slug)
         fmt = self.outputs_config_obj.output_format
         raster = BedrockMap(grid=grid, bounds=self.bounds, crs=self.meta.get("crs"), transform=self.meta.get("transform"), name=name)
         saved = raster.save(filepath, formats=fmt)
@@ -875,7 +882,7 @@ class Solver:
         return False
 
     def export_outputs(
-        self, stage: str | None = None, subfolder: str | None = None, export_points: bool = True
+        self, stage: str | None = None, model_slug: str | None = None, export_points: bool = True
     ) -> list[str]:
         """
         Exports optional spatial datasets according to configured boolean output flags.
@@ -884,8 +891,9 @@ class Solver:
         ----------
         stage : str, optional
             Workflow stage name ('migration', 'finalization', or None to export all stages).
-        subfolder : str or None, optional
-            Optional subdirectory within results/ to store exported raster datasets.
+        model_slug : str or None, optional
+            Applied drift model slug appended to the filename. If None, automatically resolved
+            from the active stage's applied drift model.
         export_points : bool, optional
             If True (default), exports optional point datasets (such as migrated survey points).
             If False, point dataset export is skipped (e.g. during secondary candidate comparison runs).
@@ -899,55 +907,57 @@ class Solver:
         cfg_out = self.outputs_config_obj
 
         if stage is None or stage == "migration":
+            m_slug = model_slug if model_slug is not None else self._get_applied_drift_slug("pre_migration")
             if cfg_out.save_traveltime_grid and self._traveltime_grid is not None:
                 res = self._export_optional_raster(
-                    self._traveltime_grid, suffix="traveltime", name="traveltime", subfolder=subfolder
+                    self._traveltime_grid, suffix="traveltime", name="traveltime", model_slug=m_slug
                 )
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_traveltime_uncertainty:
                 if self._uncertainty_exportable(self._traveltime_std, "traveltime uncertainty"):
                     res = self._export_optional_raster(
-                        self._traveltime_std, suffix="traveltime_uncertainty", name="traveltime uncertainty", subfolder=subfolder
+                        self._traveltime_std, suffix="traveltime_uncertainty", name="traveltime uncertainty", model_slug=m_slug
                     )
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
             if export_points and cfg_out.save_migrated_points and self.migrated_points is not None:
-                # Migrated points are always saved to root results/
+                # Migrated points are always saved to root results/ without model slug
                 res = self._export_optional_points_csv(self.migrated_points, suffix="migrated_points")
                 if res:
                     saved.append(res)
 
         if stage is None or stage == "finalization":
+            f_slug = model_slug if model_slug is not None else self._get_applied_drift_slug("post_migration")
             if cfg_out.save_thickness_grid and self.final_thickness is not None:
                 res = self._export_optional_raster(
-                    self.final_thickness, suffix="thickness", name="thickness", subfolder=subfolder
+                    self.final_thickness, suffix="thickness", name="thickness", model_slug=f_slug
                 )
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_thickness_uncertainty:
                 if self._uncertainty_exportable(self.kriged_std, "thickness uncertainty"):
                     res = self._export_optional_raster(
-                        self.kriged_std, suffix="thickness_uncertainty", name="thickness uncertainty", subfolder=subfolder
+                        self.kriged_std, suffix="thickness_uncertainty", name="thickness uncertainty", model_slug=f_slug
                     )
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_basal_shear_stress and self.final_bss is not None:
                 res = self._export_optional_raster(
-                    self.final_bss, suffix="basal_shear_stress", name="basal shear stress", subfolder=subfolder
+                    self.final_bss, suffix="basal_shear_stress", name="basal shear stress", model_slug=f_slug
                 )
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_basal_shear_stress_uncertainty:
                 if self._uncertainty_exportable(self.bss_std, "basal shear stress uncertainty"):
                     res = self._export_optional_raster(
-                        self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty", subfolder=subfolder
+                        self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty", model_slug=f_slug
                     )
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
             if getattr(cfg_out, "save_bedrock_grid", True) and self.final_grid is not None:
                 res = self._export_optional_raster(
-                    self.final_grid, suffix="bedrock", name="bedrock", subfolder=subfolder
+                    self.final_grid, suffix="bedrock", name="bedrock", model_slug=f_slug
                 )
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
@@ -1932,7 +1942,7 @@ class Solver:
                 if idx == 0:
                     cand_tt = tt_grid
                     cand_std = self._traveltime_std
-                    self.export_outputs("migration", subfolder=cand_slug)
+                    self.export_outputs("migration", model_slug=cand_slug)
                     t_mean, t_median, t_std, t_max = _compute_distribution_stats(cand_tt, self.outline_mask)
                     failed = False
                 else:
@@ -1976,7 +1986,7 @@ class Solver:
                         orig_std = self._traveltime_std
                         self._traveltime_grid = cand_tt
                         self._traveltime_std = cand_std
-                        self.export_outputs("migration", subfolder=cand_slug, export_points=False)
+                        self.export_outputs("migration", model_slug=cand_slug, export_points=False)
                         self._traveltime_grid = orig_tt
                         self._traveltime_std = orig_std
 
@@ -2757,7 +2767,7 @@ class Solver:
         self.final_grid = self.blended_bedrock
 
         if self.post_selected_drift_models:
-            self.export_outputs("finalization", subfolder=primary_slug)
+            self.export_outputs("finalization", model_slug=primary_slug)
             records: list[DriftComparisonRecord] = []
             prim_cand = self.post_selected_drift_models[0]
             prim_rank = prim_cand.rank or 1
@@ -2984,7 +2994,7 @@ class Solver:
                     self.final_grid = cand_blended
                     self.kriged_std = cand_kriged_std
                     self.bss_std = cand_bss_std
-                    self.export_outputs("finalization", subfolder=cand_slug)
+                    self.export_outputs("finalization", model_slug=cand_slug)
 
                     ch_mean, ch_med, ch_std, ch_max = _compute_distribution_stats(cand_final_thick, self.outline_mask)
                     cb_mean, cb_med, cb_std, cb_max = _compute_distribution_stats(cand_final_bss, self.outline_mask)

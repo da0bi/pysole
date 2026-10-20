@@ -52,7 +52,7 @@ class TestConfigWorkflowWuk(unittest.TestCase):
             self.assertIsInstance(bedrock_map, pysole.BedrockMap)
             self.assertEqual(bedrock_map.shape, (179, 213))
             self.assertTrue(np.all(np.isfinite(bedrock_map.grid)))
-            self.assertTrue(os.path.exists(os.path.join(tmp_dir, "wuk_final_bedrock.tif")))
+            self.assertTrue(os.path.exists(os.path.join(tmp_dir, "wuk_final_bedrock_ordinary.tif")))
 
     def test_save_multi_format_all(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

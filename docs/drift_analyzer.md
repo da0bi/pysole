@@ -466,7 +466,7 @@ Users can pre-define an explicit candidate suite in `pysole.json` under `kriging
 When an explicit suite of candidate models is configured in JSON, the Drift Analyzer automatically evaluates all specified models and executes the multi-model comparison pipeline **non-interactively without prompt interruption**.
 
 #### 3. Data Storage & Output Directory Architecture
-To keep output repositories clean and avoid collision between competing models, `PySole` enforces a strict subfolder structure:
+To keep output repositories organized and avoid collision between competing models without deep directory nesting:
 
 - **Diagnostic Plots (`figures/`)**:
   - Global pre-interpolation diagnostic plots (`01` through `05`: variograms, BSS optimization curves, 3D ray migration vectors) remain in root `figures/`.
@@ -492,9 +492,9 @@ To keep output repositories clean and avoid collision between competing models, 
         ├── 06_bedrock_elevation_and_uncertainty_ordinary.png
         └── ...
     ```
-- **Spatial Rasters & Tables (`results/`)**:
-  - All GeoTIFF spatial raster outputs (`thickness.tif`, `bedrock.tif`, `basal_shear_stress.tif`, `traveltime.tif`, and their corresponding `*_uncertainty.tif` grids) are saved **strictly into the corresponding model subfolder `results/<model_slug>/`**. No duplicate rasters are created in root `results/`.
-  - Global survey observation soundings and migration coordinate tables (`migrated_points.csv`) remain in root `results/`.
+- **Spatial Rasters & Tables (`results/` or configured `<output_dir>`)**:
+  - All GeoTIFF and raster outputs append the applied drift model slug at the end of the filename (e.g. `[<output_prefix>_]bedrock_<model_slug>.tif`, `[<output_prefix>_]thickness_<model_slug>.tif`, `[<output_prefix>_]traveltime_<model_slug>.tif`, `[<output_prefix>_]basal_shear_stress_<model_slug>.tif`, and uncertainty rasters `[<output_prefix>_]*_uncertainty_<model_slug>.tif`) and are saved **directly into the defined `<output_dir>`** (flat output directory structure; no model subdirectories are generated in `<output_dir>`).
+  - Global survey observation soundings and migration coordinate tables (`[<output_prefix>_]migrated_points.csv`) remain in the root `<output_dir>` without a drift model slug.
 
 #### 4. Cross-Model Comparison Tables
 When multiple drift models are evaluated or selected for production comparison, `PySole` formats and exports comprehensive comparison files in three synchronized formats under `figures/`:
