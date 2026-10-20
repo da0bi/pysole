@@ -10,21 +10,25 @@ import contextlib
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
 
-from pysole.drift import DRIFT_PRIMITIVES, build_drift_suite
+from pysole.drift import DRIFT_PRIMITIVES, build_drift_suite, slugify_drift_name
 from pysole.drift_analyzer import (
     FAILED_AICC,
     CandidateDriftResult,
     DriftAnalyzer,
+    DriftComparisonRecord,
     add_ranking_deltas,
     farthest_point_indices,
+    format_drift_comparison_table,
     format_ranking_table,
     parse_model_selection,
     resolve_rmse_unit,
+    save_drift_comparison_files,
 )
 from pysole.interpolation import DriftBasis
 from pysole.kriging_core import KrigingSystem
@@ -237,11 +241,13 @@ class TestParseModelSelection(unittest.TestCase):
 
     def test_empty_keeps_the_recommendation(self):
         for text in ("", "   ", "#"):
-            self.assertEqual(self.parse(text), (None, None))
+            self.assertEqual(self.parse(text), ([self.results[0]], None))
 
     def test_row_numbers(self):
         for text, row in (("1", 0), ("3", 2), (" #2 ", 1)):
-            self.assertIs(self.parse(text)[0], self.results[row])
+            chosen, error = self.parse(text)
+            self.assertIsNone(error)
+            self.assertEqual(chosen, [self.results[row]])
 
     def test_row_out_of_range(self):
         for text in ("0", "4", "99"):
@@ -252,13 +258,50 @@ class TestParseModelSelection(unittest.TestCase):
     def test_names_and_term_lists(self):
         for text in ("sia + z_dem", "z_dem, sia", "['sia', 'z_dem']", '("z_dem" + "sia")', "[sia,z_dem]"):
             with self.subTest(text=text):
-                self.assertIs(self.parse(text)[0], self.results[0])
-        self.assertIs(self.parse("linear_xy")[0], self.results[2])
+                chosen, error = self.parse(text)
+                self.assertIsNone(error)
+                self.assertEqual(chosen, [self.results[0]])
+        chosen, error = self.parse("linear_xy")
+        self.assertIsNone(error)
+        self.assertEqual(chosen, [self.results[2]])
 
     def test_ordinary(self):
         for text in ("ordinary", "Ordinary", "[]", "()"):
             with self.subTest(text=text):
-                self.assertIs(self.parse(text)[0], self.results[1])
+                chosen, error = self.parse(text)
+                self.assertIsNone(error)
+                self.assertEqual(chosen, [self.results[1]])
+
+    def test_ranges_and_multi_selection(self):
+        # Range 1-3
+        chosen, err = self.parse("1-3")
+        self.assertIsNone(err)
+        self.assertEqual(chosen, self.results)
+
+        # Range 1-2
+        chosen, err = self.parse("1-2")
+        self.assertIsNone(err)
+        self.assertEqual(chosen, [self.results[0], self.results[1]])
+
+        # Inverted range returns clear validation error
+        chosen, err = self.parse("2-1")
+        self.assertIsNone(chosen)
+        self.assertIn("must be <= end row", err)
+
+        # Comma list
+        chosen, err = self.parse("1, 3")
+        self.assertIsNone(err)
+        self.assertEqual(chosen, [self.results[0], self.results[2]])
+
+        # Mixed range and list with duplicates preserves order of appearance
+        chosen, err = self.parse("3, 1-2, 3")
+        self.assertIsNone(err)
+        self.assertEqual(chosen, [self.results[2], self.results[0], self.results[1]])
+
+    def test_range_out_of_bounds(self):
+        chosen, err = self.parse("1-5")
+        self.assertIsNone(chosen)
+        self.assertIn("out of bounds", err)
 
     def test_unknown_term(self):
         chosen, error = self.parse("sia + banana")
@@ -271,6 +314,172 @@ class TestParseModelSelection(unittest.TestCase):
         chosen, error = self.parse("curvature_dem")
         self.assertIsNone(chosen)
         self.assertIn("not evaluated", error)
+
+
+class TestDriftComparisonFormatting(unittest.TestCase):
+    def test_slugify_drift_name(self):
+        self.assertEqual(slugify_drift_name([]), "ordinary")
+        self.assertEqual(slugify_drift_name(["sia", "curvature_dem"]), "sia_curvature_dem")
+        self.assertEqual(slugify_drift_name("sia + curvature_dem"), "sia_curvature_dem")
+        self.assertEqual(slugify_drift_name("ordinary"), "ordinary")
+
+    def test_format_and_save_comparison_tables(self):
+        rec1 = DriftComparisonRecord(
+            pass_label="Pass 2",
+            rank=1,
+            model_name="sia + curvature_dem",
+            model_slug="sia_curvature_dem",
+            terms=["sia", "curvature_dem"],
+            cv_rmse=2.5,
+            delta_rmse_pct=0.0,
+            aicc=100.0,
+            delta_aicc=0.0,
+            vif_max=1.2,
+            rmse_unit="m",
+            status="OK",
+            thick_mean=50.0,
+            thick_median=48.0,
+            thick_std=10.0,
+            thick_max=85.0,
+            bss_mean=90.0,
+            bss_median=88.0,
+            bss_std=15.0,
+            bss_max=120.0,
+        )
+        rec2 = DriftComparisonRecord(
+            pass_label="Pass 2",
+            rank=2,
+            model_name="ordinary",
+            model_slug="ordinary",
+            terms=[],
+            cv_rmse=3.0,
+            delta_rmse_pct=20.0,
+            aicc=110.0,
+            delta_aicc=10.0,
+            vif_max=1.0,
+            rmse_unit="m",
+            status="FAILED",
+            is_failed=True,
+        )
+        table_str = format_drift_comparison_table([rec1, rec2], "Pass 2")
+        self.assertIn("DRIFT MODEL INTERPOLATION COMPARISON TABLE (PASS 2)", table_str)
+        self.assertIn("sia + curvature_dem", table_str)
+        self.assertIn("FAILED", table_str)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            saved_paths = save_drift_comparison_files([rec1, rec2], tmp_dir, "Pass 2")
+            self.assertEqual(len(saved_paths), 3)
+            for p in saved_paths:
+                self.assertTrue(p.exists())
+                content = p.read_text(encoding="utf-8")
+                self.assertIn("sia + curvature_dem", content)
+                self.assertIn("FAILED", content)
+
+    def test_format_and_save_comparison_tables_with_uncertainty(self):
+        # Pass 1 with uncertainty
+        p1_rec = DriftComparisonRecord(
+            pass_label="Pass 1",
+            rank=1,
+            model_name="sia",
+            model_slug="sia",
+            terms=["sia"],
+            cv_rmse=1.2,
+            delta_rmse_pct=0.0,
+            aicc=50.0,
+            delta_aicc=0.0,
+            vif_max=1.0,
+            rmse_unit="ns",
+            status="VALID",
+            target_mean=100.0,
+            target_median=95.0,
+            target_std=20.0,
+            target_max=160.0,
+            target_unit="ns",
+            unc_mean=4.5,
+        )
+        p1_str = format_drift_comparison_table([p1_rec], "Pass 1")
+        self.assertIn("Mean Unc", p1_str)
+        self.assertIn("4.50", p1_str)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            p1_saved = save_drift_comparison_files([p1_rec], tmp_dir, "Pass 1")
+            self.assertEqual(len(p1_saved), 3)
+            csv_content = (Path(tmp_dir) / "drift_model_comparison_pass1.csv").read_text(encoding="utf-8")
+            self.assertIn("traveltime_unc_mean", csv_content)
+            self.assertIn("4.5000", csv_content)
+            md_content = (Path(tmp_dir) / "drift_model_comparison_pass1.md").read_text(encoding="utf-8")
+            self.assertIn("Mean Uncertainty", md_content)
+            self.assertIn("4.50 ns", md_content)
+
+        # Pass 2 with uncertainty
+        p2_rec = DriftComparisonRecord(
+            pass_label="Pass 2",
+            rank=1,
+            model_name="sia",
+            model_slug="sia",
+            terms=["sia"],
+            cv_rmse=2.0,
+            delta_rmse_pct=0.0,
+            aicc=80.0,
+            delta_aicc=0.0,
+            vif_max=1.0,
+            rmse_unit="m",
+            status="VALID",
+            thick_mean=45.0,
+            thick_median=42.0,
+            thick_std=12.0,
+            thick_max=80.0,
+            bss_mean=85.0,
+            bss_median=80.0,
+            bss_std=14.0,
+            bss_max=115.0,
+            unc_mean=3.2,
+        )
+        p2_str = format_drift_comparison_table([p2_rec], "Pass 2")
+        self.assertIn("Mean Unc", p2_str)
+        self.assertIn("3.20", p2_str)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            p2_saved = save_drift_comparison_files([p2_rec], tmp_dir, "Pass 2")
+            self.assertEqual(len(p2_saved), 3)
+            csv_content = (Path(tmp_dir) / "drift_model_comparison_pass2.csv").read_text(encoding="utf-8")
+            self.assertIn("thickness_unc_mean_m", csv_content)
+            self.assertIn("3.2000", csv_content)
+            md_content = (Path(tmp_dir) / "drift_model_comparison_pass2.md").read_text(encoding="utf-8")
+            self.assertIn("Mean Unc (m)", md_content)
+            self.assertIn("3.20", md_content)
+
+    def test_format_and_save_comparison_tables_without_uncertainty(self):
+        p1_rec = DriftComparisonRecord(
+            pass_label="Pass 1",
+            rank=1,
+            model_name="ordinary",
+            model_slug="ordinary",
+            terms=[],
+            cv_rmse=1.5,
+            delta_rmse_pct=0.0,
+            aicc=60.0,
+            delta_aicc=0.0,
+            vif_max=1.0,
+            rmse_unit="ns",
+            status="VALID",
+            target_mean=100.0,
+            target_median=95.0,
+            target_std=20.0,
+            target_max=160.0,
+            target_unit="ns",
+            unc_mean=None,
+        )
+        p1_str = format_drift_comparison_table([p1_rec], "Pass 1")
+        self.assertNotIn("Mean Unc", p1_str)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_drift_comparison_files([p1_rec], tmp_dir, "Pass 1")
+            csv_content = (Path(tmp_dir) / "drift_model_comparison_pass1.csv").read_text(encoding="utf-8")
+            self.assertNotIn("traveltime_unc_mean", csv_content)
+            md_content = (Path(tmp_dir) / "drift_model_comparison_pass1.md").read_text(encoding="utf-8")
+            self.assertNotIn("Mean Uncertainty", md_content)
+
 
 
 class TestFarthestPoints(unittest.TestCase):
@@ -542,6 +751,126 @@ class TestSolverUsesFittedVariogram(unittest.TestCase):
         self.assertEqual(results[0].delta_rmse_pct, 0.0)
         best = [r for r in results if not r.is_penalized]
         self.assertEqual(min(r.delta_aicc for r in best), 0.0)
+
+
+class TestMultiModelComparisonIntegration(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        geom, self.dem, self.slope, _, _ = make_asymmetric_fixture()
+        x, y, z = make_points(geom, self.dem)
+        self.plots_dir = os.path.join(self._tmp.name, "figures")
+        self.output_dir = os.path.join(self._tmp.name, "results")
+        os.makedirs(self.plots_dir, exist_ok=True)
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        cfg = {
+            "kriging_parameters": {
+                "pre_migration": {
+                    "method": "universal",
+                    "drift_terms": [["z_dem"], []],
+                    "calculate_uncertainty": True,
+                },
+                "post_migration": {
+                    "method": "universal",
+                    "drift_terms": [["z_dem"], []],
+                    "calculate_uncertainty": True,
+                },
+            },
+            "outputs": {
+                "plots_dir": self.plots_dir,
+                "output_dir": self.output_dir,
+                "save_thickness_grid": True,
+                "save_thickness_uncertainty": True,
+                "save_traveltime_grid": True,
+                "save_traveltime_uncertainty": True,
+                "save_migrated_points": True,
+                "save_basal_shear_stress": True,
+            },
+        }
+
+        self.solver = Solver(
+            dem=self.dem,
+            bounds=geom.bounds,
+            survey_data_type="one_way_traveltime",
+            pre_kriging_method="universal",
+            post_kriging_method="universal",
+            pre_variogram_model="spherical",
+            post_variogram_model="spherical",
+            pre_drift_analyzer=True,
+            post_drift_analyzer=True,
+            output_dir=self.output_dir,
+            plots_dir=self.plots_dir,
+            show_progress=False,
+            config=cfg,
+        )
+        self.solver.opt_slope = self.slope
+        self.solver.opt_kc = 0.03
+        pts = np.column_stack((x, y, np.zeros_like(x), z))
+        self.solver.survey_points = pts.copy()
+
+    def test_multi_model_pipeline_execution_and_exports(self):
+        # 1. Pass 1: migrate_eikonal()
+        mig_pts = self.solver.migrate_eikonal(interactive=False)
+        self.assertIsNotNone(mig_pts)
+        self.assertEqual(len(self.solver.pre_selected_drift_models), 2)
+
+        # Check Pass 1 comparison files
+        for ext in ["txt", "csv", "md"]:
+            comp_file = os.path.join(self.plots_dir, f"drift_model_comparison_pass1.{ext}")
+            self.assertTrue(os.path.exists(comp_file), f"Missing {comp_file}")
+
+        p1_txt = Path(self.plots_dir, "drift_model_comparison_pass1.txt").read_text(encoding="utf-8")
+        self.assertIn("Mean Unc", p1_txt)
+        p1_csv = Path(self.plots_dir, "drift_model_comparison_pass1.csv").read_text(encoding="utf-8")
+        self.assertIn("traveltime_unc_mean", p1_csv)
+        p1_md = Path(self.plots_dir, "drift_model_comparison_pass1.md").read_text(encoding="utf-8")
+        self.assertIn("Mean Uncertainty", p1_md)
+
+        # Check subfolders for Pass 1 rasters
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "z_dem", "traveltime.tif")))
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "ordinary", "traveltime.tif")))
+        # Check migrated points in root results
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "migrated_points.csv")))
+        # Verify NO traveltime in root results
+        self.assertFalse(os.path.exists(os.path.join(self.output_dir, "traveltime.tif")))
+
+        # 2. Pass 2: calculate_bedrock() & finalize_bedrock()
+        self.solver.calculate_bedrock(interactive=False)
+        bed_map = self.solver.finalize_bedrock(interactive=False)
+        self.assertIsNotNone(bed_map)
+        self.assertEqual(len(self.solver.post_selected_drift_models), 2)
+
+        # Check Pass 2 comparison files
+        for ext in ["txt", "csv", "md"]:
+            comp_file = os.path.join(self.plots_dir, f"drift_model_comparison_pass2.{ext}")
+            self.assertTrue(os.path.exists(comp_file), f"Missing {comp_file}")
+
+        p2_txt = Path(self.plots_dir, "drift_model_comparison_pass2.txt").read_text(encoding="utf-8")
+        self.assertIn("Mean Unc", p2_txt)
+        p2_csv = Path(self.plots_dir, "drift_model_comparison_pass2.csv").read_text(encoding="utf-8")
+        self.assertIn("thickness_unc_mean_m", p2_csv)
+        p2_md = Path(self.plots_dir, "drift_model_comparison_pass2.md").read_text(encoding="utf-8")
+        self.assertIn("Mean Unc (m)", p2_md)
+
+        # Check Pass 2 plots in subfolders
+        for slug in ["z_dem", "ordinary"]:
+            for fig_num, fig_name in [
+                ("06", "bedrock_elevation_and_uncertainty"),
+                ("07", "final_embedded_bedrock"),
+                ("08", "final_thickness_and_uncertainty"),
+                ("09", "final_thickness_histogram"),
+                ("10", "final_basal_shear_stress_and_uncertainty"),
+                ("11", "final_basal_shear_stress_histogram"),
+            ]:
+                p = os.path.join(self.plots_dir, slug, f"{fig_num}_{fig_name}_{slug}.png")
+                self.assertTrue(os.path.exists(p), f"Missing figure: {p}")
+
+        # Check Pass 2 rasters in subfolders
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "z_dem", "thickness.tif")))
+        self.assertTrue(os.path.exists(os.path.join(self.output_dir, "ordinary", "thickness.tif")))
+        # Verify NO thickness raster in root results
+        self.assertFalse(os.path.exists(os.path.join(self.output_dir, "thickness.tif")))
 
 
 if __name__ == "__main__":

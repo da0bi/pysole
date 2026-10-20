@@ -30,7 +30,7 @@ from .logging import (
 )
 from . import plotting
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 
 __all__ = [
     "Solver",

@@ -91,6 +91,30 @@ def format_drift_name(terms: list[str] | tuple[str, ...]) -> str:
     return " + ".join(sorted(terms, key=lambda t: _CANONICAL_RANK.get(t, len(_CANONICAL_RANK))))
 
 
+def slugify_drift_name(terms: list[str] | tuple[str, ...] | str) -> str:
+    """Formats drift terms or name into a filesystem-safe lowercase slug with underscores.
+
+    Examples
+    --------
+    >>> slugify_drift_name([])
+    'ordinary'
+    >>> slugify_drift_name(['sia', 'linear_xy'])
+    'sia_linear_xy'
+    >>> slugify_drift_name('sia + linear_xy + quadratic_xy')
+    'sia_linear_xy_quadratic_xy'
+    """
+    if isinstance(terms, str):
+        clean = terms.strip().lower()
+        if clean == ORDINARY_NAME or not clean or clean in ("[]", "()"):
+            return ORDINARY_NAME
+        tokens = [t.strip() for t in clean.replace("+", " ").replace(",", " ").split() if t.strip()]
+        return "_".join(tokens)
+    if not terms:
+        return ORDINARY_NAME
+    sorted_terms = sorted(terms, key=lambda t: _CANONICAL_RANK.get(t, len(_CANONICAL_RANK)))
+    return "_".join(sorted_terms)
+
+
 def normalize_method(method: Any) -> str:
     """
     Normalizes a Kriging method name (case-insensitive, ``*_kriging`` spelling accepted).
@@ -194,8 +218,9 @@ def build_drift_suite(drift_terms: list | None) -> list[list[str]]:
     ----------
     drift_terms : list or None
         ``None``: default suite - Ordinary (``[]``) plus all 23 non-empty subsets of the five primitives
-        that do not contain ``linear_xy`` and ``quadratic_xy`` together. A list: all such subsets of the listed
-        primitives, plus Ordinary if the list contains one nested ``[]``.
+        that do not contain ``linear_xy`` and ``quadratic_xy`` together. A list of primitives: all subsets of the
+        listed primitives, plus Ordinary if the list contains one nested ``[]``. If a list of candidate model
+        lists is provided (e.g. ``[["sia", "z_dem"], ["sia"], []]``), those explicit models form the suite directly.
 
     Returns
     -------
@@ -204,6 +229,20 @@ def build_drift_suite(drift_terms: list | None) -> list[list[str]]:
     """
     if drift_terms is None:
         return _suite_from_primitives(list(DRIFT_PRIMITIVES), True)
+    if any(isinstance(elem, (list, tuple)) and len(elem) > 0 for elem in drift_terms):
+        suite: list[list[str]] = []
+        for cand in drift_terms:
+            cand_terms = list(cand)
+            if cand_terms:
+                for t in cand_terms:
+                    if t not in _CANONICAL_RANK:
+                        raise ConfigError(f"Unknown drift term {t!r}. Expected primitive terms from {list(DRIFT_PRIMITIVES)}.")
+                cand_sorted = sorted(set(cand_terms), key=_CANONICAL_RANK.__getitem__)
+            else:
+                cand_sorted = []
+            if cand_sorted not in suite:
+                suite.append(cand_sorted)
+        return suite
     primitives, has_ordinary = parse_drift_terms(drift_terms, allow_ordinary_candidate=True)
     return _suite_from_primitives(primitives, has_ordinary)
 
@@ -343,7 +382,19 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
                 "Kriging method 'universal' requires drift_terms (a list of drift terms) or an enabled "
                 "drift_analyzer - specify drift_terms or use method 'ordinary'."
             )
-        raw_terms, _ = parse_drift_terms(drift_terms)
+        if isinstance(drift_terms, (list, tuple)) and any(isinstance(elem, (list, tuple)) and len(elem) > 0 for elem in drift_terms):
+            if len(drift_terms) == 1 and isinstance(drift_terms[0], (list, tuple)):
+                effective_terms = list(drift_terms[0])
+            else:
+                raise ConfigError(
+                    f"drift_terms specifies a candidate suite of multiple models ({len(drift_terms)} candidates), "
+                    "but drift_analyzer is false. Set drift_analyzer: true to evaluate a candidate suite, "
+                    "or specify a flat list of drift terms for a single model."
+                )
+        else:
+            effective_terms = drift_terms
+
+        raw_terms, _ = parse_drift_terms(effective_terms)
         terms, pruned = prune_redundant_drift_terms(raw_terms)
         notices = list(slow_universal)
         if pruned:

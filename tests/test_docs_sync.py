@@ -20,8 +20,9 @@ from tests.test_drift_covariates import make_asymmetric_fixture, make_points
 
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
-GUIDE = ROOT / "docs" / "drift_analyzer_&_survey_planner.md"
-LIVING_DOCS = (README, GUIDE)
+DRIFT_GUIDE = ROOT / "docs" / "drift_analyzer.md"
+SURVEY_GUIDE = ROOT / "docs" / "survey_planner.md"
+LIVING_DOCS = (README, DRIFT_GUIDE, SURVEY_GUIDE)
 
 
 def read(path: Path) -> str:
@@ -42,10 +43,10 @@ def leaves(tree: dict, prefix: str = "") -> list[tuple[str, object]]:
     return found
 
 
-@unittest.skipUnless(README.exists() and GUIDE.exists(), "not running from a source checkout")
+@unittest.skipUnless(README.exists() and DRIFT_GUIDE.exists() and SURVEY_GUIDE.exists(), "not running from a source checkout")
 class TestDriftModelListsMatchCode(unittest.TestCase):
     def test_guide_lists_every_multi_drift_model_with_the_n_drift_of_the_code(self):
-        text = read(GUIDE)
+        text = read(DRIFT_GUIDE)
         section = text[text.index("### 1.8 Systematic Multi-Drift Model Suite"):text.index("### 1.9")]
         documented = {}
         for terms, n_drift in re.findall(r"\*\*`(\[[^`]*\])` \(\$n_\{\\text\{drift\}\} = (\d+)\$\)\*\*", section):
@@ -69,7 +70,7 @@ class TestDriftModelListsMatchCode(unittest.TestCase):
         self.assertEqual(documented, {frozenset(t) for t in build_drift_suite(None) if len(t) >= 2})
 
     def test_guide_documents_the_single_primitives_and_ordinary(self):
-        text = read(GUIDE)
+        text = read(DRIFT_GUIDE)
         for term in DRIFT_PRIMITIVES:
             self.assertIn(f"`{term}`", text)
         self.assertEqual(len(build_drift_suite(None)), 24)
@@ -77,10 +78,10 @@ class TestDriftModelListsMatchCode(unittest.TestCase):
         self.assertIn("24 candidates", read(README))
 
 
-@unittest.skipUnless(README.exists() and GUIDE.exists(), "not running from a source checkout")
+@unittest.skipUnless(README.exists() and DRIFT_GUIDE.exists() and SURVEY_GUIDE.exists(), "not running from a source checkout")
 class TestSuiteCountsAndRulesMatchCode(unittest.TestCase):
     def test_documented_candidate_counts(self):
-        text = read(GUIDE)
+        text = read(DRIFT_GUIDE)
         section = text[text.index("#### Suite expansion"):text.index("#### Winner handling")]
         rows = re.findall(r"^\| `(.+?)` \| (\d+|error)[ |(]", section, re.M)
         self.assertGreaterEqual(len(rows), 6)
@@ -99,7 +100,7 @@ class TestSuiteCountsAndRulesMatchCode(unittest.TestCase):
         self.assertEqual([lvl for lvl, _ in plan.notices], ["info"])
 
     def test_rule_table_rows(self):
-        guide = read(GUIDE)
+        guide = read(DRIFT_GUIDE)
         for phrase in (
             "`ordinary` overrides `drift_analyzer` and `drift_terms`",
             "ONE multi-drift model",
@@ -143,14 +144,14 @@ class TestSuiteCountsAndRulesMatchCode(unittest.TestCase):
 
     def test_ranking_wording_matches_the_sort_key(self):
         """S12: the guide must not claim an RMSE-first ranking; the code sorts by (penalized, AICc, RMSE)."""
-        text = read(GUIDE)
+        text = read(DRIFT_GUIDE)
         self.assertIn("AICc ascending", text)
         self.assertNotIn("sorted primarily by **$\\text{RMSE}_{\\text{CV}}$**", text)
         source = read(ROOT / "src" / "pysole" / "drift_analyzer.py")
         self.assertIn("results.sort(key=lambda r: (r.is_penalized, r.aicc, r.cv_rmse))", source)
 
 
-@unittest.skipUnless(README.exists() and GUIDE.exists(), "not running from a source checkout")
+@unittest.skipUnless(README.exists() and DRIFT_GUIDE.exists() and SURVEY_GUIDE.exists(), "not running from a source checkout")
 class TestJsonExamplesMatchCode(unittest.TestCase):
     def test_readme_configuration_example_equals_the_default_configuration(self):
         example = json_blocks(read(README))[0]
@@ -178,7 +179,7 @@ class TestJsonExamplesMatchCode(unittest.TestCase):
         self.assertEqual(missing, [])
 
 
-@unittest.skipUnless(README.exists() and GUIDE.exists(), "not running from a source checkout")
+@unittest.skipUnless(README.exists() and DRIFT_GUIDE.exists() and SURVEY_GUIDE.exists(), "not running from a source checkout")
 class TestDocumentationIntegrity(unittest.TestCase):
     def test_docs_have_no_absolute_or_dead_links(self):
         """README / CHANGELOG / docs links are relative and resolve to existing files."""
@@ -205,7 +206,8 @@ class TestDocumentationIntegrity(unittest.TestCase):
             *(root / "docs" / n for n in (
                 "pysole_interpolation_practice_guide.md",
                 "gok_thickness_analysis_report.md",
-                "drift_analyzer_&_survey_planner.md",
+                "drift_analyzer.md",
+                "survey_planner.md",
                 "kriging_performance_report.md",
                 "release_guide.md",
             )),

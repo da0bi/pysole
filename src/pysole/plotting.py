@@ -755,6 +755,7 @@ def plot_kriging_bedrock_and_uncertainty(
     plots_dir: str | Path | None = None,
     interactive: bool = False,
     output_prefix: str = "",
+    model_suffix: str = "",
 ) -> None:
     """
     Plot 2-panel figure showing Kriging-interpolated bedrock elevation and standard uncertainty.
@@ -780,6 +781,10 @@ def plot_kriging_bedrock_and_uncertainty(
         Target directory to save the output figure PNG. If None, figure is not saved.
     interactive : bool, default=False
         If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
+    model_suffix : str, default=""
+        Optional drift model identifier slug appended to the figure filename.
 
     Returns
     -------
@@ -828,7 +833,8 @@ def plot_kriging_bedrock_and_uncertainty(
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
-        _save_figure(plt, plots_dir, f"06_{pfx_str}bedrock_elevation_and_uncertainty.png")
+        sfx = f"_{model_suffix.lstrip('_')}" if model_suffix else ""
+        _save_figure(plt, plots_dir, f"06_{pfx_str}bedrock_elevation_and_uncertainty{sfx}.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -944,6 +950,7 @@ def plot_final_blended_bedrock_map(
     plots_dir: str | Path | None = None,
     interactive: bool = False,
     output_prefix: str = "",
+    model_suffix: str = "",
 ) -> None:
     """
     Plot final geomorphologically blended bedrock elevation raster.
@@ -964,6 +971,8 @@ def plot_final_blended_bedrock_map(
         If True and a GUI backend is active, displays the figure interactively.
     output_prefix : str, default=""
         Configured output prefix prepended to figure filename.
+    model_suffix : str, default=""
+        Optional drift model identifier slug appended to the figure filename.
 
     Returns
     -------
@@ -981,7 +990,8 @@ def plot_final_blended_bedrock_map(
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
-        _save_figure(plt, plots_dir, f"07_{pfx_str}final_embedded_bedrock.png")
+        sfx = f"_{model_suffix.lstrip('_')}" if model_suffix else ""
+        _save_figure(plt, plots_dir, f"07_{pfx_str}final_embedded_bedrock{sfx}.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -1001,6 +1011,7 @@ def plot_final_ice_thickness_and_uncertainty(
     plots_dir: str | Path | None = None,
     interactive: bool = False,
     output_prefix: str = "",
+    model_suffix: str = "",
 ) -> None:
     """
     Plot 2-panel figure showing final ice thickness map and Kriging standard uncertainty.
@@ -1029,6 +1040,10 @@ def plot_final_ice_thickness_and_uncertainty(
         Target directory to save the output figure PNG. If None, figure is not saved.
     interactive : bool, default=False
         If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
+    model_suffix : str, default=""
+        Optional drift model identifier slug appended to the figure filename.
 
     Returns
     -------
@@ -1090,7 +1105,8 @@ def plot_final_ice_thickness_and_uncertainty(
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
-        _save_figure(plt, plots_dir, f"08_{pfx_str}final_thickness_and_uncertainty.png")
+        sfx = f"_{model_suffix.lstrip('_')}" if model_suffix else ""
+        _save_figure(plt, plots_dir, f"08_{pfx_str}final_thickness_and_uncertainty{sfx}.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -1107,6 +1123,7 @@ def plot_final_ice_thickness_histogram(
     plots_dir: str | Path | None = None,
     interactive: bool = False,
     output_prefix: str = "",
+    model_suffix: str = "",
 ) -> None:
     """
     Plot statistical frequency histogram of the final ice thickness distribution.
@@ -1127,6 +1144,10 @@ def plot_final_ice_thickness_histogram(
         Target directory to save the output figure PNG. If None, figure is not saved.
     interactive : bool, default=False
         If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
+    model_suffix : str, default=""
+        Optional drift model identifier slug appended to the figure filename.
 
     Returns
     -------
@@ -1180,7 +1201,8 @@ def plot_final_ice_thickness_histogram(
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
-        _save_figure(plt, plots_dir, f"09_{pfx_str}final_thickness_histogram.png")
+        sfx = f"_{model_suffix.lstrip('_')}" if model_suffix else ""
+        _save_figure(plt, plots_dir, f"09_{pfx_str}final_thickness_histogram{sfx}.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -1200,6 +1222,7 @@ def plot_final_basal_shear_stress_and_uncertainty(
     plots_dir: str | Path | None = None,
     interactive: bool = False,
     output_prefix: str = "",
+    model_suffix: str = "",
 ) -> None:
     """
     Plot 2-panel figure showing Basal Shear Stress distribution and propagated Kriging uncertainty.
@@ -1228,6 +1251,10 @@ def plot_final_basal_shear_stress_and_uncertainty(
         Target directory to save the output figure PNG. If None, figure is not saved.
     interactive : bool, default=False
         If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
+    model_suffix : str, default=""
+        Optional drift model identifier slug appended to the figure filename.
 
     Returns
     -------
@@ -1292,7 +1319,8 @@ def plot_final_basal_shear_stress_and_uncertainty(
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
-        _save_figure(plt, plots_dir, f"10_{pfx_str}final_basal_shear_stress_and_uncertainty.png")
+        sfx = f"_{model_suffix.lstrip('_')}" if model_suffix else ""
+        _save_figure(plt, plots_dir, f"10_{pfx_str}final_basal_shear_stress_and_uncertainty{sfx}.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)
@@ -1309,6 +1337,7 @@ def plot_final_basal_shear_stress_histogram(
     plots_dir: str | Path | None = None,
     interactive: bool = False,
     output_prefix: str = "",
+    model_suffix: str = "",
 ) -> None:
     """
     Plot statistical frequency histogram of the final Basal Shear Stress distribution.
@@ -1329,6 +1358,10 @@ def plot_final_basal_shear_stress_histogram(
         Target directory to save the output figure PNG. If None, figure is not saved.
     interactive : bool, default=False
         If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
+    model_suffix : str, default=""
+        Optional drift model identifier slug appended to the figure filename.
 
     Returns
     -------
@@ -1382,7 +1415,8 @@ def plot_final_basal_shear_stress_histogram(
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""
-        _save_figure(plt, plots_dir, f"11_{pfx_str}final_basal_shear_stress_histogram.png")
+        sfx = f"_{model_suffix.lstrip('_')}" if model_suffix else ""
+        _save_figure(plt, plots_dir, f"11_{pfx_str}final_basal_shear_stress_histogram{sfx}.png")
 
         if interactive:
             _safe_interactive_pause(plt, 0.5)

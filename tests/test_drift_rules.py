@@ -681,5 +681,92 @@ class TestNoLegacyNamesInSource(unittest.TestCase):
                 self.assertNotIn("def format_drift_name", content)
 
 
+class TestSingleModelAutoDisableAndNonFlatSuites(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        geom = GridGeometry.create((12, 12), dx=10.0, dy=10.0, bounds=BOUNDS)
+        xx, yy = geom.meshgrid
+        self.dem = 1000.0 + 0.2 * (xx - BOUNDS[0]) + 0.1 * (yy - BOUNDS[1])
+        self.out = os.path.join(self._tmp.name, "out")
+        os.makedirs(self.out, exist_ok=True)
+
+    def test_non_flat_suite_with_analyzer_false_raises_config_error(self):
+        with self.assertRaises(ConfigError) as ctx:
+            resolve_drift_plan("universal", False, [["sia", "z_dem"], ["sia"], []])
+        self.assertIn("specifies a candidate suite of multiple models", str(ctx.exception))
+        self.assertIn("Set drift_analyzer: true", str(ctx.exception))
+
+    def test_single_non_flat_candidate_with_analyzer_false_unwraps(self):
+        plan = resolve_drift_plan("universal", False, [["sia", "z_dem"]])
+        self.assertEqual(plan.method, "universal")
+        self.assertEqual(plan.terms, ["sia", "z_dem"])
+        self.assertFalse(plan.analyze)
+
+    def test_load_config_auto_disables_analyzer_for_single_model(self):
+        # Flat single primitive
+        cfg1 = load_config({
+            "outputs": {"output_dir": self.out},
+            "kriging_parameters": {
+                "post_migration": {
+                    "method": "universal",
+                    "drift_analyzer": True,
+                    "drift_terms": ["sia"],
+                }
+            }
+        })
+        self.assertFalse(cfg1["kriging_parameters"]["post_migration"]["drift_analyzer"])
+
+        # Non-flat single candidate
+        cfg2 = load_config({
+            "outputs": {"output_dir": self.out},
+            "kriging_parameters": {
+                "post_migration": {
+                    "method": "universal",
+                    "drift_analyzer": True,
+                    "drift_terms": [["sia", "z_dem"]],
+                }
+            }
+        })
+        self.assertFalse(cfg2["kriging_parameters"]["post_migration"]["drift_analyzer"])
+
+        # Multi-model suite keeps drift_analyzer: True
+        cfg3 = load_config({
+            "outputs": {"output_dir": self.out},
+            "kriging_parameters": {
+                "post_migration": {
+                    "method": "universal",
+                    "drift_analyzer": True,
+                    "drift_terms": [["sia", "z_dem"], ["sia"], []],
+                }
+            }
+        })
+        self.assertTrue(cfg3["kriging_parameters"]["post_migration"]["drift_analyzer"])
+
+    def test_solver_auto_disables_analyzer_attribute_for_single_model(self):
+        s1 = Solver(
+            dem=self.dem,
+            bounds=BOUNDS,
+            survey_data_type="depth",
+            post_kriging_method="universal",
+            post_drift_analyzer=True,
+            post_drift_terms=["sia"],
+            output_dir=self.out,
+        )
+        self.assertFalse(s1.post_drift_analyzer)
+
+        s2 = Solver(
+            dem=self.dem,
+            bounds=BOUNDS,
+            survey_data_type="depth",
+            post_kriging_method="universal",
+            post_drift_analyzer=True,
+            post_drift_terms=[["sia", "z_dem"]],
+            output_dir=self.out,
+        )
+        self.assertFalse(s2.post_drift_analyzer)
+
+
 if __name__ == "__main__":
     unittest.main()
+

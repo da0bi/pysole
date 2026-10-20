@@ -624,7 +624,9 @@ def load_config(
         sec["method"] = method
         sec["drift_terms"] = terms
         try:
-            resolve_drift_plan(method, sec.get("drift_analyzer", False), terms, kp.get("engine", "native"))
+            plan = resolve_drift_plan(method, sec.get("drift_analyzer", False), terms, kp.get("engine", "native"))
+            if sec.get("drift_analyzer", False) and not plan.analyze and method == "universal":
+                sec["drift_analyzer"] = False
         except ConfigError as exc:
             raise ConfigError(f"kriging_parameters.{section_name}: {exc}") from exc
 

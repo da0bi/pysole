@@ -30,13 +30,40 @@ from .drift import (
     normalize_engine,
     normalize_method,
     resolve_drift_plan,
+    slugify_drift_name,
 )
 from .smoothing import compute_gradients, precompute_fft_grid, fft_gaussian_smooth_precomputed, compute_surface_curvature
 from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir, resolve_plots_dir, configured_output_dir, sanitize_config, warn_unknown_config_keys, validate_memory_fraction
 from .logging import logger, log_section_header, end_terminal_block
-from .drift_analyzer import FAILED_AICC, CandidateDriftResult, DriftAnalyzer
+from .drift_analyzer import (
+    FAILED_AICC,
+    CandidateDriftResult,
+    DriftAnalyzer,
+    DriftComparisonRecord,
+    format_drift_comparison_table,
+    save_drift_comparison_files,
+)
 from .survey_planner import SurveyPlanner
 import sys
+
+
+def _compute_distribution_stats(
+    grid: np.ndarray, outline_mask: np.ndarray | None = None
+) -> tuple[float, float, float, float]:
+    """Computes (mean, median, std, max) across strictly positive finite cells in the active domain."""
+    finite = np.isfinite(grid) & (grid > 0.0)
+    if outline_mask is not None and np.any(outline_mask):
+        valid = grid[outline_mask & finite]
+    else:
+        valid = grid[finite]
+    if valid.size == 0:
+        return 0.0, 0.0, 0.0, 0.0
+    return (
+        float(np.mean(valid)),
+        float(np.median(valid)),
+        float(np.std(valid)),
+        float(np.max(valid)),
+    )
 
 
 def _prompt_finalization_bool(prompt_text: str, default: bool) -> bool:
@@ -251,6 +278,26 @@ class Solver:
             If the Kriging method, engine or drift settings are invalid or contradictory; raised before any
             file is read.
         """
+        self.config = dict(config) if isinstance(config, dict) else {}
+        if self.config:
+            krig_cfg = self.config.get("kriging_parameters", {})
+            if pre_drift_terms is None and "drift_terms" in krig_cfg.get("pre_migration", {}):
+                pre_drift_terms = krig_cfg.get("pre_migration", {}).get("drift_terms")
+            if post_drift_terms is None and "drift_terms" in krig_cfg.get("post_migration", {}):
+                post_drift_terms = krig_cfg.get("post_migration", {}).get("drift_terms")
+            if pre_kriging_method is None and "method" in krig_cfg.get("pre_migration", {}):
+                pre_kriging_method = krig_cfg.get("pre_migration", {}).get("method")
+            if post_kriging_method is None and "method" in krig_cfg.get("post_migration", {}):
+                post_kriging_method = krig_cfg.get("post_migration", {}).get("method")
+            if not pre_drift_analyzer and "drift_analyzer" in krig_cfg.get("pre_migration", {}):
+                pre_drift_analyzer = krig_cfg.get("pre_migration", {}).get("drift_analyzer", False)
+            if not post_drift_analyzer and "drift_analyzer" in krig_cfg.get("post_migration", {}):
+                post_drift_analyzer = krig_cfg.get("post_migration", {}).get("drift_analyzer", False)
+            if not pre_calculate_uncertainty and "calculate_uncertainty" in krig_cfg.get("pre_migration", {}):
+                pre_calculate_uncertainty = krig_cfg.get("pre_migration", {}).get("calculate_uncertainty", False)
+            if not post_calculate_uncertainty and "calculate_uncertainty" in krig_cfg.get("post_migration", {}):
+                post_calculate_uncertainty = krig_cfg.get("post_migration", {}).get("calculate_uncertainty", False)
+
         # Validate the Kriging drift configuration first: nothing is read or computed for an invalid setup.
         self.engine_type = normalize_engine(kriging_engine)
         self.pre_interpolation_target = str(pre_interpolation_target).upper().strip()
@@ -267,8 +314,14 @@ class Solver:
         self.pre_drift_terms = pre_terms
         self.post_kriging_method = normalize_method(post_method)
         self.post_drift_terms = post_terms
-        self._log_drift_plan("Pass 1 - Constructing Traveltime Grid", self._drift_plan("pre_migration"))
-        self._log_drift_plan("Pass 2 - Constructing Depth Grid", self._drift_plan("post_migration"))
+        pre_plan = self._drift_plan("pre_migration")
+        post_plan = self._drift_plan("post_migration")
+        self._log_drift_plan("Pass 1 - Constructing Traveltime Grid", pre_plan)
+        self._log_drift_plan("Pass 2 - Constructing Depth Grid", post_plan)
+        if self.pre_kriging_method == "universal" and not pre_plan.analyze:
+            self.pre_drift_analyzer = False
+        if self.post_kriging_method == "universal" and not post_plan.analyze:
+            self.post_drift_analyzer = False
 
         self.output_dir = output_dir
         self.survey_data_path = survey_data_path
@@ -363,6 +416,8 @@ class Solver:
         self.final_bss: np.ndarray | None = None
         self.bss_std: np.ndarray | None = None
         self.opt_variogram_params: dict[str, float] | None = None
+        self.pre_selected_drift_models: list[CandidateDriftResult] = []
+        self.post_selected_drift_models: list[CandidateDriftResult] = []
         if config is not None:
             # Unknown (e.g. outdated) keys are dropped with one warning; see config.sanitize_config
             self.config, _unknown_keys = sanitize_config(config)
@@ -676,8 +731,8 @@ class Solver:
                 stem = stem[:-len(ext)]
         return stem
 
-    def _get_output_filepath(self, suffix: str, ext: str = "") -> str:
-        """Constructs an output filepath incorporating optional prefix and clean suffix.
+    def _get_output_filepath(self, suffix: str, ext: str = "", subfolder: str | None = None) -> str:
+        """Constructs an output filepath incorporating optional prefix, clean suffix, and subfolder.
 
         Parameters
         ----------
@@ -685,6 +740,8 @@ class Solver:
             Dataset identifier (e.g. 'bedrock', 'thickness', 'migrated_points').
         ext : str, optional
             File extension (e.g. '.csv'). If omitted, no extension is appended (suitable for raster save).
+        subfolder : str or None, optional
+            Optional subdirectory within the results folder (e.g. model slug).
 
         Returns
         -------
@@ -694,7 +751,10 @@ class Solver:
         raw_prefix = (self.outputs_config_obj.output_prefix or "").strip()
         ext_clean = f".{ext.lstrip('.')}" if ext else ""
         if not raw_prefix:
-            return self.resolve_path(f"{suffix}{ext_clean}")
+            base_rel = f"{suffix}{ext_clean}"
+            if subfolder:
+                base_rel = str(Path(subfolder) / base_rel)
+            return self.resolve_path(base_rel)
 
         prefix_path = Path(raw_prefix)
         for e in [".tif", ".tiff", ".asc", ".csv", ".npy", ".geotiff"]:
@@ -705,7 +765,10 @@ class Solver:
         parent = prefix_path.parent
         stem = prefix_path.name
         filename = f"{stem}_{suffix}{ext_clean}"
-        target = parent / filename if str(parent) != "." else filename
+        if subfolder:
+            target = parent / subfolder / filename if str(parent) != "." else Path(subfolder) / filename
+        else:
+            target = parent / filename if str(parent) != "." else Path(filename)
         return self.resolve_path(str(target))
 
     def _get_resolved_output_prefix(self) -> str:
@@ -729,7 +792,9 @@ class Solver:
 
         return self.resolve_path(str(prefix_path))
 
-    def _export_optional_raster(self, grid: np.ndarray | None, suffix: str, name: str) -> str | list[str] | None:
+    def _export_optional_raster(
+        self, grid: np.ndarray | None, suffix: str, name: str, subfolder: str | None = None
+    ) -> str | list[str] | None:
         """Exports a 2D spatial grid to raster files if the grid is populated.
 
         Parameters
@@ -740,6 +805,8 @@ class Solver:
             Filename suffix appended to base output prefix (e.g. 'thickness', 'bedrock').
         name : str
             Human-readable dataset name for logging.
+        subfolder : str or None, optional
+            Optional subdirectory within results/ for model-specific raster storage.
 
         Returns
         -------
@@ -748,7 +815,7 @@ class Solver:
         """
         if grid is None:
             return None
-        filepath = self._get_output_filepath(suffix)
+        filepath = self._get_output_filepath(suffix, subfolder=subfolder)
         fmt = self.outputs_config_obj.output_format
         raster = BedrockMap(grid=grid, bounds=self.bounds, crs=self.meta.get("crs"), transform=self.meta.get("transform"), name=name)
         saved = raster.save(filepath, formats=fmt)
@@ -805,7 +872,7 @@ class Solver:
         )
         return False
 
-    def export_outputs(self, stage: str | None = None) -> list[str]:
+    def export_outputs(self, stage: str | None = None, subfolder: str | None = None) -> list[str]:
         """
         Exports optional spatial datasets according to configured boolean output flags.
 
@@ -813,6 +880,8 @@ class Solver:
         ----------
         stage : str, optional
             Workflow stage name ('migration', 'finalization', or None to export all stages).
+        subfolder : str or None, optional
+            Optional subdirectory within results/ to store exported raster datasets.
 
         Returns
         -------
@@ -824,40 +893,55 @@ class Solver:
 
         if stage is None or stage == "migration":
             if cfg_out.save_traveltime_grid and self._traveltime_grid is not None:
-                res = self._export_optional_raster(self._traveltime_grid, suffix="traveltime", name="traveltime")
+                res = self._export_optional_raster(
+                    self._traveltime_grid, suffix="traveltime", name="traveltime", subfolder=subfolder
+                )
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_traveltime_uncertainty:
                 if self._uncertainty_exportable(self._traveltime_std, "traveltime uncertainty"):
-                    res = self._export_optional_raster(self._traveltime_std, suffix="traveltime_uncertainty", name="traveltime uncertainty")
+                    res = self._export_optional_raster(
+                        self._traveltime_std, suffix="traveltime_uncertainty", name="traveltime uncertainty", subfolder=subfolder
+                    )
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_migrated_points and self.migrated_points is not None:
+                # Migrated points are always saved to root results/
                 res = self._export_optional_points_csv(self.migrated_points, suffix="migrated_points")
                 if res:
                     saved.append(res)
 
         if stage is None or stage == "finalization":
             if cfg_out.save_thickness_grid and self.final_thickness is not None:
-                res = self._export_optional_raster(self.final_thickness, suffix="thickness", name="thickness")
+                res = self._export_optional_raster(
+                    self.final_thickness, suffix="thickness", name="thickness", subfolder=subfolder
+                )
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_thickness_uncertainty:
                 if self._uncertainty_exportable(self.kriged_std, "thickness uncertainty"):
-                    res = self._export_optional_raster(self.kriged_std, suffix="thickness_uncertainty", name="thickness uncertainty")
+                    res = self._export_optional_raster(
+                        self.kriged_std, suffix="thickness_uncertainty", name="thickness uncertainty", subfolder=subfolder
+                    )
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_basal_shear_stress and self.final_bss is not None:
-                res = self._export_optional_raster(self.final_bss, suffix="basal_shear_stress", name="basal shear stress")
+                res = self._export_optional_raster(
+                    self.final_bss, suffix="basal_shear_stress", name="basal shear stress", subfolder=subfolder
+                )
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
             if cfg_out.save_basal_shear_stress_uncertainty:
                 if self._uncertainty_exportable(self.bss_std, "basal shear stress uncertainty"):
-                    res = self._export_optional_raster(self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty")
+                    res = self._export_optional_raster(
+                        self.bss_std, suffix="basal_shear_stress_uncertainty", name="basal shear stress uncertainty", subfolder=subfolder
+                    )
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
             if getattr(cfg_out, "save_bedrock_grid", True) and self.final_grid is not None:
-                res = self._export_optional_raster(self.final_grid, suffix="bedrock", name="bedrock")
+                res = self._export_optional_raster(
+                    self.final_grid, suffix="bedrock", name="bedrock", subfolder=subfolder
+                )
                 if res:
                     saved.extend([res] if isinstance(res, str) else res)
 
@@ -1398,7 +1482,9 @@ class Solver:
             velocity=velocity,
         )
         use_var_params = variogram_params if variogram_params is not None else self.opt_variogram_params
-        return analyzer.run_diagnostics(
+        krig_cfg = self.config.get("kriging_parameters", {}).get(stage_key, {}) if hasattr(self, "config") and isinstance(self.config, dict) else {}
+        is_predefined = bool(krig_cfg.get("drift_terms"))
+        eval_results = analyzer.run_diagnostics(
             x_pts=sample_pts[:, 0],
             y_pts=sample_pts[:, 1],
             z_values=sample_pts[:, 2],
@@ -1409,7 +1495,13 @@ class Solver:
             variogram_params=use_var_params,
             profile_data=sample_pts[:, 3] if sample_pts.shape[1] >= 4 else None,
             interactive=interactive,
+            is_predefined_suite=is_predefined,
         )
+        if stage_key == "pre_migration":
+            self.pre_selected_drift_models = analyzer.selected_models
+        else:
+            self.post_selected_drift_models = analyzer.selected_models
+        return eval_results
 
     def _ensure_optimized(self, stage_key: str, interactive: bool | None = None) -> None:
         """Guarantees BSS slope optimization and variogram parameters have been resolved for the stage."""
@@ -1423,6 +1515,25 @@ class Solver:
             if self.post_opt_res is None:
                 if self.opt_slope is None or (self.pre_opt_res is not None and self.migrated_points is not None):
                     self.optimize_bss(stage="post_migration", interactive=is_inter, prefix="03_")
+
+    def _effective_variogram_params(
+        self, sample_pts: np.ndarray, target_upper: str
+    ) -> dict[str, float] | None:
+        """Builds effective variogram parameters, scaling sill to target variance for direct targets."""
+        if target_upper == "P" or self.opt_variogram_params is None:
+            return self.opt_variogram_params
+        z_var = float(np.var(sample_pts[:, 2])) if len(sample_pts) > 1 else 1.0
+        opt_sill = float(self.opt_variogram_params.get("sill", z_var))
+        nugget_ratio = (
+            float(self.opt_variogram_params.get("nugget", 0.0)) / opt_sill
+            if opt_sill > 0
+            else 0.0
+        )
+        return {
+            "range": float(self.opt_variogram_params["range"]),
+            "sill": z_var if z_var > 0 else 1.0,
+            "nugget": nugget_ratio * z_var,
+        }
 
     def _execute_kriging_pass(
         self,
@@ -1474,24 +1585,7 @@ class Solver:
 
         self._ensure_optimized(stage_key, interactive=interactive_optimization)
         sample_pts = self.get_sample_points(stage_key, target_upper, interactive=interactive_optimization)
-
-        # Build effective variogram parameters: for direct physical targets ('T' or 'D'), scale sill
-        # to the variance of the interpolated field while preserving the fitted spatial range a_0.
-        if target_upper == "P" or self.opt_variogram_params is None:
-            effective_var_params = self.opt_variogram_params
-        else:
-            z_var = float(np.var(sample_pts[:, 2])) if len(sample_pts) > 1 else 1.0
-            opt_sill = float(self.opt_variogram_params.get("sill", z_var))
-            nugget_ratio = (
-                float(self.opt_variogram_params.get("nugget", 0.0)) / opt_sill
-                if opt_sill > 0
-                else 0.0
-            )
-            effective_var_params = {
-                "range": float(self.opt_variogram_params["range"]),
-                "sill": z_var if z_var > 0 else 1.0,
-                "nugget": nugget_ratio * z_var,
-            }
+        effective_var_params = self._effective_variogram_params(sample_pts, target_upper)
 
         # The plan was validated (and its notices logged) when the Solver was built; it is re-resolved here
         # silently because ``calculate_bedrock(method=...)`` may replace the method of the stage.
@@ -1809,7 +1903,110 @@ class Solver:
                     break
             end_terminal_block()
 
-        self.export_outputs("migration")
+        if self.pre_selected_drift_models:
+            records: list[DriftComparisonRecord] = []
+            target_upper = self.pre_interpolation_target.upper().strip()
+            tt_unit = "m" if self.survey_data_type == "depth" else "ns"
+            sample_pts = self.get_sample_points("pre_migration", target_upper, interactive=effective_opt_interactive)
+            eff_var = self._effective_variogram_params(sample_pts, target_upper)
+
+            for idx, cand in enumerate(self.pre_selected_drift_models):
+                cand_slug = slugify_drift_name(cand.terms)
+                cand_rank = cand.rank or (idx + 1)
+                if idx == 0:
+                    cand_tt = tt_grid
+                    cand_std = self._traveltime_std
+                    self.export_outputs("migration", subfolder=cand_slug)
+                    t_mean, t_median, t_std, t_max = _compute_distribution_stats(cand_tt, self.outline_mask)
+                    failed = False
+                else:
+                    logger.info(f"   [Drift Analyzer] Drift model '{cand.name}' selected for the production Kriging run.")
+                    ext_drifts = self.get_drift_grids(cand.terms)
+                    cand_method = "universal" if cand.terms else "ordinary"
+                    try:
+                        k_cand = kriging_interpolation(
+                            sample_points=sample_pts,
+                            geometry=self.geometry,
+                            method=cand_method,
+                            variogram_model=self.pre_variogram_model,
+                            variogram_params=eff_var,
+                            dem_grid=self.dem_grid,
+                            opt_slope_grid=self.opt_slope,
+                            drift_terms=cand.terms,
+                            outline_mask=self.outline_mask,
+                            include_zero_boundary_condition=self.pre_zero_boundary,
+                            n_cores=self.n_cores,
+                            engine=self.engine_type,
+                            slope_floor_deg=self.slope_floor_deg,
+                            show_progress=self.show_progress,
+                            external_drift_grid=ext_drifts if len(ext_drifts) > 0 else None,
+                            return_variance=self.pre_calculate_uncertainty,
+                            max_memory_fraction=self.max_memory_fraction,
+                        )
+                        if target_upper == "P":
+                            cand_tt = np.maximum(k_cand.bedrock_grid / self.safe_slope_sin, 0.0)
+                            cand_var = k_cand.variance_grid / (self.safe_slope_sin**2) if k_cand.variance_grid is not None else None
+                        else:
+                            cand_tt = np.maximum(k_cand.bedrock_grid, 0.0)
+                            cand_var = k_cand.variance_grid
+
+                        if self.outline_mask is not None:
+                            cand_tt[~self.outline_mask] = np.nan
+                        cand_std = np.sqrt(np.maximum(cand_var, 0.0)) if (cand_var is not None and not np.all(np.isnan(cand_var))) else None
+                        if cand_std is not None and self.outline_mask is not None:
+                            cand_std[~self.outline_mask] = np.nan
+
+                        orig_tt = self._traveltime_grid
+                        orig_std = self._traveltime_std
+                        self._traveltime_grid = cand_tt
+                        self._traveltime_std = cand_std
+                        self.export_outputs("migration", subfolder=cand_slug)
+                        self._traveltime_grid = orig_tt
+                        self._traveltime_std = orig_std
+
+                        t_mean, t_median, t_std, t_max = _compute_distribution_stats(cand_tt, self.outline_mask)
+                        failed = False
+                    except Exception as e:
+                        logger.warning(f"   [Drift Comparison] Interpolation failed for '{cand.name}': {e}")
+                        t_mean, t_median, t_std, t_max = 0.0, 0.0, 0.0, 0.0
+                        failed = True
+
+                if self.pre_calculate_uncertainty and cand_std is not None and not failed:
+                    mask_tt = (self.outline_mask & (cand_tt > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (cand_tt > 0)
+                    v_unc = cand_std[mask_tt & np.isfinite(cand_std)]
+                    t_unc_mean = float(np.mean(v_unc)) if v_unc.size > 0 else 0.0
+                else:
+                    t_unc_mean = None
+
+                records.append(
+                    DriftComparisonRecord(
+                        pass_label="Pass 1",
+                        rank=cand_rank,
+                        model_name=cand.name,
+                        model_slug=cand_slug,
+                        terms=cand.terms,
+                        cv_rmse=cand.cv_rmse,
+                        delta_rmse_pct=cand.delta_rmse_pct,
+                        aicc=cand.aicc,
+                        delta_aicc=cand.delta_aicc,
+                        vif_max=cand.vif_max,
+                        status="FAILED" if failed else ("PENALIZED" if cand.is_penalized else ("WARNING" if cand.warning_msg else "VALID")),
+                        rmse_unit=tt_unit,
+                        target_mean=t_mean,
+                        target_median=t_median,
+                        target_std=t_std,
+                        target_max=t_max,
+                        target_unit=tt_unit,
+                        unc_mean=t_unc_mean,
+                        is_failed=failed,
+                    )
+                )
+
+            if self.plots_dir:
+                save_drift_comparison_files(records, self.plots_dir, "Pass 1")
+            print(format_drift_comparison_table(records, "Pass 1"))
+        else:
+            self.export_outputs("migration")
         return self.migrated_points
 
     def optimize_bss(
@@ -2064,14 +2261,22 @@ class Solver:
 
         if should_plot:
             from .plotting import plot_kriging_bedrock_and_uncertainty
+            if self.post_selected_drift_models and self.plots_dir:
+                p_slug = slugify_drift_name(self.post_selected_drift_models[0].terms)
+                p_dir = Path(self.plots_dir) / p_slug
+                sfx = p_slug
+            else:
+                p_dir = self.plots_dir
+                sfx = ""
             plot_kriging_bedrock_and_uncertainty(
                 kriged_bedrock=self.kriged_bedrock,
                 kriged_std=self.kriged_std,
                 pts=pts,
                 plot_extent=plot_extent,
-                plots_dir=self.plots_dir,
+                plots_dir=p_dir,
                 interactive=interactive,
                 output_prefix=self.figure_prefix,
+                model_suffix=sfx,
             )
 
         return self.kriged_bedrock, self.kriged_variance
@@ -2231,6 +2436,15 @@ class Solver:
         should_plot = interactive or (self.plots_dir is not None)
         plot_extent = self.plot_extent
 
+        if self.post_selected_drift_models and self.plots_dir:
+            primary_slug = slugify_drift_name(self.post_selected_drift_models[0].terms)
+            primary_plots_dir = Path(self.plots_dir) / primary_slug
+            primary_suffix = primary_slug
+        else:
+            primary_slug = slugify_drift_name(self.post_selected_drift_models[0].terms) if self.post_selected_drift_models else ""
+            primary_plots_dir = self.plots_dir
+            primary_suffix = ""
+
         if self.kriged_thickness is None:
             if self.kriged_bedrock is not None:
                 self.kriged_thickness = np.maximum(self.dem_grid - self.kriged_bedrock, 0.0)
@@ -2339,9 +2553,10 @@ class Solver:
                     plot_final_blended_bedrock_map(
                         blended_bedrock=self.blended_bedrock,
                         plot_extent=plot_extent,
-                        plots_dir=self.plots_dir,
+                        plots_dir=primary_plots_dir,
                         interactive=interactive,
                         output_prefix=self.figure_prefix,
+                        model_suffix=primary_suffix,
                     )
 
                 cand_thickness = np.maximum(self.dem_grid - self.blended_bedrock, 0.0)
@@ -2361,9 +2576,10 @@ class Solver:
                 sys.stdout.write(f"  - Spatial smoothing       : {cur_smooth_bedrock} ({cur_smoothing_method})\n")
                 sys.stdout.write(f"  - Random Forest gap fill  : {cur_rf}\n")
                 sys.stdout.write(f"  - Margin blend applied    : {cur_blend} (buffer: {cur_min_gap_dist:.1f} m)\n")
-                if self.plots_dir:
+                if primary_plots_dir:
                     pfx_str = f"{self.figure_prefix}_" if self.figure_prefix else ""
-                    fig_path = Path(self.plots_dir).resolve() / f"07_{pfx_str}final_embedded_bedrock.png"
+                    sfx_str = f"_{primary_suffix.lstrip('_')}" if primary_suffix else ""
+                    fig_path = Path(primary_plots_dir).resolve() / f"07_{pfx_str}final_embedded_bedrock{sfx_str}.png"
                     sys.stdout.write(f"  - Diagnostic figure 07    : {fig_path}\n")
                 sys.stdout.flush()
 
@@ -2424,9 +2640,10 @@ class Solver:
                 plot_final_blended_bedrock_map(
                     blended_bedrock=self.blended_bedrock,
                     plot_extent=plot_extent,
-                    plots_dir=self.plots_dir,
+                    plots_dir=primary_plots_dir,
                     interactive=interactive,
                     output_prefix=self.figure_prefix,
+                    model_suffix=primary_suffix,
                 )
 
         self.final_thickness = np.maximum(self.dem_grid - self.blended_bedrock, 0.0)
@@ -2480,17 +2697,19 @@ class Solver:
                 plot_extent=plot_extent,
                 mean_thick=mean_thick,
                 mean_unc=mean_unc,
-                plots_dir=self.plots_dir,
+                plots_dir=primary_plots_dir,
                 interactive=interactive,
                 output_prefix=self.figure_prefix,
+                model_suffix=primary_suffix,
             )
             plot_final_ice_thickness_histogram(
                 final_thickness=self.final_thickness,
                 outline_mask=self.outline_mask,
                 mean_thick=mean_thick,
-                plots_dir=self.plots_dir,
+                plots_dir=primary_plots_dir,
                 interactive=interactive,
                 output_prefix=self.figure_prefix,
+                model_suffix=primary_suffix,
             )
             plot_final_basal_shear_stress_and_uncertainty(
                 final_bss=self.final_bss,
@@ -2499,21 +2718,302 @@ class Solver:
                 plot_extent=plot_extent,
                 mean_bss=mean_bss,
                 mean_bss_unc=mean_bss_unc,
-                plots_dir=self.plots_dir,
+                plots_dir=primary_plots_dir,
                 interactive=interactive,
                 output_prefix=self.figure_prefix,
+                model_suffix=primary_suffix,
             )
             plot_final_basal_shear_stress_histogram(
                 final_bss=self.final_bss,
                 outline_mask=self.outline_mask,
                 mean_bss=mean_bss,
-                plots_dir=self.plots_dir,
+                plots_dir=primary_plots_dir,
                 interactive=interactive,
                 output_prefix=self.figure_prefix,
+                model_suffix=primary_suffix,
             )
 
         self.final_grid = self.blended_bedrock
-        self.export_outputs("finalization")
+
+        if self.post_selected_drift_models:
+            self.export_outputs("finalization", subfolder=primary_slug)
+            records: list[DriftComparisonRecord] = []
+            prim_cand = self.post_selected_drift_models[0]
+            prim_rank = prim_cand.rank or 1
+            h_mean, h_med, h_std, h_max = _compute_distribution_stats(self.final_thickness, self.outline_mask)
+            b_mean, b_med, b_std, b_max = _compute_distribution_stats(self.final_bss, self.outline_mask)
+            records.append(
+                DriftComparisonRecord(
+                    pass_label="Pass 2",
+                    rank=prim_rank,
+                    model_name=prim_cand.name,
+                    model_slug=primary_slug,
+                    terms=prim_cand.terms,
+                    cv_rmse=prim_cand.cv_rmse,
+                    delta_rmse_pct=prim_cand.delta_rmse_pct,
+                    aicc=prim_cand.aicc,
+                    delta_aicc=prim_cand.delta_aicc,
+                    vif_max=prim_cand.vif_max,
+                    status="PENALIZED" if prim_cand.is_penalized else ("WARNING" if prim_cand.warning_msg else "VALID"),
+                    rmse_unit="m",
+                    thick_mean=h_mean,
+                    thick_median=h_med,
+                    thick_std=h_std,
+                    thick_max=h_max,
+                    bss_mean=b_mean,
+                    bss_median=b_med,
+                    bss_std=b_std,
+                    bss_max=b_max,
+                    unc_mean=mean_unc if self.post_calculate_uncertainty else None,
+                    is_failed=False,
+                )
+            )
+
+            pts = self.migrated_points if self.migrated_points is not None else self.survey_points
+            val_col = 3 if pts.shape[1] >= 4 else 2
+            valid_pts_val = pts[~np.isnan(pts[:, val_col]), val_col]
+            max_thickness = max(float(np.max(valid_pts_val)) * 1.5, 500.0) if len(valid_pts_val) > 0 else 500.0
+
+            target_upper = self.post_interpolation_target.upper().strip()
+            sample_pts = self.get_sample_points("post_migration", target_upper)
+            eff_var = self._effective_variogram_params(sample_pts, target_upper)
+
+            orig_thickness = self.final_thickness
+            orig_bss = self.final_bss
+            orig_grid = self.final_grid
+            orig_std = self.kriged_std
+            orig_bss_std = self.bss_std
+
+            for idx, cand in enumerate(self.post_selected_drift_models[1:], start=2):
+                cand_slug = slugify_drift_name(cand.terms)
+                cand_rank = cand.rank or idx
+                logger.info(f"   [Drift Analyzer] Drift model '{cand.name}' selected for the production Kriging run.")
+                ext_drifts = self.get_drift_grids(cand.terms)
+                cand_method = "universal" if cand.terms else "ordinary"
+                try:
+                    k_cand = kriging_interpolation(
+                        sample_points=sample_pts,
+                        geometry=self.geometry,
+                        method=cand_method,
+                        variogram_model=self.post_variogram_model,
+                        variogram_params=eff_var,
+                        dem_grid=self.dem_grid,
+                        opt_slope_grid=self.opt_slope,
+                        drift_terms=cand.terms,
+                        outline_mask=self.outline_mask,
+                        include_zero_boundary_condition=self.post_zero_boundary,
+                        n_cores=self.n_cores,
+                        engine=self.engine_type,
+                        slope_floor_deg=self.slope_floor_deg,
+                        show_progress=self.show_progress,
+                        external_drift_grid=ext_drifts if len(ext_drifts) > 0 else None,
+                        return_variance=self.post_calculate_uncertainty,
+                        max_memory_fraction=self.max_memory_fraction,
+                    )
+                    if target_upper == "P":
+                        cand_raw = np.maximum(k_cand.bedrock_grid / self.safe_slope_sin, 0.0)
+                        cand_var = k_cand.variance_grid / (self.safe_slope_sin**2) if k_cand.variance_grid is not None else None
+                    else:
+                        cand_raw = k_cand.bedrock_grid
+                        cand_var = k_cand.variance_grid
+
+                    cand_thick = np.clip(cand_raw, 0.0, max_thickness)
+                    if self.outline_mask is not None:
+                        cand_thick[~self.outline_mask] = 0.0
+
+                    cand_bed = self.dem_grid - cand_thick
+                    if self.outline_mask is not None:
+                        cand_bed[~self.outline_mask] = self.dem_grid[~self.outline_mask]
+
+                    cand_var_masked = cand_var.copy() if cand_var is not None else None
+                    if cand_var_masked is not None and self.outline_mask is not None:
+                        cand_var_masked[~self.outline_mask] = np.nan
+                    cand_kriged_std = np.sqrt(np.maximum(cand_var_masked, 0.0)) if (cand_var_masked is not None and not np.all(np.isnan(cand_var_masked))) else np.full_like(cand_thick, np.nan)
+                    if self.outline_mask is not None:
+                        cand_kriged_std[~self.outline_mask] = np.nan
+
+                    if cur_smooth_bedrock:
+                        th_raw = cand_thick.copy()
+                        if self.outline_mask is not None:
+                            th_raw[~self.outline_mask] = 0.0
+                        th_smooth = self.smooth_bedrock_dem(
+                            th_raw,
+                            method=cur_smoothing_method,
+                            sigma=cur_smoothing_sigma,
+                            kernel_size=cur_smoothing_kernel_size,
+                            kc_cutoff=cur_smoothing_kc_cutoff,
+                        )
+                        if self.outline_mask is not None:
+                            th_smooth[~self.outline_mask] = 0.0
+                        cand_bed_post = self.dem_grid - th_smooth
+                    else:
+                        cand_bed_post = cand_bed
+
+                    if cur_rf:
+                        cand_rf_bed = self.finalizer.fill_holes(cand_bed_post, n_cores=self.n_cores, show_progress=False)
+                    else:
+                        cand_rf_bed = cand_bed_post
+
+                    if cur_blend:
+                        cand_blended = blend_margin_topography(
+                            dem=self.dem_grid,
+                            bedrock_input=cand_rf_bed,
+                            boundary_mask=self.outline_mask,
+                            geometry=self.geometry,
+                            min_gap_dist=cur_min_gap_dist,
+                        )
+                    else:
+                        cand_blended = cand_rf_bed.copy()
+
+                    cand_final_thick = np.maximum(self.dem_grid - cand_blended, 0.0)
+                    if self.outline_mask is not None:
+                        cand_final_thick[~self.outline_mask] = 0.0
+
+                    cand_final_bss = (self.ice_density * self.g * cand_final_thick * self.slope_sin) / 1000.0
+                    cand_bss_std = (self.ice_density * self.g * cand_kriged_std * self.slope_sin) / 1000.0
+                    if self.outline_mask is not None:
+                        cand_final_bss[~self.outline_mask] = np.nan
+                        cand_bss_std[~self.outline_mask] = np.nan
+
+                    cand_plots_dir = Path(self.plots_dir) / cand_slug if self.plots_dir else None
+                    if cand_plots_dir:
+                        from .plotting import (
+                            plot_kriging_bedrock_and_uncertainty,
+                            plot_final_blended_bedrock_map,
+                            plot_final_ice_thickness_and_uncertainty,
+                            plot_final_ice_thickness_histogram,
+                            plot_final_basal_shear_stress_and_uncertainty,
+                            plot_final_basal_shear_stress_histogram,
+                        )
+                        cand_mask_thick = (self.outline_mask & (cand_final_thick > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (cand_final_thick > 0)
+                        c_th_valid = cand_final_thick[cand_mask_thick & np.isfinite(cand_final_thick)]
+                        c_unc_valid = cand_kriged_std[cand_mask_thick & np.isfinite(cand_kriged_std)]
+                        c_mean_thick = float(np.mean(c_th_valid)) if c_th_valid.size > 0 else 0.0
+                        c_mean_unc = float(np.mean(c_unc_valid)) if c_unc_valid.size > 0 else 0.0
+
+                        cand_mask_bss = (self.outline_mask & (cand_final_bss > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (cand_final_bss > 0)
+                        c_bss_valid = cand_final_bss[cand_mask_bss & np.isfinite(cand_final_bss)]
+                        c_bss_unc_valid = cand_bss_std[cand_mask_bss & np.isfinite(cand_bss_std)]
+                        c_mean_bss = float(np.mean(c_bss_valid)) if c_bss_valid.size > 0 else 0.0
+                        c_mean_bss_unc = float(np.mean(c_bss_unc_valid)) if c_bss_unc_valid.size > 0 else 0.0
+
+                        plot_kriging_bedrock_and_uncertainty(
+                            kriged_bedrock=cand_bed,
+                            kriged_std=cand_kriged_std,
+                            pts=pts,
+                            plot_extent=plot_extent,
+                            plots_dir=cand_plots_dir,
+                            interactive=False,
+                            output_prefix=self.figure_prefix,
+                            model_suffix=cand_slug,
+                        )
+                        plot_final_blended_bedrock_map(
+                            blended_bedrock=cand_blended,
+                            plot_extent=plot_extent,
+                            plots_dir=cand_plots_dir,
+                            interactive=False,
+                            output_prefix=self.figure_prefix,
+                            model_suffix=cand_slug,
+                        )
+                        plot_final_ice_thickness_and_uncertainty(
+                            final_thickness=cand_final_thick,
+                            kriged_std=cand_kriged_std,
+                            outline_mask=self.outline_mask,
+                            plot_extent=plot_extent,
+                            mean_thick=c_mean_thick,
+                            mean_unc=c_mean_unc,
+                            plots_dir=cand_plots_dir,
+                            interactive=False,
+                            output_prefix=self.figure_prefix,
+                            model_suffix=cand_slug,
+                        )
+                        plot_final_ice_thickness_histogram(
+                            final_thickness=cand_final_thick,
+                            outline_mask=self.outline_mask,
+                            mean_thick=c_mean_thick,
+                            plots_dir=cand_plots_dir,
+                            interactive=False,
+                            output_prefix=self.figure_prefix,
+                            model_suffix=cand_slug,
+                        )
+                        plot_final_basal_shear_stress_and_uncertainty(
+                            final_bss=cand_final_bss,
+                            bss_std=cand_bss_std,
+                            outline_mask=self.outline_mask,
+                            plot_extent=plot_extent,
+                            mean_bss=c_mean_bss,
+                            mean_bss_unc=c_mean_bss_unc,
+                            plots_dir=cand_plots_dir,
+                            interactive=False,
+                            output_prefix=self.figure_prefix,
+                            model_suffix=cand_slug,
+                        )
+                        plot_final_basal_shear_stress_histogram(
+                            final_bss=cand_final_bss,
+                            outline_mask=self.outline_mask,
+                            mean_bss=c_mean_bss,
+                            plots_dir=cand_plots_dir,
+                            interactive=False,
+                            output_prefix=self.figure_prefix,
+                            model_suffix=cand_slug,
+                        )
+
+                    self.final_thickness = cand_final_thick
+                    self.final_bss = cand_final_bss
+                    self.final_grid = cand_blended
+                    self.kriged_std = cand_kriged_std
+                    self.bss_std = cand_bss_std
+                    self.export_outputs("finalization", subfolder=cand_slug)
+
+                    ch_mean, ch_med, ch_std, ch_max = _compute_distribution_stats(cand_final_thick, self.outline_mask)
+                    cb_mean, cb_med, cb_std, cb_max = _compute_distribution_stats(cand_final_bss, self.outline_mask)
+                    cand_unc_mean = c_mean_unc if self.post_calculate_uncertainty else None
+                    failed = False
+                except Exception as e:
+                    logger.warning(f"   [Drift Comparison] Interpolation failed for '{cand.name}': {e}")
+                    ch_mean, ch_med, ch_std, ch_max = 0.0, 0.0, 0.0, 0.0
+                    cb_mean, cb_med, cb_std, cb_max = 0.0, 0.0, 0.0, 0.0
+                    cand_unc_mean = None
+                    failed = True
+
+                records.append(
+                    DriftComparisonRecord(
+                        pass_label="Pass 2",
+                        rank=cand_rank,
+                        model_name=cand.name,
+                        model_slug=cand_slug,
+                        terms=cand.terms,
+                        cv_rmse=cand.cv_rmse,
+                        delta_rmse_pct=cand.delta_rmse_pct,
+                        aicc=cand.aicc,
+                        delta_aicc=cand.delta_aicc,
+                        vif_max=cand.vif_max,
+                        status="FAILED" if failed else ("PENALIZED" if cand.is_penalized else ("WARNING" if cand.warning_msg else "VALID")),
+                        rmse_unit="m",
+                        thick_mean=ch_mean,
+                        thick_median=ch_med,
+                        thick_std=ch_std,
+                        thick_max=ch_max,
+                        bss_mean=cb_mean,
+                        bss_median=cb_med,
+                        bss_std=cb_std,
+                        bss_max=cb_max,
+                        unc_mean=cand_unc_mean,
+                        is_failed=failed,
+                    )
+                )
+
+            self.final_thickness = orig_thickness
+            self.final_bss = orig_bss
+            self.final_grid = orig_grid
+            self.kriged_std = orig_std
+            self.bss_std = orig_bss_std
+
+            if self.plots_dir:
+                save_drift_comparison_files(records, self.plots_dir, "Pass 2")
+            print(format_drift_comparison_table(records, "Pass 2"))
+        else:
+            self.export_outputs("finalization")
 
         return BedrockMap(
             grid=self.final_grid,
@@ -2556,21 +3056,7 @@ class Solver:
         interp_target = getattr(self, f"{stage_prefix}_interpolation_target", "P")
         sample_pts = self.get_sample_points(stage_key, interp_target)
 
-        if interp_target.upper() == "P" or self.opt_variogram_params is None:
-            effective_var_params = self.opt_variogram_params
-        else:
-            z_var = float(np.var(sample_pts[:, 2])) if len(sample_pts) > 1 else 1.0
-            opt_sill = float(self.opt_variogram_params.get("sill", z_var))
-            nugget_ratio = (
-                float(self.opt_variogram_params.get("nugget", 0.0)) / opt_sill
-                if opt_sill > 0
-                else 0.0
-            )
-            effective_var_params = {
-                "range": float(self.opt_variogram_params["range"]),
-                "sill": z_var if z_var > 0 else 1.0,
-                "nugget": nugget_ratio * z_var,
-            }
+        effective_var_params = self._effective_variogram_params(sample_pts, interp_target.upper())
 
         return self._run_drift_analysis(
             stage_key=stage_key,

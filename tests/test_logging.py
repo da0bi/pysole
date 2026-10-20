@@ -147,10 +147,10 @@ class TestTerminalUI(unittest.TestCase):
     """Test suite for Terminal UI enhancements: banner centering, section headers, and progress bar spacing."""
 
     def test_welcome_banner_content(self):
-        banner = pysole_logging.get_welcome_banner(version="0.5.2", term_width=80)
+        banner = pysole_logging.get_welcome_banner(version="0.5.3", term_width=80)
         self.assertIn("/ ___/ __   / /_", banner)
         self.assertIn("The soul of the sole", banner)
-        self.assertIn("v0.5.2", banner)
+        self.assertIn("v0.5.3", banner)
         self.assertIn("Released under the MIT License.", banner)
 
     def test_welcome_banner_dynamic_version(self):

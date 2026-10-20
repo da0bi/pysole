@@ -9,6 +9,7 @@ survey point is evaluated with the fitted variogram and the regularisation of th
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 import sys
 import numpy as np
 from scipy.spatial import cKDTree
@@ -79,6 +80,7 @@ class CandidateDriftResult:
     warning_msg: str | None = None
     delta_aicc: float = 0.0
     delta_rmse_pct: float = 0.0
+    rank: int = 0
 
 
 def farthest_point_indices(x: np.ndarray, y: np.ndarray, n_select: int) -> np.ndarray:
@@ -207,15 +209,53 @@ def format_ranking_table(
     return "\n".join(lines)
 
 
+@dataclass
+class DriftComparisonRecord:
+    """Evaluation and distribution summary record for one candidate drift model."""
+
+    pass_label: str
+    rank: int
+    model_name: str
+    model_slug: str
+    terms: list[str]
+    cv_rmse: float
+    delta_rmse_pct: float | None
+    aicc: float
+    delta_aicc: float | None
+    vif_max: float
+    status: str
+    rmse_unit: str = "m"
+    target_mean: float = 0.0
+    target_median: float = 0.0
+    target_std: float = 0.0
+    target_max: float = 0.0
+    target_unit: str = "ns"
+    thick_mean: float = 0.0
+    thick_median: float = 0.0
+    thick_std: float = 0.0
+    thick_max: float = 0.0
+    bss_mean: float = 0.0
+    bss_median: float = 0.0
+    bss_std: float = 0.0
+    bss_max: float = 0.0
+    unc_mean: float | None = None
+    is_failed: bool = False
+    failure_reason: str | None = None
+
+
 def parse_model_selection(
     text: str, results: list[CandidateDriftResult]
-) -> tuple[CandidateDriftResult | None, str | None]:
+) -> tuple[list[CandidateDriftResult] | None, str | None]:
     """
-    Interprets the answer of the interactive model selection prompt.
+    Parses user input from interactive drift model selection.
 
-    Accepted: nothing (keep the recommended model), a row number (``3`` or ``#3``), the model name as printed
-    (``sia + z_dem``), a list of drift terms separated by ``+`` or ``,`` with optional brackets and quotes
-    (``['sia', 'z_dem']``), and ``ordinary`` or ``[]`` for Ordinary Kriging.
+    Accepted:
+    - Empty input or '#' -> [results[0]] (recommended model)
+    - Single row number ('3' or '#3') -> [results[2]]
+    - Range of rows ('1-5' or '#1-#5') -> results[0:5]
+    - Comma-separated rows and ranges ('1,2,5-8')
+    - Model name as printed ('sia + z_dem'), or primitive terms
+    - 'ordinary' or '[]' for Ordinary Kriging
 
     Parameters
     ----------
@@ -226,19 +266,45 @@ def parse_model_selection(
 
     Returns
     -------
-    chosen : CandidateDriftResult or None
-        The selected candidate, or ``None`` if the input was empty or invalid.
+    chosen : list of CandidateDriftResult or None
+        The selected candidates (at least one), or None if invalid.
     error : str or None
-        Message describing why the input was rejected (``None`` for empty input and for a valid selection).
+        Error message if input was rejected, or None if valid.
     """
-    clean = text.strip().lstrip("#").strip()
-    if not clean:
-        return None, None
-    if clean.isdigit():
-        index = int(clean) - 1
-        if 0 <= index < len(results):
-            return results[index], None
-        return None, f"Row {clean} does not exist; choose a number from 1 to {len(results)}."
+    clean = text.strip()
+    if not clean or clean == "#":
+        if not results:
+            return None, "No evaluated candidates available."
+        return [results[0]], None
+
+    cand_chars = set("0123456789,- #")
+    if all(c in cand_chars for c in clean):
+        segments = [s.strip() for s in clean.split(",") if s.strip()]
+        indices: list[int] = []
+        for seg in segments:
+            seg_clean = seg.lstrip("#").strip()
+            if "-" in seg_clean:
+                parts = seg_clean.split("-", 1)
+                p0, p1 = parts[0].strip().lstrip("#").strip(), parts[1].strip().lstrip("#").strip()
+                if not (p0.isdigit() and p1.isdigit()):
+                    return None, f"Invalid range '{seg}'; expected format 'start-end' (e.g. '1-5')."
+                start, end = int(p0), int(p1)
+                if start < 1 or end > len(results):
+                    return None, f"Range '{seg}' out of bounds; choose row numbers from 1 to {len(results)}."
+                if start > end:
+                    return None, f"Invalid range '{seg}': start row ({start}) must be <= end row ({end})."
+                indices.extend(range(start - 1, end))
+            elif seg_clean.isdigit():
+                val = int(seg_clean)
+                if 1 <= val <= len(results):
+                    indices.append(val - 1)
+                else:
+                    return None, f"Row {seg_clean} does not exist; choose a number from 1 to {len(results)}."
+            else:
+                return None, f"Invalid row selector '{seg}'."
+        if indices:
+            unique_indices = list(dict.fromkeys(indices))
+            return [results[i] for i in unique_indices], None
 
     stripped = clean.strip("[]()").replace("'", "").replace('"', "")
     tokens = [t.strip() for t in stripped.replace("+", ",").split(",") if t.strip()]
@@ -248,14 +314,266 @@ def parse_model_selection(
         unknown = [t for t in tokens if t not in DRIFT_PRIMITIVES]
         if unknown:
             return None, (
-                f"Unknown drift term(s) {unknown}; use row numbers, 'ordinary', '[]' or terms from "
-                f"{list(DRIFT_PRIMITIVES)}."
+                f"Unknown drift term(s) {unknown}; choose row numbers (e.g. '1-5', '1,2,5-8'), "
+                f"'ordinary', '[]' or terms from {list(DRIFT_PRIMITIVES)}."
             )
         wanted = set(tokens)
     for res in results:
         if set(res.terms) == wanted:
-            return res, None
+            return [res], None
     return None, f"The drift model '{format_drift_name(sorted(wanted)) if wanted else ORDINARY_NAME}' was not evaluated."
+
+
+def format_drift_comparison_table(
+    records: list[DriftComparisonRecord],
+    stage_label: str = "pass2",
+) -> str:
+    """Formats comparison table of evaluated drift models sorted by canonical Drift Analyzer rank."""
+    sorted_records = sorted(records, key=lambda r: r.rank)
+    stage_norm = stage_label.lower().replace(" ", "").replace("_", "")
+    is_p1 = "pass1" in stage_norm or "pre" in stage_norm or stage_norm == "1"
+    rmse_unit = sorted_records[0].rmse_unit if sorted_records else ("ns" if is_p1 else "m")
+    target_unit = sorted_records[0].target_unit if sorted_records else "ns"
+    has_unc = any(r.unc_mean is not None for r in sorted_records)
+
+    header_title = (
+        "DRIFT MODEL INTERPOLATION COMPARISON TABLE (PASS 1)"
+        if is_p1
+        else "DRIFT MODEL INTERPOLATION COMPARISON TABLE (PASS 2)"
+    )
+
+    if is_p1:
+        if has_unc:
+            width = 133
+            lines = [
+                "=" * width,
+                f"{header_title:^{width}}",
+                "=" * width,
+                f"{'#':<3} {'Drift Model':<32} {f'RMSE ({rmse_unit})':<11} {'dRMSE %':<9} {'AICc':<10} {'dAICc':<8} {'VIF':<6} {'Status':<10} | {f'Traveltime [{target_unit}]':<41}",
+                f"{'':<82} | {'Mean':<8} {'Median':<8} {'Std':<8} {'Max':<8} {'Mean Unc':<8}",
+                "-" * width,
+            ]
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+                if r.is_failed:
+                    t_stats = f"{'FAILED':<41}"
+                else:
+                    unc_str = f"{r.unc_mean:<8.2f}" if r.unc_mean is not None else f"{'n/a':<8}"
+                    t_stats = f"{r.target_mean:<8.2f} {r.target_median:<8.2f} {r.target_std:<8.2f} {r.target_max:<8.2f} {unc_str}"
+                lines.append(
+                    f"{r.rank:<3} {r.model_name:<32} {r.cv_rmse:<11.2f} {d_rmse:<9} {aicc_str:<10} {d_aicc:<8} {r.vif_max:<6.1f} {r.status:<10} | {t_stats}"
+                )
+            lines.append("-" * width)
+        else:
+            width = 124
+            lines = [
+                "=" * width,
+                f"{header_title:^{width}}",
+                "=" * width,
+                f"{'#':<3} {'Drift Model':<32} {f'RMSE ({rmse_unit})':<11} {'dRMSE %':<9} {'AICc':<10} {'dAICc':<8} {'VIF':<6} {'Status':<10} | {f'Traveltime [{target_unit}]':<32}",
+                f"{'':<82} | {'Mean':<8} {'Median':<8} {'Std':<8} {'Max':<8}",
+                "-" * width,
+            ]
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+                if r.is_failed:
+                    t_stats = f"{'FAILED':<32}"
+                else:
+                    t_stats = f"{r.target_mean:<8.2f} {r.target_median:<8.2f} {r.target_std:<8.2f} {r.target_max:<8.2f}"
+                lines.append(
+                    f"{r.rank:<3} {r.model_name:<32} {r.cv_rmse:<11.2f} {d_rmse:<9} {aicc_str:<10} {d_aicc:<8} {r.vif_max:<6.1f} {r.status:<10} | {t_stats}"
+                )
+            lines.append("-" * width)
+    else:
+        if has_unc:
+            width = 165
+            lines = [
+                "=" * width,
+                f"{header_title:^{width}}",
+                "=" * width,
+                f"{'#':<3} {'Drift Model':<32} {f'RMSE ({rmse_unit})':<11} {'dRMSE %':<9} {'AICc':<10} {'dAICc':<8} {'VIF':<6} {'Status':<10} | {'Ice Thickness [m]':<41} | {'Basal Shear Stress [kPa]':<32}",
+                f"{'':<82} | {'Mean':<8} {'Median':<8} {'Std':<8} {'Max':<8} {'Mean Unc':<8} | {'Mean':<8} {'Median':<8} {'Std':<8} {'Max':<8}",
+                "-" * width,
+            ]
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+                if r.is_failed:
+                    th_stats = f"{'FAILED':<41}"
+                    bss_stats = f"{'FAILED':<32}"
+                else:
+                    unc_str = f"{r.unc_mean:<8.2f}" if r.unc_mean is not None else f"{'n/a':<8}"
+                    th_stats = f"{r.thick_mean:<8.2f} {r.thick_median:<8.2f} {r.thick_std:<8.2f} {r.thick_max:<8.2f} {unc_str}"
+                    bss_stats = f"{r.bss_mean:<8.2f} {r.bss_median:<8.2f} {r.bss_std:<8.2f} {r.bss_max:<8.2f}"
+                lines.append(
+                    f"{r.rank:<3} {r.model_name:<32} {r.cv_rmse:<11.2f} {d_rmse:<9} {aicc_str:<10} {d_aicc:<8} {r.vif_max:<6.1f} {r.status:<10} | {th_stats} | {bss_stats}"
+                )
+            lines.append("-" * width)
+        else:
+            width = 156
+            lines = [
+                "=" * width,
+                f"{header_title:^{width}}",
+                "=" * width,
+                f"{'#':<3} {'Drift Model':<32} {f'RMSE ({rmse_unit})':<11} {'dRMSE %':<9} {'AICc':<10} {'dAICc':<8} {'VIF':<6} {'Status':<10} | {'Ice Thickness [m]':<32} | {'Basal Shear Stress [kPa]':<32}",
+                f"{'':<82} | {'Mean':<8} {'Median':<8} {'Std':<8} {'Max':<8} | {'Mean':<8} {'Median':<8} {'Std':<8} {'Max':<8}",
+                "-" * width,
+            ]
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+                if r.is_failed:
+                    th_stats = f"{'FAILED':<32}"
+                    bss_stats = f"{'FAILED':<32}"
+                else:
+                    th_stats = f"{r.thick_mean:<8.2f} {r.thick_median:<8.2f} {r.thick_std:<8.2f} {r.thick_max:<8.2f}"
+                    bss_stats = f"{r.bss_mean:<8.2f} {r.bss_median:<8.2f} {r.bss_std:<8.2f} {r.bss_max:<8.2f}"
+                lines.append(
+                    f"{r.rank:<3} {r.model_name:<32} {r.cv_rmse:<11.2f} {d_rmse:<9} {aicc_str:<10} {d_aicc:<8} {r.vif_max:<6.1f} {r.status:<10} | {th_stats} | {bss_stats}"
+                )
+            lines.append("-" * width)
+
+    return "\n".join(lines)
+
+
+def save_drift_comparison_files(
+    records: list[DriftComparisonRecord],
+    plots_dir: str | Path,
+    stage_label: str = "pass2",
+) -> list[Path]:
+    """Saves comparison tables in .txt, .csv, and .md formats into plots_dir."""
+    p_dir = Path(plots_dir).expanduser().resolve()
+    stage_norm = stage_label.lower().replace(" ", "").replace("_", "")
+    is_p1 = "pass1" in stage_norm or "pre" in stage_norm or stage_norm == "1"
+    base_name = "drift_model_comparison_pass1" if is_p1 else "drift_model_comparison_pass2"
+    sorted_records = sorted(records, key=lambda r: r.rank)
+    has_unc = any(r.unc_mean is not None for r in sorted_records)
+
+    # 1. Plaintext ASCII table (.txt)
+    txt_path = p_dir / f"{base_name}.txt"
+    txt_content = format_drift_comparison_table(sorted_records, stage_label)
+    txt_path.write_text(txt_content + "\n", encoding="utf-8")
+
+    # 2. Machine-readable CSV (.csv)
+    csv_path = p_dir / f"{base_name}.csv"
+    csv_lines = []
+    if is_p1:
+        if has_unc:
+            csv_lines.append("rank,drift_model,slug,rmse,delta_rmse_pct,aicc,delta_aicc,vif,status,traveltime_mean,traveltime_median,traveltime_std,traveltime_max,traveltime_unc_mean,unit,is_failed")
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
+                d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
+                aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
+                unc_val = f"{r.unc_mean:.4f}" if r.unc_mean is not None else ""
+                csv_lines.append(
+                    f'{r.rank},"{r.model_name}",{r.model_slug},{r.cv_rmse:.4f},{d_rmse},{aicc_val},{d_aicc},{r.vif_max:.2f},{r.status},'
+                    f'{r.target_mean:.4f},{r.target_median:.4f},{r.target_std:.4f},{r.target_max:.4f},{unc_val},{r.target_unit},{r.is_failed}'
+                )
+        else:
+            csv_lines.append("rank,drift_model,slug,rmse,delta_rmse_pct,aicc,delta_aicc,vif,status,traveltime_mean,traveltime_median,traveltime_std,traveltime_max,unit,is_failed")
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
+                d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
+                aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
+                csv_lines.append(
+                    f'{r.rank},"{r.model_name}",{r.model_slug},{r.cv_rmse:.4f},{d_rmse},{aicc_val},{d_aicc},{r.vif_max:.2f},{r.status},'
+                    f'{r.target_mean:.4f},{r.target_median:.4f},{r.target_std:.4f},{r.target_max:.4f},{r.target_unit},{r.is_failed}'
+                )
+    else:
+        if has_unc:
+            csv_lines.append("rank,drift_model,slug,rmse,delta_rmse_pct,aicc,delta_aicc,vif,status,thickness_mean_m,thickness_median_m,thickness_std_m,thickness_max_m,thickness_unc_mean_m,bss_mean_kpa,bss_median_kpa,bss_std_kpa,bss_max_kpa,is_failed")
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
+                d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
+                aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
+                unc_val = f"{r.unc_mean:.4f}" if r.unc_mean is not None else ""
+                csv_lines.append(
+                    f'{r.rank},"{r.model_name}",{r.model_slug},{r.cv_rmse:.4f},{d_rmse},{aicc_val},{d_aicc},{r.vif_max:.2f},{r.status},'
+                    f'{r.thick_mean:.4f},{r.thick_median:.4f},{r.thick_std:.4f},{r.thick_max:.4f},{unc_val},'
+                    f'{r.bss_mean:.4f},{r.bss_median:.4f},{r.bss_std:.4f},{r.bss_max:.4f},{r.is_failed}'
+                )
+        else:
+            csv_lines.append("rank,drift_model,slug,rmse,delta_rmse_pct,aicc,delta_aicc,vif,status,thickness_mean_m,thickness_median_m,thickness_std_m,thickness_max_m,bss_mean_kpa,bss_median_kpa,bss_std_kpa,bss_max_kpa,is_failed")
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:.2f}" if r.delta_rmse_pct is not None else ""
+                d_aicc = f"{r.delta_aicc:.2f}" if r.delta_aicc is not None else ""
+                aicc_val = f"{r.aicc:.2f}" if np.isfinite(r.aicc) else ""
+                csv_lines.append(
+                    f'{r.rank},"{r.model_name}",{r.model_slug},{r.cv_rmse:.4f},{d_rmse},{aicc_val},{d_aicc},{r.vif_max:.2f},{r.status},'
+                    f'{r.thick_mean:.4f},{r.thick_median:.4f},{r.thick_std:.4f},{r.thick_max:.4f},'
+                    f'{r.bss_mean:.4f},{r.bss_median:.4f},{r.bss_std:.4f},{r.bss_max:.4f},{r.is_failed}'
+                )
+    csv_path.write_text("\n".join(csv_lines) + "\n", encoding="utf-8")
+
+    # 3. Markdown table (.md)
+    md_path = p_dir / f"{base_name}.md"
+    md_lines = []
+    if is_p1:
+        md_lines.append("# Drift Model Interpolation Comparison Table (Pass 1)")
+        md_lines.append("")
+        if has_unc:
+            md_lines.append("| # | Drift Model | RMSE | ΔRMSE % | AICc | ΔAICc | VIF | Status | Mean Traveltime | Median Traveltime | Std Dev | Max Traveltime | Mean Uncertainty |")
+            md_lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | ---: | ---: | ---: |")
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+                if r.is_failed:
+                    stats = "FAILED | FAILED | FAILED | FAILED | FAILED"
+                else:
+                    unc_md = f"{r.unc_mean:.2f} {r.target_unit}" if r.unc_mean is not None else "n/a"
+                    stats = f"{r.target_mean:.2f} {r.target_unit} | {r.target_median:.2f} {r.target_unit} | {r.target_std:.2f} {r.target_unit} | {r.target_max:.2f} {r.target_unit} | {unc_md}"
+                md_lines.append(f"| {r.rank} | `{r.model_name}` | {r.cv_rmse:.2f} {r.rmse_unit} | {d_rmse} | {aicc_str} | {d_aicc} | {r.vif_max:.1f} | {r.status} | {stats} |")
+        else:
+            md_lines.append("| # | Drift Model | RMSE | ΔRMSE % | AICc | ΔAICc | VIF | Status | Mean Traveltime | Median Traveltime | Std Dev | Max Traveltime |")
+            md_lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | ---: | ---: |")
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+                if r.is_failed:
+                    stats = "FAILED | FAILED | FAILED | FAILED"
+                else:
+                    stats = f"{r.target_mean:.2f} {r.target_unit} | {r.target_median:.2f} {r.target_unit} | {r.target_std:.2f} {r.target_unit} | {r.target_max:.2f} {r.target_unit}"
+                md_lines.append(f"| {r.rank} | `{r.model_name}` | {r.cv_rmse:.2f} {r.rmse_unit} | {d_rmse} | {aicc_str} | {d_aicc} | {r.vif_max:.1f} | {r.status} | {stats} |")
+    else:
+        md_lines.append("# Drift Model Interpolation Comparison Table (Pass 2)")
+        md_lines.append("")
+        if has_unc:
+            md_lines.append("| # | Drift Model | RMSE | ΔRMSE % | AICc | ΔAICc | VIF | Status | Mean Thick (m) | Median Thick (m) | Max Thick (m) | Mean Unc (m) | Mean BSS (kPa) | Median BSS (kPa) | Max BSS (kPa) |")
+            md_lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+                if r.is_failed:
+                    stats = "FAILED | FAILED | FAILED | FAILED | FAILED | FAILED | FAILED"
+                else:
+                    unc_md = f"{r.unc_mean:.2f}" if r.unc_mean is not None else "n/a"
+                    stats = f"{r.thick_mean:.2f} | {r.thick_median:.2f} | {r.thick_max:.2f} | {unc_md} | {r.bss_mean:.2f} | {r.bss_median:.2f} | {r.bss_max:.2f}"
+                md_lines.append(f"| {r.rank} | `{r.model_name}` | {r.cv_rmse:.2f} {r.rmse_unit} | {d_rmse} | {aicc_str} | {d_aicc} | {r.vif_max:.1f} | {r.status} | {stats} |")
+        else:
+            md_lines.append("| # | Drift Model | RMSE | ΔRMSE % | AICc | ΔAICc | VIF | Status | Mean Thick (m) | Median Thick (m) | Max Thick (m) | Mean BSS (kPa) | Median BSS (kPa) | Max BSS (kPa) |")
+            md_lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
+            for r in sorted_records:
+                d_rmse = f"{r.delta_rmse_pct:+.1f}%" if r.delta_rmse_pct is not None else "n/a"
+                d_aicc = f"{r.delta_aicc:+.1f}" if r.delta_aicc is not None else "n/a"
+                aicc_str = f"{r.aicc:.1f}" if np.isfinite(r.aicc) else "inf"
+                if r.is_failed:
+                    stats = "FAILED | FAILED | FAILED | FAILED | FAILED | FAILED"
+                else:
+                    stats = f"{r.thick_mean:.2f} | {r.thick_median:.2f} | {r.thick_max:.2f} | {r.bss_mean:.2f} | {r.bss_median:.2f} | {r.bss_max:.2f}"
+                md_lines.append(f"| {r.rank} | `{r.model_name}` | {r.cv_rmse:.2f} {r.rmse_unit} | {d_rmse} | {aicc_str} | {d_aicc} | {r.vif_max:.1f} | {r.status} | {stats} |")
+    md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+
+    logger.info(f"   Saved comparison tables to: {txt_path.name}, {csv_path.name}, {md_path.name}")
+    return [txt_path, csv_path, md_path]
 
 
 class DriftAnalyzer:
@@ -321,6 +639,7 @@ class DriftAnalyzer:
         self.show_progress = show_progress
         self.survey_data_type = survey_data_type
         self.velocity = velocity
+        self.selected_models: list[CandidateDriftResult] = []
 
     @property
     def rmse_unit(self) -> str:
@@ -636,23 +955,24 @@ class DriftAnalyzer:
         return radius
 
     @staticmethod
-    def _prompt_model_selection(results: list[CandidateDriftResult]) -> CandidateDriftResult | None:
-        """Asks which model to apply until the answer is valid or empty; returns the chosen result or ``None``."""
+    def _prompt_model_selection(results: list[CandidateDriftResult]) -> list[CandidateDriftResult]:
+        """Asks which model(s) to apply until the answer is valid; returns list of chosen results."""
         prompt = (
-            f"[DriftAnalyzer] Select drift model to apply [1-{len(results)}, name or terms, 'ordinary' or [], "
-            f"default: 1 ('{results[0].name}')]: "
+            f"[DriftAnalyzer] Select drift model(s) to apply [1-{len(results)}, range e.g. '1-5', '1,2,5-8', "
+            f"name or terms, default: 1 ('{results[0].name}')]: "
         )
         while True:
             try:
                 answer = input(prompt)
             except EOFError:
                 end_terminal_block()
-                return None
+                return [results[0]]
             chosen, error = parse_model_selection(answer, results)
-            if error is None:
+            if error is None and chosen:
                 end_terminal_block()
                 return chosen
-            print(f"[DriftAnalyzer] {error}")
+            if error is not None:
+                print(f"[DriftAnalyzer] {error}")
 
     def run_diagnostics(
         self,
@@ -666,6 +986,7 @@ class DriftAnalyzer:
         variogram_params: dict[str, float] | None,
         profile_data: np.ndarray | None = None,
         interactive: bool = True,
+        is_predefined_suite: bool = False,
     ) -> list[CandidateDriftResult]:
         """
         Executes the full diagnostic workflow and presents candidate drift model rankings.
@@ -699,6 +1020,9 @@ class DriftAnalyzer:
             Profile ID labels for each sounding point.
         interactive : bool, default True
             If True and in an interactive terminal, displays interactive model selection prompt.
+        is_predefined_suite : bool, default False
+            If True, candidate suite was predefined in JSON configuration: suppresses interactive prompt
+            and selects all evaluated candidates for comparison.
 
         Returns
         -------
@@ -721,7 +1045,7 @@ class DriftAnalyzer:
         cv_mode = "buffer"
         buffer_radius_m = a_0 / 2.0
         profile_ids = None
-        show_prompts = interactive and sys.stdin.isatty()
+        show_prompts = interactive and sys.stdin.isatty() and not is_predefined_suite
         banner_shown = False
 
         if self.survey_profile_column and profile_data is not None:
@@ -746,13 +1070,17 @@ class DriftAnalyzer:
             variogram_model, params, cv_mode=cv_mode,
             buffer_radius_m=buffer_radius_m, profile_ids=profile_ids,
         )
+        for rank_idx, res in enumerate(eval_results, 1):
+            res.rank = rank_idx
 
         top_model = eval_results[0] if eval_results else None
         if top_model:
             logger.info(f"   [Drift Analyzer] Ranking complete. Top model: '{top_model.name}' (RMSE = {top_model.cv_rmse:.2f} {self.rmse_unit}, AICc = {top_model.aicc:.1f}).")
 
-        # Interactive Terminal Ranking & Selection Table
-        if show_prompts and eval_results:
+        if is_predefined_suite:
+            self.selected_models = list(eval_results)
+            logger.info(f"   [Drift Analyzer] Pre-defined suite in configuration detected ({len(eval_results)} models). Bypassing interactive selection prompt.")
+        elif show_prompts and eval_results:
             if not banner_shown:
                 log_section_header("INTERACTIVE DRIFT MODEL SELECTION")
             else:
@@ -761,10 +1089,18 @@ class DriftAnalyzer:
             print(format_ranking_table(eval_results, f"DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS ({self.pass_label.upper()})", rmse_unit=self.rmse_unit))
             print(f"   [Drift Analyzer] Recommended model: #1 '{eval_results[0].name}'")
             chosen = self._prompt_model_selection(eval_results)
-            if chosen is not None:
-                eval_results.remove(chosen)
-                eval_results.insert(0, chosen)
+            self.selected_models = chosen if chosen else [eval_results[0]]
+        else:
+            self.selected_models = [eval_results[0]] if eval_results else []
 
-            logger.info(f"   [Drift Analyzer] Drift model '{eval_results[0].name}' selected for the production Kriging run.")
+        if self.selected_models:
+            primary = self.selected_models[0]
+            if primary in eval_results:
+                eval_results.remove(primary)
+                eval_results.insert(0, primary)
+            logger.info(f"   [Drift Analyzer] Drift model '{self.selected_models[0].name}' selected for the production Kriging run.")
+            if len(self.selected_models) > 1:
+                names = [m.name for m in self.selected_models]
+                logger.info(f"   [Drift Comparison] {len(self.selected_models)} models queued for comparison: {names}")
 
         return eval_results

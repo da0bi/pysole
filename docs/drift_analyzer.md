@@ -1,8 +1,9 @@
-# PySole Drift Analyzer & Survey Planner Methodological Guide
+# Universal Kriging Drift Analyzer Guide
 
-This document provides a comprehensive methodological and mathematical reference for two key modules in `PySole`:
-1. **Universal Kriging Drift Analyzer (`DriftAnalyzer`)**: An automated diagnostic and model selection engine for evaluating and ranking spatial drift models.
-2. **Unprobed Glacier Survey Planner (`SurveyPlanner`)**: A forward campaign design engine for generating synthetic Shallow Ice Approximation (SIA) ice thickness targets and laying out optimal longitudinal and transverse survey tracks.
+This document provides a comprehensive methodological and mathematical reference for the **Universal Kriging Drift Analyzer (`DriftAnalyzer`)** in `PySole`, an automated diagnostic and model selection engine for evaluating, ranking, and comparing spatial drift models.
+
+> [!TIP]
+> For forward campaign design on unprobed glaciers without radar sounding data, see the dedicated [Survey Planner Guide](survey_planner.md).
 
 ---
 
@@ -59,7 +60,26 @@ The suite is every non-empty subset of the listed primitives **except subsets co
 | `["sia"]` | 1 |
 | `[]` | error (use `null`) |
 
-A suite of exactly **one** candidate (a single-term list such as `["sia"]`) overrides the analyzer: no analysis is run (an info message is logged) and that model is applied. Note that with the analyzer on, a list of several terms is always a suite; for ONE multi-drift model such as `["sia", "z_dem"]` set `drift_analyzer: false`.
+#### Complete Model Suite & Drift Analyzer State Matrix
+
+The configuration interaction between Kriging `method`, `drift_analyzer`, and `drift_terms` is fully governed by the following state matrix:
+
+| Kriging `method` | `drift_analyzer` | `drift_terms` syntax | Interpreted Action | Effective `drift_analyzer` |
+| :--- | :--- | :--- | :--- | :--- |
+| `"ordinary"` | `false` or `true` | any or omitted | Ordinary Kriging (drift terms ignored) | `false` |
+| `"universal"` | `false` | flat list, e.g. `["sia", "z_dem"]` | Single multi-drift model applied directly | `false` |
+| `"universal"` | `false` | single non-flat, e.g. `[["sia", "z_dem"]]` | Unwrapped to single model `["sia", "z_dem"]` | `false` |
+| `"universal"` | `false` | multi-model suite, e.g. `[["sia", "z_dem"], ["sia"]]` | Raises `ConfigError` (must set `drift_analyzer: true`) | `false` |
+| `"universal"` | `true` | flat single primitive, e.g. `["sia"]` | Single model applied directly; analyzer auto-disabled | `false` (auto-disabled) |
+| `"universal"` | `true` | flat list $\ge 2$ terms, e.g. `["sia", "z_dem"]` | Combinatorial candidate suite evaluated and ranked | `true` |
+| `"universal"` | `true` | flat list with `[]`, e.g. `[[], "sia", "z_dem"]` | Combinatorial candidate suite + Ordinary evaluated | `true` |
+| `"universal"` | `true` | explicit multi-model suite, e.g. `[["sia", "z_dem"], ["sia"], []]` | Explicit candidate suite evaluated (no combinatorial expansion) | `true` |
+| `"universal"` | `true` | explicit single-model suite, e.g. `[["sia", "z_dem"]]` | Single model applied directly; analyzer auto-disabled | `false` (auto-disabled) |
+| `"regression"` | `false` or `true` | flat list or omitted | Random Forest Regression Kriging (PyKrige) | `false` |
+
+> [!NOTE]
+> When `drift_analyzer: true` is configured with a single model definition (e.g. flat `["sia"]` or non-flat `[["sia", "z_dem"]]`), `PySole` logs an informational notice and automatically sets `drift_analyzer: false` across configuration dictionaries and solver states, directly executing Universal Kriging without interactive prompts or redundant candidate loops.
+
 
 #### Winner handling
 
@@ -403,133 +423,100 @@ The `DriftAnalyzer` applies one domain-specific rule:
 
 ---
 
-<a id="survey_planner"></a>
-## 2. Survey Planner (`SurveyPlanner`)
+### 1.10 Multi-Model Comparison Suite, Directory Architecture & Comparison Tables
 
-When a user provides a surface DEM (`dem_path`) and glacier outline (`outline_path`), but **no survey dataset** (`survey_data_path = null`), `PySole` automatically dispatches the **Survey Planner**.
+When evaluating drift models, glaciologists frequently need to systematically contrast how different theoretical assumptions (e.g. baseline Ordinary Kriging vs. SIA physical drift vs. elevation hypsometry) impact the spatial geometry of the interpolated bedrock surface, ice thickness distribution, and basal shear stress fields. `PySole` provides an automated multi-model comparison workflow:
 
+#### 1. Interactive Multi-Model Selection
+In interactive terminal sessions, when presented with the Drift Analyzer candidate recommendation table, the user can select one or multiple models simultaneously:
+- **Recommended Default**: Press `[Enter]` or type `#` to accept the top-ranked model (`#1`).
+- **Single Model**: Enter a row number (`3`, `#3`), canonical model name (`sia + z_dem`), or `ordinary`.
+- **Row Ranges**: Hyphenated intervals (e.g. `1-5` or `#1-#5`) select all candidates within the range.
+- **Comma-Separated Lists**: Discrete model numbers (e.g. `1, 3` or `1, 2, 5`).
+- **Mixed Combinations**: Arbitrary combinations of lists and ranges (e.g. `1-3, 5` or `3, 1-2`).
+- **Deduplication & Order of Precedence**: Inputs are automatically validated and deduplicated. The first model entered becomes the **primary production model** that determines downstream migration soundings and final returns, while all remaining models are queued for comparative multi-model evaluation.
+
+#### 2. Configuration via JSON (`pysole.json`)
+Users can pre-define an explicit candidate suite in `pysole.json` under `kriging_parameters.<stage>.drift_terms` as a list of model candidate lists:
+```json
+{
+  "kriging_parameters": {
+    "pre_migration": {
+      "method": "universal",
+      "drift_analyzer": true,
+      "drift_terms": [
+        ["sia", "z_dem"],
+        ["sia"],
+        []
+      ]
+    },
+    "post_migration": {
+      "method": "universal",
+      "drift_analyzer": true,
+      "drift_terms": [
+        ["sia", "z_dem", "curvature_dem"],
+        ["sia", "z_dem"],
+        ["z_dem"],
+        []
+      ]
+    }
+  }
+}
 ```
-[ Surface DEM & Glacier Outline ]
-               │
-               ▼
-┌──────────────────────────────┐
-│  FFT Gaussian DEM Smoothing  │ ──► Compute Z_smooth,kc(x,y)
-│    (Corner Frequency k_c)    │ ──► Derive Clamped Slope alpha_clamped(x,y)
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│ Synthetic SIA Target Modeling│ ──► D_SIA(x,y) = tau_0 / (rho * g * sin(alpha))
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│    Track Layout Algorithm    │ ──► Longitudinal Central Flowline (L_1)
-│    (Budget Limit L_max)      │ ──► Transverse Cross-Profiles (T_1 ... T_M)
-└──────────────┬───────────────┘
-               │
-               ▼
-[ Export: GeoTIFF, GPX, GeoJSON, Map Plot ]
-```
+When an explicit suite of candidate models is configured in JSON, the Drift Analyzer automatically evaluates all specified models and executes the multi-model comparison pipeline **non-interactively without prompt interruption**.
+
+#### 3. Data Storage & Output Directory Architecture
+To keep output repositories clean and avoid collision between competing models, `PySole` enforces a strict subfolder structure:
+
+- **Diagnostic Plots (`figures/`)**:
+  - Global pre-interpolation diagnostic plots (`01` through `05`: variograms, BSS optimization curves, 3D ray migration vectors) remain in root `figures/`.
+  - Post-interpolation diagnostic plots (`06` through `11`: bedrock elevation map, embedded bedrock map, ice thickness map and histogram, basal shear stress map and histogram) are routed into model subdirectories:
+    ```
+    figures/
+    ├── 01_pass1_variogram.png
+    ├── 02_pass1_kc_variogram_optimization.png
+    ├── 03_3d_migration.png
+    ├── 04_pass2_variogram.png
+    ├── 05_pass2_kc_variogram_optimization.png
+    ├── drift_model_comparison_pass1.txt
+    ├── drift_model_comparison_pass1.csv
+    ├── drift_model_comparison_pass1.md
+    ├── drift_model_comparison_pass2.txt
+    ├── drift_model_comparison_pass2.csv
+    ├── drift_model_comparison_pass2.md
+    ├── sia_z_dem/
+    │   ├── 06_bedrock_elevation_and_uncertainty_sia_z_dem.png
+    │   ├── 07_final_embedded_bedrock_sia_z_dem.png
+    │   ├── 08_final_thickness_and_uncertainty_sia_z_dem.png
+    │   ├── 09_final_thickness_histogram_sia_z_dem.png
+    │   ├── 10_final_basal_shear_stress_and_uncertainty_sia_z_dem.png
+    │   └── 11_final_basal_shear_stress_histogram_sia_z_dem.png
+    └── ordinary/
+        ├── 06_bedrock_elevation_and_uncertainty_ordinary.png
+        └── ...
+    ```
+- **Spatial Rasters & Tables (`results/`)**:
+  - All GeoTIFF spatial raster outputs (`thickness.tif`, `bedrock.tif`, `basal_shear_stress.tif`, `traveltime.tif`, and their corresponding `*_uncertainty.tif` grids) are saved **strictly into the corresponding model subfolder `results/<model_slug>/`**. No duplicate rasters are created in root `results/`.
+  - Global survey observation soundings and migration coordinate tables (`migrated_points.csv`) remain in root `results/`.
+
+#### 4. Cross-Model Comparison Tables
+At the conclusion of each interpolation pass, `PySole` formats and exports comprehensive comparison files in three synchronized formats:
+1. `.txt`: ASCII console table printed directly to stdout and saved to disk.
+2. `.csv`: Machine-readable tabular file for downstream data science workflows.
+3. `.md`: GitHub-Flavored Markdown table with KaTeX math support.
+
+- **Pass 1 (`drift_model_comparison_pass1.*`)**:
+  Contrasts cross-validation rankings (Rank, Drift Model, CV RMSE, $\Delta$RMSE %, AICc, $\Delta$AICc, VIF, Status) with full domain traveltime distribution metrics $T(x,y)$ (Mean, Median, Std, Max in `ns` or `m`). If `pre_migration.calculate_uncertainty: true`, an additional column `Mean Unc` is dynamically appended, reporting the spatial mean traveltime Kriging uncertainty $\sigma_T$ in traveltime units over all glaciated cells within the glacier outline (`outline_mask & (traveltime > 0)`).
+- **Pass 2 (`drift_model_comparison_pass2.*`)**:
+  Contrasts cross-validation rankings with both ice thickness distribution metrics $H(x,y)$ (Mean, Median, Std, Max in meters) and basal shear stress distribution metrics $\tau_b(x,y)$ (Mean, Median, Std, Max in kPa). If `post_migration.calculate_uncertainty: true`, an additional column `Mean Unc` is dynamically appended under the Ice Thickness section, reporting the spatial mean ice thickness Kriging uncertainty $\sigma_D$ in meters over all glaciated cells within the glacier outline (`outline_mask & (thickness > 0)`).
+- **Uncertainty Toggle**: When `calculate_uncertainty: false` (the default setting to avoid unnecessary $O(N^2 \cdot m)$ operations), the `Mean Unc` column is omitted, keeping comparison tables concise and performant.
+- **Graceful Error Handling**: If any candidate model fails numerical matrix inversion or regularized Cholesky decomposition, it is marked `FAILED` in the table with safe zeroed metrics, allowing the remaining candidates in the suite to complete cleanly.
 
 ---
 
-### 2.1 Required User Input Data & Default Parameters
+## 2. Configuration & CLI Examples
 
-To execute forward campaign survey planning on unprobed glaciers, `SurveyPlanner` requires two core spatial input files:
-
-1. **Surface DEM (`dem` / `dem_path`)**: High-resolution Digital Elevation Model raster (GeoTIFF `.tif`, ESRI ASCII `.asc`, or NumPy `ndarray`) containing surface elevation values $Z_{\text{dem}}(x,y)$ [m].
-2. **Glacier Boundary Outline (`outline` / `outline_path`, Optional)**: Vector boundary polygon (Shapefile `.shp`, GeoJSON `.geojson`, or 2D boolean mask) delineating the active extent of the creeping body. If `outline_path` is `null` (or omitted), `PySole` automatically detects `NaN` entries in the DEM raster to construct the active domain mask:
-   - **Outer Perimeter Margins**: Exterior `NaN` padding surrounding the creeping body defines the outer boundary shell.
-   - **Interior Rock Outcrops (Nunataks)**: Interior `NaN` entries within the glacier domain are automatically delineated as rock outcrop holes where SIA ice thickness is masked to zero ($D_{\text{SIA}} = 0\text{ m}$).
-   - **Automated Logging**: Emits an `INFO` log detailing the count of `NaN` pixels and valid domain pixels. If no `NaN` values exist in the DEM and no outline is provided, emits a `WARNING` indicating that the full rectangular grid will be treated as active domain without boundary constraints.
-
-#### Default Engine Parameters
-When optional parameters are omitted, `SurveyPlanner` enforces the following default values:
-
-| Parameter | Identifier / Argument | Default Value | Physical / Technical Description |
-| :--- | :--- | :--- | :--- |
-| **FFT DEM Cutoff Wavelength** | `lambda_c` / `--lambda-c` (alias `--wavelength`) or `kc` / `--kc` | **`200.0`** m ($k_c \approx 0.0314\text{ rad/m}$) | Physical spatial corner cutoff wavelength ($\lambda_c = 200.0\text{ m}$, corresponding to angular corner wavenumber frequency $k_c = 2\pi / \lambda_c \approx 0.0314\text{ rad/m}$) applied during 2D Fourier frequency-domain Gaussian DEM surface smoothing. |
-| **Nominal Basal Shear Stress** | `tau_0` / `tau_p` / `--tau` | **`100`** kPa ($100,000\text{ Pa}$) | Target nominal basal shear stress ($\tau_0 = 100\text{ kPa}$) used in Shallow Ice Approximation (SIA) ice thickness depth modeling $D_{\text{SIA}}(x,y) = \frac{\tau_0}{\rho g \sin \alpha}$. |
-| **Total Survey Track Budget** | `max_length_km` / `max_km` / `--max-km` | **`5.0`** km ($5,000\text{ m}$) | Maximum total survey length budget ($L_{\text{max}} = 5.0\text{ km}$) allocated across longitudinal flowlines and transverse cross-profiles. |
-| **Minimum Surface Slope Floor** | `slope_floor_deg` | `5.0`° | Minimum surface slope angle threshold ($\alpha_{\text{floor}} = 5^\circ$) to prevent numerical division singularities in low-gradient accumulation basins. |
-| **Ice Density** | `ice_density` | `900.0` kg/m³ | Bulk ice density ($\rho_{\text{ice}} = 900\text{ kg/m}^3$). |
-| **Gravitational Acceleration** | `g` | `9.81` m/s² | Standard gravitational acceleration ($g = 9.81\text{ m/s}^2$). |
-
----
-
-### 2.2 Synthetic SIA Ice Thickness Modeling
-
-#### 1. Frequency-Domain Surface DEM Smoothing
-Raw DEM elevations $Z_{\text{dem}}(x,y)$ contain high-frequency micro-topography. `PySole` applies a 2D Gaussian low-pass filter in the frequency domain using spatial corner wavenumber $k_c$ (default $k_c = 0.0314\text{ rad/m}$):
-
-$$Z_{\text{smooth}, k_c}(x,y) = \text{Re}\left[ \mathcal{F}^{-1} \left( \mathcal{F}\left[ Z_{\text{dem}}(x,y) \right] \cdot \exp\left( -\frac{k_x^2 + k_y^2}{2 k_c^2} \right) \right) \right]$$
-
-where $k_x, k_y$ are spatial wavenumbers ($2\pi / \lambda$).
-
-#### 2. Surface Slope Angle Derivation & Clamping
-Spatial surface slope gradients are calculated via 2nd-order central finite differences:
-
-$$\frac{\partial Z_{\text{smooth}}}{\partial x}, \quad \frac{\partial Z_{\text{smooth}}}{\partial y}$$
-
-$$\alpha(x,y) = \arctan\left( \sqrt{\left(\frac{\partial Z_{\text{smooth}}}{\partial x}\right)^2 + \left(\frac{\partial Z_{\text{smooth}}}{\partial y}\right)^2} \right)$$
-
-To prevent division by zero or extreme thickness over-estimates in flat regions (e.g., upper accumulation basins), slope angles are clamped against a minimum slope floor $\alpha_{\text{floor}}$ (default 5.0°):
-
-$$\alpha_{\text{clamped}}(x,y) = \max(\alpha(x,y), \, \alpha_{\text{floor}})$$
-
-#### 3. Shallow Ice Approximation Thickness Field $D_{\text{SIA}}(x,y)$
-Assuming ice density $\rho_{\text{ice}} = 900\text{ kg/m}^3$, gravitational acceleration $g = 9.81\text{ m/s}^2$, and nominal basal shear stress $\tau_0 = 100\text{ kPa}$:
-
-$$D_{\text{SIA}}(x,y) = \frac{\tau_0}{\rho_{\text{ice}} \, g \, \sin(\alpha_{\text{clamped}}(x,y))}$$
-
-The thickness grid is masked to zero outside the active glacier outline $O(x,y)$:
-
-$$D_{\text{SIA}}(x,y) = 0 \quad \forall (x,y) \notin O(x,y)$$
-
----
-
-### 2.3 Survey Profile Track Layout Algorithm
-
-The survey planner automatically designs field campaign GPR/seismic tracks subject to a total track length budget $L_{\text{max}}$ (default $L_{\text{max}} = 5.0\text{ km}$).
-
-#### 1. Central Longitudinal Flowline ($L_1$)
-- **Maximum Thickness Axis**: The planner identifies the primary ice flow column $j_{\text{center}}$ corresponding to maximum integrated synthetic ice volume:
-
-  $$j_{\text{center}} = \arg\max_j \sum_{i=1}^{N_y} D_{\text{SIA}}(i, j)$$
-
-- **Profile Coordinates**: Traces the central longitudinal profile coordinates along $j_{\text{center}}$ across all active ice nodes ($D_{\text{SIA}} > 0$).
-- **Budget Allocation**: Allocates up to $\sim 40\%$ of total budget $L_{\text{max}}$ to the main longitudinal profile:
-
-  $$L_{\text{long}} = \min(L_{\text{flowline}}, \, 0.40 \cdot L_{\text{max}})$$
-
-#### 2. Transverse Cross-Profiles ($T_1, T_2, \dots, T_M$)
-- **Remaining Budget**: $L_{\text{rem}} = L_{\text{max}} - L_{\text{long}}$.
-- **Number of Cross-Profiles ($M$)**:
-
-  $$M = \max\left(2, \, \left\lfloor \frac{L_{\text{rem}}}{0.20 \cdot L_{\text{max}}} \right\rfloor\right)$$
-
-- **Row Distribution**: $M$ cross-profile row indices $i_1, \dots, i_M$ are spaced evenly across the central $15\%\text{--}85\%$ of the active glacier length.
-- **Margin-to-Margin Spanning**: For each cross-profile row $i_k$, coordinates span orthogonal to the main axis across active ice columns where $D_{\text{SIA}}(i_k, j) > 0$.
-
----
-
-### 2.4 Output Formats & Field Exports
-
-The `SurveyPlanner` generates four field-ready deliverables:
-
-| Deliverable | File Naming Pattern | Description |
-| :--- | :--- | :--- |
-| **GeoTIFF Raster** | `<output_prefix>_sia_modelled_depth.tif` | 2D synthetic SIA ice thickness grid $D_{\text{SIA}}(x,y)$ [m]. |
-| **GPX Vector** | `<output_prefix>_survey_plan.gpx` | GPS track file containing `<trk>` segments and `<trkpt>` nodes for field navigation. |
-| **GeoJSON Vector** | `<output_prefix>_survey_plan.geojson` | Standard GIS LineString features with `track_id`, `length_m`, and `max_depth_m` attributes. |
-| **Map Plot** | `<plots_dir>/<output_prefix>_survey_plan_map.png` | Diagnostic map plot displaying $D_{\text{SIA}}(x,y)$ color map overlaid with longitudinal ($L_1$, red) and transverse ($T_i$, cyan) tracks. |
-
----
-
-## 3. Configuration & CLI Examples
-
-### 3.1 JSON Configuration Schema
+### 2.1 JSON Configuration Schema
 
 ```json
 {
@@ -578,7 +565,7 @@ With `drift_analyzer: true` and `drift_terms` omitted (`null`) the default suite
 
 The pre-migration stage applies ONE multi-drift model (`sia` + `z_dem`); the post-migration stage ranks the 4 candidates Ordinary, `sia`, `z_dem` and `sia + z_dem` and applies the best one.
 
-### 3.2 CLI Commands
+### 2.2 CLI Commands
 
 ```bash
 # Execute PySole with interactive Drift Analyzer and profile grouping
@@ -586,32 +573,5 @@ pysole pysole.json --drift-analyzer --profile-col line_id
 
 # Force non-interactive batch mode
 pysole pysole.json --batch
-
-# Interactive Survey Planning (prompts for omitted parameters: tau_0, lambda_c, max-km)
-pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp
-
-# Fully specified non-interactive execution (or using --batch)
-pysole plan-survey --dem surface_dem.tif --outline glacier_outline.shp --lambda-c 200 --tau 100 --max-km 5.0 --out-dir results --format tif
 ```
 
-#### `pysole plan-survey` CLI Options & Path Resolution
-
-Computes the shallow-ice-approximation (SIA) thickness model and proposes survey tracks within a length budget.
-
-- **Interactive Parameter Configuration**:
-  When running via the Python API (`SurveyPlanner.plan_survey()`, `Solver.plan_survey()`, or automated dispatch when `inputs.survey_data_path` is `null`/omitted) or the CLI (`pysole plan-survey`), PySole interactively prompts for any omitted parameters (`tau_0`, `lambda_c`, `max_length_km`) via terminal `input()`. Each prompt displays the default value in brackets (e.g. `[default: 200.0]`). Pressing <kbd>Enter</kbd> (empty response) automatically adopts the default value. Non-numeric or negative entries trigger a helpful warning and re-prompt. In non-TTY environments (CI, background scripts, pipes) or when `--batch` / `interactive=False` is passed, prompts are bypassed and defaults are used automatically.
-
-- **Options:**
-  - `--dem`: File path to surface DEM raster (required).
-  - `--outline`: File path to creeping body / glacier boundary polygon (optional).
-  - `--lambda-c`, `--wavelength`: Corner frequency cutoff wavelength $\lambda_c$ in meters (default `200.0` m).
-  - `--kc`: FFT corner wavenumber $k_c$ in rad/m (default `0.0314` rad/m, retained for backwards compatibility).
-  - `--tau`: Target basal shear stress $\tau_0$ in kPa (default `100`).
-  - `--max-km`: Survey length budget in km (default `5.0`).
-  - `--batch`: Force non-interactive batch mode (accept defaults for omitted parameters without terminal prompts).
-  - `--prefix`: Output prefix (default `final`).
-  - `--out-dir`: Output directory for generated deliverables.
-  - `--plots-dir`: Output directory for diagnostic figures.
-  - `--format`: Export raster format (`tif` or `asc`, default `tif`).
-
-- **Output Path Resolution:** Outputs are kept together: files go to `--out-dir` (current directory if omitted); an absolute `--prefix` places all files beside it; figures are saved in `figures/` next to the data files unless `--plots-dir` is an absolute path.

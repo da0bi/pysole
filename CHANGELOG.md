@@ -7,7 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-20
+
+Universal Kriging Drift Analyzer candidate suite expansion & auto-disable for single models, multi-model comparison pipeline with isolated subfolder exports & comparison tables, dynamic RMSE ranking table units, interactive $\lambda_c$ survey planning prompt, dedicated Drift Analyzer & Survey Planner documentation guides, and codebase streamlining.
+
 ### Changed
+- **[Documentation Split: Drift Analyzer & Survey Planner Dedicated Guides] (`docs/drift_analyzer.md`, `docs/survey_planner.md`, `README.md`, `tests/test_docs_sync.py`, `CHANGELOG.md`)**:
+  - Split `docs/drift_analyzer_&_survey_planner.md` into two standalone technical reference guides:
+    - `docs/drift_analyzer.md` (**Universal Kriging Drift Analyzer Guide**): Comprehensive coverage of Universal Kriging theory, candidate suite interpretation, spatial buffer and profile LOOCV, AICc/VIF metrics, multi-model candidate suites, isolated directory architecture, and cross-model comparison tables.
+    - `docs/survey_planner.md` (**Survey Planner Guide**): Comprehensive coverage of forward campaign planning on unprobed glaciers, frequency-domain surface DEM filtering ($k_c$, $\lambda_c$), synthetic SIA ice thickness modeling, longitudinal and transverse profile layout algorithms, and GIS/GPX/GeoTIFF deliverable exports.
+  - Updated all 11 contextual markdown links in `README.md` to point directly to `docs/drift_analyzer.md` or `docs/survey_planner.md`.
+  - Synchronized `tests/test_docs_sync.py` to parse and validate both living documentation files (`DRIFT_GUIDE`, `SURVEY_GUIDE`).
+- **[Drift Analyzer Single-Model Auto-Disable & Mean Kriging Uncertainty in Comparison Tables] (`src/pysole/drift.py`, `src/pysole/config.py`, `src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_analyzer_engine.py`, `tests/test_drift_rules.py`)**:
+  - **Single-Model Auto-Disable**: When a single candidate model is configured (either a flat single primitive e.g. `["sia"]`, a non-flat single candidate e.g. `[["sia", "z_dem"]]`, or Ordinary-only `[[]]`) and `drift_analyzer: true`, `PySole` logs an informative notice and automatically overrides `drift_analyzer` to `False` across the configuration dictionary (`load_config`) and solver attributes (`self.pre_drift_analyzer`, `self.post_drift_analyzer`). Directly executes Universal Kriging without candidate evaluation loops or interactive prompts.
+  - **Explicit Non-Flat Candidate Suites & Validation**:
+    - With `drift_analyzer: true`: non-flat candidate suites e.g. `[["sia", "z_dem"], ["sia"], []]` explicitly specify evaluated candidates without combinatorial expansion.
+    - With `drift_analyzer: false`: single non-flat candidates `[["sia", "z_dem"]]` unwrap cleanly to `["sia", "z_dem"]`; multi-model suites raise an informative `ConfigError` advising to set `drift_analyzer: true`.
+  - **Mean Kriging Uncertainty in Cross-Model Comparison Tables**:
+    - Pass 1: When `pre_migration.calculate_uncertainty: true`, dynamically appends a `Mean Unc` column to `drift_model_comparison_pass1.{txt,csv,md}` reporting domain mean traveltime Kriging uncertainty over glaciated cells (`outline_mask & (traveltime > 0)`).
+    - Pass 2: When `post_migration.calculate_uncertainty: true`, dynamically appends a `Mean Unc` column to `drift_model_comparison_pass2.{txt,csv,md}` under Ice Thickness reporting domain mean thickness Kriging uncertainty over glaciated cells (`outline_mask & (thickness > 0)`).
+    - When `calculate_uncertainty: false`, the column is omitted, keeping comparison tables concise.
+  - **Documentation Updates**: Added the Complete Model Suite & Drift Analyzer State Matrix table to `docs/drift_analyzer.md` Subsection 1.2, updated Subsection 1.10, and updated `README.md` *How `drift_terms` is interpreted* table and rules.
+- **[Drift Analyzer Multi-Model Comparison Suite, Isolated Directory Storage & Comparison Tables] (`src/pysole/drift.py`, `src/pysole/drift_analyzer.py`, `src/pysole/plotting.py`, `src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_analyzer_engine.py`)**:
+  - **Interactive Multi-Model Selection**: Enhanced `DriftAnalyzer._prompt_model_selection()` and `parse_model_selection()` to parse single row numbers (`3`), comma-separated lists (`1, 3`), hyphenated ranges (`1-5`), and mixed combinations (`1-3, 5`), with automatic deduplication. The first model entered serves as the primary model determining downstream migration soundings and final returns.
+  - **Non-Interactive Pre-Defined JSON Candidate Suites**: Added support for pre-defining candidate suites in `pysole.json` (`kriging_parameters.<stage>.drift_terms: [["sia", "z_dem"], ["sia"], []]`). Bypasses interactive selection prompt and executes the multi-model comparison pipeline non-interactively.
+  - **Directory Output Isolation (Option 1 & Option B)**:
+    - Pre-interpolation figures (`01` through `05`) stay in root `figures/`.
+    - Post-interpolation diagnostic figures (`06` through `11`) are organized into subfolders `figures/<model_slug>/` with `<model_slug>` appended to the filenames (`06_<pfx>bedrock_elevation_and_uncertainty_<model_slug>.png`, `07`, `08`, `09`, `10`, `11`).
+    - Raster exports (`thickness.tif`, `bedrock.tif`, `basal_shear_stress.tif`, `traveltime.tif`, etc.) are routed strictly to `results/<model_slug>/` with zero duplicate rasters in root `results/` (Option Y).
+    - Migrated sounding coordinates (`migrated_points.csv`) remain in root `results/`.
+  - **Cross-Model Comparison Tables**: Automatically formats and exports cross-model comparison tables in `.txt`, `.csv`, and `.md` formats:
+    - Pass 1: `figures/drift_model_comparison_pass1.{txt,csv,md}` comparing CV metrics with Traveltime distribution $T(x,y)$ metrics (mean, median, std, max in ns or m).
+    - Pass 2: `figures/drift_model_comparison_pass2.{txt,csv,md}` comparing CV metrics with Ice Thickness $H(x,y)$ distribution metrics and Basal Shear Stress $\tau_b(x,y)$ distribution metrics (mean, median, std, max in kPa).
+  - **Unified Logging and Progress Bars**: Every evaluated candidate model logs its selection, regularized Tikhonov matrix conditioning, and live dual kriging chunk progress bar during evaluation.
+  - **Graceful Numerical Recovery**: Ill-conditioned models that fail numerical inversion are marked `FAILED` without aborting the execution of subsequent candidates in the comparison suite.
 - **[Terminal Output & Log Block Formatting Separation] (`src/pysole/logging.py`, `src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `src/pysole/survey_planner.py`, `src/pysole/variogram.py`, `tests/test_logging.py`)**:
   - **Banner Spacing Fix**: Removed redundant leading newline in `DriftAnalyzer._prompt_buffer_radius()` (`print(f"[DriftAnalyzer] Fitted spatial range...")`), ensuring that exactly one empty line follows the `INTERACTIVE DRIFT MODEL SELECTION` section header. Also removed redundant leading newline in interactive migration velocity prompt (`solver.py`).
   - **Standardized Terminal Block Delimitation (`end_terminal_block`)**: Introduced `end_terminal_block()` in `src/pysole/logging.py` to emit a trailing newline at the boundary of interactive terminal sessions. Applied across `_prompt_buffer_radius()` and `_prompt_model_selection()` in `drift_analyzer.py`, interactive migration and bedrock finalization in `solver.py`, survey planning prompts in `survey_planner.py`, and interactive BSS optimization in `variogram.py`, guaranteeing that subsequent timestamped log blocks (`[INFO]`) are cleanly separated by an empty line.
@@ -169,7 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **[Relative Output Directory Resolution for Migrated Points] (`src/pysole/solver.py`)**:
   - Fixed path resolution in `Solver._export_optional_points_csv()` so that relative output paths (such as `"output_dir": "."`) and custom output prefixes resolve properly against `output_dir` (e.g. `./migrated_points.csv` or `./<prefix>_migrated_points.csv`) rather than falling back to CWD or omitting export files.
-- **[Survey Planner Documentation Anchor Link] (`docs/drift_analyzer_&_survey_planner.md`)**:
+- **[Survey Planner Documentation Anchor Link] (`docs/survey_planner.md`)**:
   - Updated markdown anchor targeting for the Survey Planner documentation to `<a id="survey_planner"></a>`.
 
 ## [0.5.2] - 2026-10-16
@@ -718,8 +751,8 @@ Multi-drift Universal Kriging, a corrected and much faster Drift Analyzer, and o
   - Styled `pysole.drift_analyzer` card border and orchestrator method `recommend_drift_model(...)` highlights with **Bright Fuchsia** (`#e879f9`) for consistent visual mapping across the diagram.
   - Increased font size and vertical line spacing in `pysole.solver` orchestrator card by **+20%**.
 - **Documentation & Methodological Reference**:
-  - Expanded [`docs/drift_analyzer_&_survey_planner.md`](./docs/drift_analyzer_&_survey_planner.md) with comprehensive equations for Universal Kriging, VIF, Pearson $r$, Spearman $\rho_s$, Spatial Buffer LOOCV, AICc, SIA depth modeling, and survey track layout algorithms, including a tri-metric diagnostic evaluation matrix table.
-  - Created `docs/drift_analyzer.md` pointing to the comprehensive guide (since merged into [`docs/drift_analyzer_&_survey_planner.md`](docs/drift_analyzer_&_survey_planner.md)).
+  - Expanded [`docs/drift_analyzer.md`](./docs/drift_analyzer.md) and [`docs/survey_planner.md`](./docs/survey_planner.md) with comprehensive equations for Universal Kriging, VIF, Pearson $r$, Spearman $\rho_s$, Spatial Buffer LOOCV, AICc, SIA depth modeling, and survey track layout algorithms, including a tri-metric diagnostic evaluation matrix table.
+  - Maintained dedicated technical guides `docs/drift_analyzer.md` and `docs/survey_planner.md`.
   - Updated JSON configuration templates ([`pysole.json`](./pysole.json), [`examples/gok/pysole_gok.json`](./examples/gok/pysole_gok.json), [`examples/wuk/pysole_wuk.json`](./examples/wuk/pysole_wuk.json)) with `"survey_profile_column"` and `"drift_analyzer"`.
   - Updated [`README.md`](./README.md) key features, JSON configuration snippet, and Parameter Reference table.
   - Created dedicated unit test suites in [`tests/test_drift_analyzer_engine.py`](./tests/test_drift_analyzer_engine.py) and [`tests/test_survey_planner.py`](./tests/test_survey_planner.py).
