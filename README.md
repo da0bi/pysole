@@ -450,7 +450,7 @@ where:
   - <i>F</i><sub>grid</sub> = [<i>f</i><sub>1</sub>(<i>x</i>,<i>y</i>), ..., <i>f</i><sub><i>L</i></sub>(<i>x</i>,<i>y</i>)]<sup>T</sup>: the drift function vector evaluated at target node (<i>x</i>, <i>y</i>) (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
 
 ##### Thread-Safe Uncertainty Evaluation & Level-3 BLAS Engine
-Kriging estimation variance is optional via `kriging_parameters.pre_migration.calculate_uncertainty` and `kriging_parameters.post_migration.calculate_uncertainty` (both default to `false` to initially save computational time). Dual Kriging point prediction only requires an $O(N \cdot m)$ vector dot product $\mathbf{w}_z \cdot \mathbf{k}_{\text{grid}}$, executing in milliseconds. Evaluating spatial estimation variance, however, requires solving a full $(N+L) \times m$ matrix system $\mathbf{K}^{-1} \mathbf{K}_{\text{rhs}}$, which scales quadratically with sample size as $O(N^2 \cdot m)$ and incurs orders of magnitude higher floating-point operations and memory bandwidth.
+Kriging estimation variance is optional via `kriging_parameters.pre_migration.calculate_uncertainty` and `kriging_parameters.post_migration.calculate_uncertainty` (both default to `false` to initially save computational time). Dual Kriging point prediction only requires an $O(N \cdot m)$ vector dot product $`\mathbf{w}_z \cdot \mathbf{k}_{\text{grid}}`$, executing in milliseconds. Evaluating spatial estimation variance, however, requires solving a full $(N+L) \times m$ matrix system $`\mathbf{K}^{-1} \mathbf{K}_{\text{rhs}}`$, which scales quadratically with sample size as $O(N^2 \cdot m)$ and incurs orders of magnitude higher floating-point operations and memory bandwidth.
 
 When Kriging estimation variance (&sigma;<sub>Kriging</sub><sup>2</sup>) is requested (`calculate_uncertainty: true`), per-grid node variance is evaluated using the exact same target node vector <i>k</i><sub>grid</sub>:
 
@@ -613,27 +613,27 @@ The Kriging parameters `method` and `drift_analyzer` decide what the `drift_term
 
 <a id="kriging-uncertainty-derivation"></a>
 #### 7. Kriging Uncertainty Derivation
-Evaluating Kriging uncertainty requires substantially more computational effort and memory throughput than point prediction alone. In the Dual Kriging framework, point prediction $\hat{z}(x,y) = \mathbf{w}_z^T \mathbf{k}_{\text{grid}}$ requires only a single $O(N \cdot m)$ vector-matrix dot product between the solved 1D dual weight vector and the target node vectors (\~$10\text{ MFLOPs}$ per chunk). By contrast, evaluating the Kriging estimation variance $\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{grid}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{grid}}$ requires solving a dense $(N+L) \times m$ matrix system $\mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}$, which scales quadratically with the number of observations as $O(N^2 \cdot m)$ operations (\~$90\text{ GFLOPs}$ per chunk for $N > 5{,}000$ points) and streams hundreds of megabytes of intermediate matrix data across the CPU memory bus per chunk. For this reason, uncertainty evaluation is optional (disabled by default via `calculate_uncertainty: false` to save computational time) and can be enabled when uncertainty rasters or diagnostic variance plots are specifically required.
+Evaluating Kriging uncertainty requires substantially more computational effort and memory throughput than point prediction alone. In the Dual Kriging framework, point prediction $`\hat{z}(x,y) = \mathbf{w}_z^T \mathbf{k}_{\text{grid}}`$ requires only a single $O(N \cdot m)$ vector-matrix dot product between the solved 1D dual weight vector and the target node vectors (~10 MFLOPs per chunk). By contrast, evaluating the Kriging estimation variance $`\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{grid}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{grid}}`$ requires solving a dense $(N+L) \times m$ matrix system $`\mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}`$, which scales quadratically with the number of observations as $O(N^2 \cdot m)$ operations (~90 GFLOPs per chunk for $N > 5{,}000$ points) and streams hundreds of megabytes of intermediate matrix data across the CPU memory bus per chunk. For this reason, uncertainty evaluation is optional (disabled by default via `calculate_uncertainty: false` to save computational time) and can be enabled when uncertainty rasters or diagnostic variance plots are specifically required.
 
 When enabled (`calculate_uncertainty: true`), Kriging spatial interpolation natively evaluates the 2D estimation variance field $\sigma^2(x,y)$ alongside point predictions. Taking the square root converts the variance field into the **Kriging Standard Error $\sigma(x,y)$**, serving as a quantitative measure of interpolation uncertainty across unmeasured regions.
 
 The exact calculation of the estimation variance depends on the selected `interpolation_target`:
 
 - **Direct Target Interpolation (`interpolation_target`: `"D"` or `"T"`)**:
-  When directly interpolating migrated depths $D_i$ or signal traveltimes $T_i$, the Kriging estimation variance field ($\sigma_{\text{D}}^2(x,y)$ $[\text{m}^2]$ or $\sigma_{\text{T}}^2(x,y)$ $[\text{s}^2]$) is evaluated directly. Taking the square root yields the standard error in physical units:
+  When directly interpolating migrated depths $D_i$ or signal traveltimes $T_i$, the Kriging estimation variance field ($`\sigma_{\text{D}}^2(x,y)`$ $[\text{m}^2]$ or $`\sigma_{\text{T}}^2(x,y)`$ $[\text{s}^2]$) is evaluated directly. Taking the square root yields the standard error in physical units:
 
   <p align="center">
   $$\sigma_{\text{D or T}}(x,y) = \sqrt{\sigma_{\text{D or T}}^2(x,y)} \quad [\pm\,\text{m or s}]$$
   </p>
 
 - **BSS-derived Product Target Interpolation (`interpolation_target`: `"P"`)**:
-  When interpolating the BSS product field $P(x,y) = D \cdot \sin(\alpha_{\text{opt}})$, or $$P(x,y) = T \cdot \sin(\alpha_{\text{opt}})$$, Kriging calculates the product variance $\sigma_{\text{P}}^2(x,y)$. The 2D estimation variance is derived via linear error propagation with the optimal surface slope field $\sin(\alpha_{\text{opt}}(x,y))$:
+  When interpolating the BSS product field $`P(x,y) = D \cdot \sin(\alpha_{\text{opt}})`$, or $`P(x,y) = T \cdot \sin(\alpha_{\text{opt}})`$, Kriging calculates the product variance $`\sigma_{\text{P}}^2(x,y)`$. The 2D estimation variance is derived via linear error propagation with the optimal surface slope field $`\sin(\alpha_{\text{opt}}(x,y))`$:
 
   <p align="center">
   $$\sigma_{\text{D or T}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m² or s²}]$$
   </p>
 
-  Taking the square root converts the propagated variance field into the **Kriging Standard Error $\sigma_{\text{D}}(x,y)$ in meters** (or $\sigma_{\text{T}}(x,y)$ in traveltime units):
+  Taking the square root converts the propagated variance field into the **Kriging Standard Error $`\sigma_{\text{D}}(x,y)`$ in meters** (or $`\sigma_{\text{T}}(x,y)`$ in traveltime units):
 
   <p align="center">
   $$\sigma_{\text{D or T}}(x,y) = \sqrt{\sigma_{\text{D or T}}^2(x,y)} \quad [\pm\,\text{m or s}]$$
@@ -643,7 +643,7 @@ Under Gaussian linear estimation theory, $\pm 1.00 \, \sigma(x,y)$ represents th
 
 <a id="memory-guard-and-uncertainty"></a>
 #### 8. Memory Guard and Kriging Uncertainty
-Computing Kriging uncertainty is optional and controlled by `kriging_parameters.pre_migration.calculate_uncertainty` and `kriging_parameters.post_migration.calculate_uncertainty` (both default to `false` to save computational time). When `calculate_uncertainty: true` is enabled, post-migration uncertainty standard error ($\sigma_{\text{D}}$) is evaluated and displayed in the diagnostic figures; the `save_*_uncertainty` options control whether the uncertainty raster grids are exported to disk. If `calculate_uncertainty: false` (or if skipped by the memory guard), diagnostic uncertainty panels display *"Uncertainty not available (see log)"* and raster export is skipped with a warning. The traveltime uncertainty $\sigma_{\text{T}}$ is exported on request when pre-migration uncertainty is enabled, but is never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
+Computing Kriging uncertainty is optional and controlled by `kriging_parameters.pre_migration.calculate_uncertainty` and `kriging_parameters.post_migration.calculate_uncertainty` (both default to `false` to save computational time). When `calculate_uncertainty: true` is enabled, post-migration uncertainty standard error ($`\sigma_{\text{D}}`$) is evaluated and displayed in the diagnostic figures; the `save_*_uncertainty` options control whether the uncertainty raster grids are exported to disk. If `calculate_uncertainty: false` (or if skipped by the memory guard), diagnostic uncertainty panels display *"Uncertainty not available (see log)"* and raster export is skipped with a warning. The traveltime uncertainty $`\sigma_{\text{T}}`$ is exported on request when pre-migration uncertainty is enabled, but is never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
 
 When uncertainty computation is requested, the native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM. Control group (*cgroup*) limits are respected, thus runs safely inside Docker, Kubernetes, and HPC clusters without exceeding assigned container memory quotas. If the estimate does not fit:
 
