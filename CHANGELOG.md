@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Suppressed Redundant Sounding Export**: Suppressed redundant exports of `migrated_points.csv` during candidate multi-model evaluation runs in Pass 1, writing migrated survey soundings exclusively once for the primary (winning) model.
 - **[Continuous Black Outline in Diagnostic Plots] (`src/pysole/plotting.py`, `tests/test_audit_regressions.py`)**:
   - Changed the glacier boundary outline in `##_<output_prefix>_final_thickness_and_uncertainty*.png` and `##_<output_prefix>_final_basal_shear_stress_and_uncertainty*.png` from dashed (`linewidths=1.5, linestyles="--"`) to a continuous solid black contour (`linewidths=0.8, linestyles="solid"`), standardizing outline styling across all diagnostic spatial figures to match `##_<output_prefix>_3d_migration.png`.
+- **[Optimum Cutoff Wavelength in Variogram Optimization Plots] (`src/pysole/plotting.py`, `tests/test_audit_regressions.py`)**:
+  - Added the corresponding physical spatial cutoff wavelength in meters ($\lambda_c = 2\pi / k_c$ [m]) to the title of the left panel in diagnostic figures `02_<output_prefix>_pass1_kc_variogram_optimization.png` and `05_<output_prefix>_pass2_kc_variogram_optimization.png` (`Optimum $k_c$ = ... ($\lambda_c$ = ... m)`), providing immediate spatial scale context.
 
 ### Removed
 - **[Dead Code Removal & Codebase Streamlining] (`src/pysole/survey_planner.py`, `src/pysole/plotting.py`, `src/pysole/logging.py`, `src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `tests/test_drift_analyzer_engine.py`, `tests/test_logging.py`)**:

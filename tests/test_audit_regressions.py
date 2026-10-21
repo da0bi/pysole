@@ -1043,9 +1043,48 @@ class TestAuditRegressions(unittest.TestCase):
                 "Did not expect uncertainty warning log message when return_variance=False"
             )
 
+    def test_kc_variogram_optimization_plot_title_wavelength(self):
+        """Verifies that plot_bss_kc_optimization_variograms includes optimum wavelength in ax1 title."""
+        import matplotlib.pyplot as plt
+        from pysole.plotting import plot_bss_kc_optimization_variograms
+
+        evaluated_variograms = [
+            {"kc": 0.05, "distance": np.array([10.0, 20.0]), "gamma_norm": np.array([0.1, 0.2])},
+            {"kc": 0.0314, "distance": np.array([10.0, 20.0]), "gamma_norm": np.array([0.05, 0.15])},
+        ]
+        best_kc = 0.0314
+        expected_wl = 2.0 * np.pi / best_kc
+
+        captured_titles = []
+        orig_subplots = plt.subplots
+
+        def spy_subplots(*args, **kwargs):
+            fig, (ax1, ax2) = orig_subplots(*args, **kwargs)
+            orig_set_title = ax1.set_title
+            def wrapped_set_title(title, *t_args, **t_kwargs):
+                captured_titles.append(title)
+                return orig_set_title(title, *t_args, **t_kwargs)
+            ax1.set_title = wrapped_set_title
+            return fig, (ax1, ax2)
+
+        with patch.object(plt, "subplots", side_effect=spy_subplots):
+            plot_bss_kc_optimization_variograms(
+                evaluated_variograms=evaluated_variograms,
+                best_kc=best_kc,
+                all_kc_variances=[(0.05, 0.2), (0.0314, 0.15)],
+                plots_dir=self.output_dir,
+                interactive=False,
+            )
+
+        self.assertTrue(len(captured_titles) > 0)
+        title = captured_titles[0]
+        self.assertIn("Optimum $k_c$ = 0.0314", title)
+        self.assertIn(f"($\\lambda_c$ = {expected_wl:.2f} m)", title)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

@@ -278,9 +278,16 @@ def plot_bss_kc_optimization_variograms(
         if a_range is not None:
             ax1.axvline(x=a_range, color="k", linestyle="--", linewidth=1.5, label=f"Correlation Range a = {a_range:.2f} m")
 
+        from .variogram import compute_cutoff_wavelength
+
+        best_wl = compute_cutoff_wavelength(best_kc)
+        wl_str = f" ($\\lambda_c$ = {best_wl:.2f} m)" if np.isfinite(best_wl) else ""
         ax1.set_xlabel("Lag Distance h [m]")
         ax1.set_ylabel("Normalized Semivariance \u03b3(h) / Mean\u00b2")
-        ax1.set_title(f"Normalized Variograms across Corner Frequencies ($k_c$)\nOptimum $k_c$ = {best_kc:.4f}")
+        ax1.set_title(
+            f"Normalized Variograms across Corner Frequencies ($k_c$)\n"
+            f"Optimum $k_c$ = {best_kc:.4f}{wl_str}"
+        )
         ax1.grid(True)
         ax1.legend(loc="best", fontsize=8)
 
