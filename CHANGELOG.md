@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **[Kriging Estimation Uncertainty Computational Notice] (`src/pysole/interpolation.py`, `tests/test_audit_regressions.py`)**:
+  - Emits an informative log notice (`Evaluating Kriging estimation variance (calculate_uncertainty: true); expect longer computation time due to dense O(N^2) uncertainty matrix evaluations.`) immediately following the Tikhonov matrix regularization report whenever `calculate_uncertainty: true` is evaluated in Dual Kriging interpolation passes.
 - **[Non-Interactive Multi-Model Suite Execution (`drift_analyzer: false`)] (`src/pysole/drift.py`, `src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_rules.py`, `tests/test_drift_analyzer_engine.py`)**:
   - **Automated Non-Interactive Plan Resolution**: When `method: "universal"` and `drift_analyzer: false` (or omitted) are configured with an explicit multi-model suite (e.g. `drift_terms: [["sia", "z_dem"], ["sia"]]`), `PySole` no longer raises a `ConfigError`. Instead, `resolve_drift_plan()` resolves to a multi-model execution plan (`analyze=True`, `interactive=False`) with an informative notice. If duplicate candidate entries collapse to a single unique model, it unwraps directly to a single-model run without cross-validation.
   - **Default Exclusion Buffer Radius**: `Solver._execute_kriging_pass()` respects `plan.interactive`, executing leave-block-out cross-validation without prompting for buffer radius or candidate selection, using the default spatial exclusion buffer radius ($r_{\text{buffer}} = a_0 / 2$).

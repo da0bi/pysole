@@ -1006,9 +1006,47 @@ class TestAuditRegressions(unittest.TestCase):
             self.assertEqual(s.get("linestyles"), "solid")
             self.assertEqual(s.get("linewidths"), 0.8)
 
+    def test_kriging_uncertainty_log_message(self):
+        """Verifies informative log message when calculate_uncertainty (return_variance) is True vs False."""
+        geom = GridGeometry.create((5, 5), dx=10.0, dy=10.0, bounds=(0, 0, 50, 50))
+        pts = np.array([
+            [10.0, 10.0, 100.0],
+            [20.0, 30.0, 110.0],
+            [30.0, 20.0, 120.0],
+            [40.0, 40.0, 130.0],
+        ])
+        params = {"sill": 1.0, "range": 50.0, "nugget": 0.0}
+
+        # Case 1: return_variance=True -> log message should be emitted
+        with patch("pysole.interpolation.logger.info") as mock_info:
+            built_in_kriging_interpolation(
+                pts, geom.x_coords, geom.y_coords, method="ordinary",
+                variogram_model="spherical", variogram_params=params,
+                return_variance=True, show_progress=False
+            )
+            logged_messages = [call.args[0] for call in mock_info.call_args_list if call.args]
+            self.assertTrue(
+                any("Evaluating Kriging estimation variance (calculate_uncertainty: true)" in msg for msg in logged_messages),
+                "Expected uncertainty warning log message when return_variance=True"
+            )
+
+        # Case 2: return_variance=False -> log message should NOT be emitted
+        with patch("pysole.interpolation.logger.info") as mock_info:
+            built_in_kriging_interpolation(
+                pts, geom.x_coords, geom.y_coords, method="ordinary",
+                variogram_model="spherical", variogram_params=params,
+                return_variance=False, show_progress=False
+            )
+            logged_messages = [call.args[0] for call in mock_info.call_args_list if call.args]
+            self.assertFalse(
+                any("Evaluating Kriging estimation variance (calculate_uncertainty: true)" in msg for msg in logged_messages),
+                "Did not expect uncertainty warning log message when return_variance=False"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

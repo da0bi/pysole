@@ -601,6 +601,11 @@ def built_in_kriging_interpolation(
         f"   [Dual Kriging Engine] Applied {system.reg_value:.1e} Tikhonov matrix regularization "
         f"(N={N_pts} points, n_drift={n_drift})"
     )
+    if return_variance:
+        logger.info(
+            "   [Dual Kriging Engine] Evaluating Kriging estimation variance (calculate_uncertainty: true); "
+            "expect longer computation time due to dense O(N^2) uncertainty matrix evaluations."
+        )
 
     # The explicit inverse (variance) is computed before the worker threads start, so that all threads only read
     # shared state and run Level-3 BLAS on it.
