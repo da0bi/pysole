@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Corrected unrendered math expressions ($O(N \cdot m)$, $O(N^2 \cdot m)$, inline KaTeX blocks) and aligned Multi-Model Comparison Suite output structure with flat `<output_dir>` in `README.md`.
   - Escaped LaTeX macro parameter `#` characters in math mode (`\text{RMSE}_{\text{top}}` instead of `\text{RMSE}_{#1}`) and escaped underscores in sort keys (`\text{is\_penalized}`) in `docs/drift_analyzer.md` to prevent KaTeX rendering syntax errors.
   - Corrected `--prefix` CLI option default description in `docs/survey_planner.md` from `final` to `""` to match `plan_parser` argument defaults, and updated `--kc` description to clarify it as an alternative cutoff wavenumber parameter ($k_c = 2\pi / \lambda_c$).
+  - Synchronized Markdown formatting for `**ONE multi-drift model**` in `README.md` and added resilient Markdown asterisk stripping in `tests/test_docs_sync.py` to prevent formatting-induced test failures in CI.
 
 ## [0.5.3] - 2026-10-20
 

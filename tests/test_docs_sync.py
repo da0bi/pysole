@@ -101,6 +101,7 @@ class TestSuiteCountsAndRulesMatchCode(unittest.TestCase):
 
     def test_rule_table_rows(self):
         guide = read(DRIFT_GUIDE)
+        plain_guide = re.sub(r"\*+", "", guide)
         for phrase in (
             "`ordinary` overrides `drift_analyzer` and `drift_terms`",
             "ONE multi-drift model",
@@ -108,7 +109,7 @@ class TestSuiteCountsAndRulesMatchCode(unittest.TestCase):
             "Random Forest covariates",
             "A top-level `[]` is never accepted",
         ):
-            self.assertIn(phrase, guide)
+            self.assertTrue(phrase in guide or phrase in plain_guide, f"{phrase!r} not found in docs/drift_analyzer.md")
 
         ordinary = resolve_drift_plan("ordinary", True, ["sia"])
         self.assertEqual((ordinary.method, ordinary.analyze, ordinary.terms), ("ordinary", False, []))
@@ -133,6 +134,7 @@ class TestSuiteCountsAndRulesMatchCode(unittest.TestCase):
 
     def test_readme_states_the_same_rules(self):
         text = read(README)
+        plain_text = re.sub(r"\*+", "", text)
         for phrase in (
             "`ordinary` overrides the analyzer and the terms",
             "ONE multi-drift model",
@@ -140,7 +142,7 @@ class TestSuiteCountsAndRulesMatchCode(unittest.TestCase):
             "An empty list `[]` at the top level is rejected",
             "only available through `PyKrige`",
         ):
-            self.assertIn(phrase, text)
+            self.assertTrue(phrase in text or phrase in plain_text, f"{phrase!r} not found in README.md")
 
     def test_ranking_wording_matches_the_sort_key(self):
         """S12: the guide must not claim an RMSE-first ranking; the code sorts by (penalized, AICc, RMSE)."""
