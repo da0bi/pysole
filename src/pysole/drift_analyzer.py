@@ -1305,7 +1305,7 @@ class DriftAnalyzer:
                 buffer_radius_m = self._prompt_buffer_radius(a_0, buffer_radius_m)
             logger.info(f"   [Drift Analyzer] Fitted spatial range: a_0 = {a_0:.1f} meters. Spatial exclusion buffer radius set to r_buffer = {buffer_radius_m:.1f} meters.")
 
-        logger.info(f"   [Drift Analyzer] Evaluating {len(candidates)} candidate drift models via block leave-out {cv_mode.upper()}...")
+        logger.info(f"   [Drift Comparison] Evaluating {len(candidates)} candidate drift models via block leave-out {cv_mode.upper()}...")
         eval_results = self.evaluate_spatial_cv(
             x_pts, y_pts, z_values, geometry, drift_grids, candidates,
             variogram_model, params, cv_mode=cv_mode,
@@ -1342,6 +1342,6 @@ class DriftAnalyzer:
             logger.info(f"   [Drift Analyzer] Drift model '{self.selected_models[0].name}' selected for the production Kriging run.")
             if len(self.selected_models) > 1:
                 names = [m.name for m in self.selected_models]
-                logger.info(f"   [Drift Comparison] {len(self.selected_models)} models queued for comparison: {names}")
+                logger.info(f"   [Drift Comparison] {len(self.selected_models)} models queued for {self.pass_label} comparison: {names}")
 
         return eval_results

@@ -973,6 +973,45 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
         self.assertIn("`ordinary`", md_text)
         self.assertIn("`z_dem`", md_text)
 
+    def test_drift_comparison_pass_log_labels(self):
+        """Verifies that [Drift Comparison] logs use explicit Pass 1 and Pass 2 tags."""
+        geom, dem, slope, _, _ = make_asymmetric_fixture()
+        x, y, z = make_points(geom, dem)
+        plots = os.path.join(self._tmp.name, "figures_log_test")
+        outputs = os.path.join(self._tmp.name, "results_log_test")
+        os.makedirs(plots, exist_ok=True)
+        os.makedirs(outputs, exist_ok=True)
+
+        solver = Solver(
+            dem=dem,
+            bounds=geom.bounds,
+            survey_data_type="one_way_traveltime",
+            pre_kriging_method="universal",
+            pre_drift_analyzer=False,
+            pre_drift_terms=[["z_dem"], []],
+            post_kriging_method="universal",
+            post_drift_analyzer=False,
+            post_drift_terms=[["z_dem"], []],
+            plots_dir=plots,
+            output_dir=outputs,
+            show_progress=False,
+        )
+        solver.opt_slope = slope
+        solver.opt_kc = 0.03
+        solver.survey_points = np.column_stack((x, y, np.zeros_like(x), z))
+
+        with self.assertLogs("pysole", level="INFO") as log_ctx:
+            solver.migrate_eikonal(interactive=False)
+            solver.calculate_bedrock(interactive=False)
+            solver.finalize_bedrock(interactive=False)
+
+        all_logs = "\n".join(log_ctx.output)
+        self.assertIn("[Drift Comparison] Evaluating 2 candidate drift models via block leave-out", all_logs)
+        self.assertIn("[Drift Comparison] 2 models queued for Pass 1 comparison:", all_logs)
+        self.assertIn("[Drift Comparison] [Pass 1] Evaluating candidate model", all_logs)
+        self.assertIn("[Drift Comparison] 2 models queued for Pass 2 comparison:", all_logs)
+        self.assertIn("[Drift Comparison] [Pass 2] Evaluating candidate model", all_logs)
+
 
 if __name__ == "__main__":
     unittest.main()

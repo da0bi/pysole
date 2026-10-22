@@ -1088,14 +1088,17 @@ class TestAuditRegressions(unittest.TestCase):
 
         thickness = np.full((10, 10), 30.0, dtype=np.float64)
         captured_titles = []
+        captured_texts = []
         orig_title = plt.title
 
         def spy_title(label, *args, **kwargs):
             captured_titles.append(label)
+            ax = plt.gca()
+            captured_texts.extend([t.get_text() for t in ax.texts])
             return orig_title(label, *args, **kwargs)
 
         with patch.object(plt, "title", side_effect=spy_title):
-            # Test 1: Explicit volume with uncertainty
+            # Test 1: Explicit volume with uncertainty and explicit mean_unc
             plot_final_ice_thickness_histogram(
                 final_thickness=thickness,
                 outline_mask=None,
@@ -1103,8 +1106,10 @@ class TestAuditRegressions(unittest.TestCase):
                 plots_dir=None,
                 total_volume_km3=0.0131,
                 total_volume_unc_km3=0.0027,
+                mean_unc=4.5,
             )
             self.assertIn("Final Thickness Distribution\nTotal Volume: 0.0131 \u00b1 0.0027 km\u00b3", captured_titles[-1])
+            self.assertIn("Mean (red dashed): 30.0 \u00b1 4.5 m", captured_texts[-1])
 
             # Test 2: Explicit volume without uncertainty
             plot_final_ice_thickness_histogram(
@@ -1116,6 +1121,7 @@ class TestAuditRegressions(unittest.TestCase):
                 total_volume_unc_km3=None,
             )
             self.assertIn("Final Thickness Distribution\nTotal Volume: 0.0131 km\u00b3", captured_titles[-1])
+            self.assertIn("Mean (red dashed): 30.0 m", captured_texts[-1])
 
             # Test 3: Auto-computed from dx, dy and kriged_std
             kriged_std = np.full((10, 10), 6.0, dtype=np.float64)
@@ -1130,6 +1136,7 @@ class TestAuditRegressions(unittest.TestCase):
             )
             # 100 cells * 25 m2 = 2500 m2; vol = 75,000 m3 = 0.000075 km3; unc = 15,000 m3 = 0.000015 km3
             self.assertIn("Total Volume: 0.0001 \u00b1 0.0000 km\u00b3", captured_titles[-1])
+            self.assertIn("Mean (red dashed): 30.0 \u00b1 6.0 m", captured_texts[-1])
 
     def test_format_final_result_summary_single_and_multi_model(self):
         """Verifies format_final_result_summary text layout, area, volume, and statistics."""

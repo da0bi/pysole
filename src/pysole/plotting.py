@@ -1036,6 +1036,7 @@ def plot_final_ice_thickness_histogram(
     dx: float | None = None,
     dy: float | None = None,
     kriged_std: np.ndarray | None = None,
+    mean_unc: float | None = None,
 ) -> None:
     """
     Plot statistical frequency histogram of the final ice thickness distribution.
@@ -1071,6 +1072,8 @@ def plot_final_ice_thickness_histogram(
         Grid resolution along Y in meters.
     kriged_std : np.ndarray or None, optional
         2D array of Kriging thickness uncertainty in meters.
+    mean_unc : float or None, optional
+        Domain-average Kriging uncertainty in ice thickness in meters.
 
     Returns
     -------
@@ -1084,6 +1087,8 @@ def plot_final_ice_thickness_histogram(
             vol_res = calculate_ice_volume(final_thickness, dx, dy, outline_mask, kriged_std)
             total_volume_km3 = vol_res.volume_km3
             total_volume_unc_km3 = vol_res.uncertainty_km3
+            if mean_unc is None and vol_res.mean_uncertainty is not None:
+                mean_unc = vol_res.mean_uncertainty
 
         fig = plt.figure("Final Ice Thickness Histogram", figsize=(7, 5))
         plt.clf()
@@ -1105,10 +1110,19 @@ def plot_final_ice_thickness_histogram(
             max_thick = 0.0
             std_thick = 0.0
 
+        if mean_unc is None and kriged_std is not None:
+            mask_u = np.isfinite(final_thickness) & (final_thickness > 0)
+            if outline_mask is not None and np.any(outline_mask):
+                mask_u &= outline_mask
+            unc_valid = kriged_std[mask_u & np.isfinite(kriged_std)]
+            if unc_valid.size > 0:
+                mean_unc = float(np.mean(unc_valid))
+
         plt.axvline(x=mean_thick, color="#ef4444", linestyle="--", linewidth=2.0)
 
+        mean_label = f"Mean (red dashed): {mean_thick:.1f} \u00b1 {mean_unc:.1f} m" if mean_unc is not None else f"Mean (red dashed): {mean_thick:.1f} m"
         stats_text = (
-            f"Mean (red dashed): {mean_thick:.1f} m\n"
+            f"{mean_label}\n"
             f"Median: {median_thick:.1f} m\n"
             f"Std Dev: \u00b1{std_thick:.1f} m\n"
             f"Max: {max_thick:.1f} m"

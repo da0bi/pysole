@@ -2060,7 +2060,7 @@ class Solver:
                     t_mean, t_median, t_std, t_max = _compute_distribution_stats(cand_tt, self.outline_mask)
                     failed = False
                 else:
-                    logger.info(f"   [Drift Comparison] Evaluating candidate model '{cand.name}'...")
+                    logger.info(f"   [Drift Comparison] [Pass 1] Evaluating candidate model '{cand.name}'...")
                     ext_drifts = self.get_drift_grids(cand.terms)
                     cand_method = "universal" if cand.terms else "ordinary"
                     try:
@@ -2874,6 +2874,8 @@ class Solver:
                 model_suffix=primary_suffix,
                 total_volume_km3=prim_vol.volume_km3,
                 total_volume_unc_km3=prim_vol.uncertainty_km3,
+                kriged_std=self.kriged_std if self.post_calculate_uncertainty else None,
+                mean_unc=mean_unc if self.post_calculate_uncertainty else None,
             )
             plot_final_basal_shear_stress_and_uncertainty(
                 final_bss=self.final_bss,
@@ -2981,7 +2983,7 @@ class Solver:
             for idx, cand in enumerate(self.post_selected_drift_models[1:], start=2):
                 cand_slug = slugify_drift_name(cand.terms)
                 cand_rank = cand.rank or idx
-                logger.info(f"   [Drift Comparison] Evaluating candidate model '{cand.name}'...")
+                logger.info(f"   [Drift Comparison] [Pass 2] Evaluating candidate model '{cand.name}'...")
                 ext_drifts = self.get_drift_grids(cand.terms)
                 cand_method = "universal" if cand.terms else "ordinary"
                 try:
@@ -3139,6 +3141,8 @@ class Solver:
                             model_suffix=cand_slug,
                             total_volume_km3=cand_vol.volume_km3,
                             total_volume_unc_km3=cand_vol.uncertainty_km3,
+                            kriged_std=cand_kriged_std if self.post_calculate_uncertainty else None,
+                            mean_unc=c_mean_unc if self.post_calculate_uncertainty else None,
                         )
                         plot_final_basal_shear_stress_and_uncertainty(
                             final_bss=cand_final_bss,
