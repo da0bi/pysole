@@ -845,16 +845,16 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
         self.assertIsNotNone(mig_pts)
         self.assertEqual(len(self.solver.pre_selected_drift_models), 2)
 
-        # Check Pass 1 comparison files
+        # Check Pass 1 comparison files (saved directly in output_dir)
         for ext in ["txt", "csv", "md"]:
-            comp_file = os.path.join(self.plots_dir, f"drift_model_comparison.{ext}")
+            comp_file = os.path.join(self.output_dir, f"drift_model_comparison.{ext}")
             self.assertTrue(os.path.exists(comp_file), f"Missing {comp_file}")
 
-        p1_txt = Path(self.plots_dir, "drift_model_comparison.txt").read_text(encoding="utf-8")
+        p1_txt = Path(self.output_dir, "drift_model_comparison.txt").read_text(encoding="utf-8")
         self.assertIn("Mean Unc", p1_txt)
-        p1_csv = Path(self.plots_dir, "drift_model_comparison.csv").read_text(encoding="utf-8")
+        p1_csv = Path(self.output_dir, "drift_model_comparison.csv").read_text(encoding="utf-8")
         self.assertIn("traveltime_unc_mean", p1_csv)
-        p1_md = Path(self.plots_dir, "drift_model_comparison.md").read_text(encoding="utf-8")
+        p1_md = Path(self.output_dir, "drift_model_comparison.md").read_text(encoding="utf-8")
         self.assertIn("Mean Uncertainty", p1_md)
 
         # Check Pass 1 rasters with model slug in flat output_dir
@@ -869,17 +869,17 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
         self.assertIsNotNone(bed_map)
         self.assertEqual(len(self.solver.post_selected_drift_models), 2)
 
-        # Check Pass 2 comparison files (unified files now contain both Pass 1 and Pass 2)
+        # Check Pass 2 comparison files (unified files saved directly in output_dir)
         for ext in ["txt", "csv", "md"]:
-            comp_file = os.path.join(self.plots_dir, f"drift_model_comparison.{ext}")
+            comp_file = os.path.join(self.output_dir, f"drift_model_comparison.{ext}")
             self.assertTrue(os.path.exists(comp_file), f"Missing {comp_file}")
 
-        p2_txt = Path(self.plots_dir, "drift_model_comparison.txt").read_text(encoding="utf-8")
+        p2_txt = Path(self.output_dir, "drift_model_comparison.txt").read_text(encoding="utf-8")
         self.assertIn("Mean Unc", p2_txt)
-        p2_csv = Path(self.plots_dir, "drift_model_comparison.csv").read_text(encoding="utf-8")
+        p2_csv = Path(self.output_dir, "drift_model_comparison.csv").read_text(encoding="utf-8")
         self.assertIn("thickness_unc_mean_m", p2_csv)
         self.assertIn("traveltime_unc_mean", p2_csv)
-        p2_md = Path(self.plots_dir, "drift_model_comparison.md").read_text(encoding="utf-8")
+        p2_md = Path(self.output_dir, "drift_model_comparison.md").read_text(encoding="utf-8")
         self.assertIn("Mean Unc (m)", p2_md)
         self.assertIn("Mean Uncertainty", p2_md)
 
@@ -962,12 +962,12 @@ class TestMultiModelComparisonIntegration(unittest.TestCase):
                 f"Missing figure 06 in {slug_plots}",
             )
 
-        # Unified comparison files exist and contain both passes
+        # Unified comparison files exist directly in outputs and contain both passes
         for ext in ["txt", "csv", "md"]:
-            comp_file = os.path.join(plots, f"drift_model_comparison.{ext}")
+            comp_file = os.path.join(outputs, f"drift_model_comparison.{ext}")
             self.assertTrue(os.path.exists(comp_file), f"Missing {comp_file}")
 
-        md_text = Path(plots, "drift_model_comparison.md").read_text(encoding="utf-8")
+        md_text = Path(outputs, "drift_model_comparison.md").read_text(encoding="utf-8")
         self.assertIn("Pass 1: Traveltime Field Interpolation", md_text)
         self.assertIn("Pass 2: Ice Thickness & Bedrock Topography Interpolation", md_text)
         self.assertIn("`ordinary`", md_text)

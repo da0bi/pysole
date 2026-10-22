@@ -2143,9 +2143,10 @@ class Solver:
                 )
 
             self.pre_drift_comparison_records = records
-            if self.plots_dir:
+            target_out_dir = self.effective_output_dir
+            if target_out_dir:
                 save_drift_comparison_files(
-                    self.plots_dir,
+                    target_out_dir,
                     pre_records=self.pre_drift_comparison_records,
                     post_records=self.post_drift_comparison_records,
                 )
@@ -3227,9 +3228,10 @@ class Solver:
             self.bss_std = orig_bss_std
 
             self.post_drift_comparison_records = records
-            if self.plots_dir:
+            target_out_dir = self.effective_output_dir
+            if target_out_dir:
                 save_drift_comparison_files(
-                    self.plots_dir,
+                    target_out_dir,
                     pre_records=self.pre_drift_comparison_records,
                     post_records=self.post_drift_comparison_records,
                 )

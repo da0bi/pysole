@@ -478,9 +478,6 @@ To keep output repositories organized and avoid collision between competing mode
     ├── 03_3d_migration.png
     ├── 04_pass2_variogram.png
     ├── 05_pass2_kc_variogram_optimization.png
-    ├── drift_model_comparison.txt
-    ├── drift_model_comparison.csv
-    ├── drift_model_comparison.md
     ├── sia_z_dem/
     │   ├── 06_bedrock_elevation_and_uncertainty_sia_z_dem.png
     │   ├── 07_final_embedded_bedrock_sia_z_dem.png
@@ -494,10 +491,11 @@ To keep output repositories organized and avoid collision between competing mode
     ```
 - **Spatial Rasters & Tables (`results/` or configured `<output_dir>`)**:
   - All GeoTIFF and raster outputs append the applied drift model slug at the end of the filename (e.g. `[<output_prefix>_]bedrock_<model_slug>.tif`, `[<output_prefix>_]thickness_<model_slug>.tif`, `[<output_prefix>_]traveltime_<model_slug>.tif`, `[<output_prefix>_]basal_shear_stress_<model_slug>.tif`, and uncertainty rasters `[<output_prefix>_]*_uncertainty_<model_slug>.tif`) and are saved **directly into the defined `<output_dir>`** (flat output directory structure; no model subdirectories are generated in `<output_dir>`).
+  - Cross-model comparison tables (`drift_model_comparison.txt`, `drift_model_comparison.csv`, and `drift_model_comparison.md`) are exported **directly into `<output_dir>`**.
   - Global survey observation soundings and migration coordinate tables (`[<output_prefix>_]migrated_points.csv`) remain in the root `<output_dir>` without a drift model slug.
 
 #### 4. Cross-Model Comparison Tables
-When multiple drift models are evaluated or selected for production comparison, `PySole` formats and exports comprehensive comparison files in three synchronized formats under `figures/`:
+When multiple drift models are evaluated or selected for production comparison, `PySole` formats and exports comprehensive comparison files in three synchronized formats directly under `<output_dir>`:
 1. `.txt`: ASCII console table (`drift_model_comparison.txt`) combining Pass 1 and Pass 2 interpolation results.
 2. `.csv`: Machine-readable tabular file (`drift_model_comparison.csv`) with a unified RFC 4180 schema and a `stage` column identifying "Pass 1" vs. "Pass 2".
 3. `.md`: GitHub-Flavored Markdown document (`drift_model_comparison.md`) with clean, perfectly-aligned tables and KaTeX math support.

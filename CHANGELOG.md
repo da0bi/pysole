@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Automated Comparison Suite**: Automatically evaluates and compares all candidate models in the suite, saves raster deliverables directly to `<output_dir>` with the applied model slug suffix, organizes diagnostic plots into `figures/<model_slug>/`, and outputs unified cross-model comparison tables without requiring interactive terminal intervention.
 
 ### Changed
+- **[Drift Model Comparison Files Relocated to `<output_dir>`] (`src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_analyzer_engine.py`)**:
+  - Saved cross-model comparison tables (`drift_model_comparison.txt`, `drift_model_comparison.csv`, and `drift_model_comparison.md`) directly into the configured `<output_dir>` instead of `<plots_dir>`.
+  - Updated `save_drift_comparison_files` in `src/pysole/drift_analyzer.py` to target `output_dir` (preserving `plots_dir` as an optional fallback keyword argument for compatibility) and ensure automatic directory creation via `p_dir.mkdir(parents=True, exist_ok=True)`.
+  - Keeps `<plots_dir>` (`figures/`) exclusively dedicated to graphical PNG diagnostic plots, placing all primary raster grids, sounding coordinate files, and comparison deliverables together in `<output_dir>`.
 - **[Flat Output Directory & Applied Drift Model Slug in Grid Filenames] (`src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_analyzer_engine.py`, `tests/test_optional_outputs.py`, `tests/test_config.py`)**:
   - **Applied Drift Model Slug in Raster Filenames**: All exported spatial raster grids (`bedrock`, `thickness`, `traveltime`, `basal_shear_stress`, and their corresponding uncertainty rasters) now append the applied drift model slug at the end of the filename (e.g. `[<output_prefix>_]bedrock_<model_slug>.<ext>`), eliminating naming ambiguities across single- and multi-model runs.
   - **Flat `<output_dir>` Directory Structure**: All raster outputs are saved directly into the user-defined `<output_dir>`, suppressing the creation of model-specific subdirectories in `<output_dir>`.

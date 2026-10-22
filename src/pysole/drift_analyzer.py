@@ -764,13 +764,35 @@ def format_drift_comparison_txt(
 
 
 def save_drift_comparison_files(
-    plots_dir: str | Path,
+    output_dir: str | Path | None = None,
     *,
+    plots_dir: str | Path | None = None,
     pre_records: list[DriftComparisonRecord] | None = None,
     post_records: list[DriftComparisonRecord] | None = None,
 ) -> list[Path]:
-    """Saves unified comparison tables in .txt, .csv, and .md formats into plots_dir."""
-    p_dir = Path(plots_dir).expanduser().resolve()
+    """Saves unified comparison tables in .txt, .csv, and .md formats directly into output_dir.
+
+    Parameters
+    ----------
+    output_dir : str or Path, optional
+        Target filesystem output directory where comparison tables are saved.
+    plots_dir : str or Path, optional
+        Legacy alias for output_dir.
+    pre_records : list of DriftComparisonRecord, optional
+        Cross-validation and distribution records from Pass 1 (traveltime interpolation).
+    post_records : list of DriftComparisonRecord, optional
+        Cross-validation and distribution records from Pass 2 (ice thickness & bedrock interpolation).
+
+    Returns
+    -------
+    saved_paths : list of Path
+        List of absolute file paths to [drift_model_comparison.txt, .csv, .md].
+    """
+    resolved_dir = output_dir if output_dir is not None else plots_dir
+    if resolved_dir is None:
+        raise ValueError("save_drift_comparison_files requires a valid output_dir.")
+    p_dir = Path(resolved_dir).expanduser().resolve()
+    p_dir.mkdir(parents=True, exist_ok=True)
     p1_list = list(pre_records) if pre_records else []
     p2_list = list(post_records) if post_records else []
 
