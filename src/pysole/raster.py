@@ -1261,3 +1261,129 @@ def save_points_csv(
     header_str = ",".join(headers)
     np.savetxt(abs_target_path, points, delimiter=",", header=header_str, comments="", fmt="%.6f")
     return abs_target_path
+
+
+@dataclass
+class IceVolumeResult:
+    """Quantitative glacier domain volume, area, and uncertainty summary.
+
+    Parameters
+    ----------
+    volume_m3 : float
+        Total ice volume in cubic meters [m³].
+    volume_km3 : float
+        Total ice volume in cubic kilometers [km³].
+    uncertainty_m3 : float or None
+        Propagated volume uncertainty in cubic meters [± m³] if Kriging uncertainty was evaluated.
+    uncertainty_km3 : float or None
+        Propagated volume uncertainty in cubic kilometers [± km³] if Kriging uncertainty was evaluated.
+    area_m2 : float
+        Glacier active domain surface area in square meters [m²].
+    area_km2 : float
+        Glacier active domain surface area in square kilometers [km²].
+    mean_thickness : float
+        Domain-average ice thickness in meters [m].
+    mean_uncertainty : float or None
+        Domain-average Kriging thickness uncertainty in meters [± m].
+    cell_count : int
+        Number of active glaciated DEM cells evaluated.
+    """
+
+    volume_m3: float
+    volume_km3: float
+    uncertainty_m3: float | None
+    uncertainty_km3: float | None
+    area_m2: float
+    area_km2: float
+    mean_thickness: float
+    mean_uncertainty: float | None
+    cell_count: int
+
+    def __iter__(self):
+        """Allows 2-tuple unpacking: volume_m3, uncertainty_m3 = result."""
+        yield self.volume_m3
+        yield self.uncertainty_m3
+
+
+def calculate_ice_volume(
+    thickness: np.ndarray,
+    dx: float,
+    dy: float,
+    outline_mask: np.ndarray | None = None,
+    kriged_std: np.ndarray | None = None,
+) -> IceVolumeResult:
+    """
+    Computes total ice volume, active glacier domain area, and propagated Kriging uncertainty.
+
+    Following established glaciological error propagation methodology (Binder et al., 2009; Fischer, 2009),
+    spatial autocorrelation across the glacier domain is captured via:
+    .. math::
+        V = A_{\\text{total}} \\cdot \\bar{D} = \\sum_{i \\in \\text{glacier}} D_i \\cdot \\Delta A
+    .. math::
+        \\sigma_V = A_{\\text{total}} \\cdot \\bar{\\sigma}_D = \\sum_{i \\in \\text{glacier}} \\sigma_i \\cdot \\Delta A
+
+    Parameters
+    ----------
+    thickness : np.ndarray
+        2D array of ice thickness in meters.
+    dx : float
+        Pixel grid resolution along X in meters.
+    dy : float
+        Pixel grid resolution along Y in meters.
+    outline_mask : np.ndarray or None, optional
+        2D boolean active domain mask. If None, derived from positive finite thickness values.
+    kriged_std : np.ndarray or None, optional
+        2D array of Kriging thickness standard uncertainty in meters.
+
+    Returns
+    -------
+    result : IceVolumeResult
+        Structured dataclass containing area, volume, and propagated uncertainty in both m³ and km³.
+    """
+    cell_area = abs(float(dx) * float(dy))
+    finite_thick = np.isfinite(thickness) & (thickness > 0)
+    valid_mask = (outline_mask & finite_thick) if (outline_mask is not None and np.any(outline_mask)) else finite_thick
+
+    valid_thick = thickness[valid_mask]
+    n_cells = int(valid_thick.size)
+    if n_cells == 0:
+        return IceVolumeResult(
+            volume_m3=0.0,
+            volume_km3=0.0,
+            uncertainty_m3=None,
+            uncertainty_km3=None,
+            area_m2=0.0,
+            area_km2=0.0,
+            mean_thickness=0.0,
+            mean_uncertainty=None,
+            cell_count=0,
+        )
+
+    area_m2 = float(n_cells * cell_area)
+    area_km2 = float(area_m2 / 1e6)
+    mean_thick = float(np.mean(valid_thick))
+    vol_m3 = float(np.sum(valid_thick) * cell_area)
+    vol_km3 = float(vol_m3 / 1e9)
+
+    unc_m3: float | None = None
+    unc_km3: float | None = None
+    mean_unc: float | None = None
+    if kriged_std is not None:
+        valid_unc = kriged_std[valid_mask & np.isfinite(kriged_std)]
+        if valid_unc.size > 0:
+            mean_unc = float(np.mean(valid_unc))
+            unc_m3 = float(area_m2 * mean_unc)
+            unc_km3 = float(unc_m3 / 1e9)
+
+    return IceVolumeResult(
+        volume_m3=vol_m3,
+        volume_km3=vol_km3,
+        uncertainty_m3=unc_m3,
+        uncertainty_km3=unc_km3,
+        area_m2=area_m2,
+        area_km2=area_km2,
+        mean_thickness=mean_thick,
+        mean_uncertainty=mean_unc,
+        cell_count=n_cells,
+    )
+

@@ -640,6 +640,19 @@ The exact calculation of the estimation variance depends on the selected `interp
 
 Under Gaussian linear estimation theory, $\pm 1.00 \, \sigma(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96 \, \sigma(x,y)$ represents the 95% confidence margin of error.
 
+- **Total Ice Volume Uncertainty Derivation ($\sigma_V$)**:
+  When total ice volume is integrated across the active glacier domain of $N$ valid cells with cell area $\Delta A = |dx \cdot dy|$ ($A_{\text{total}} = N \cdot \Delta A$), Kriging interpolation errors are spatially autocorrelated. Following established glaciological error propagation methodology (e.g. Binder et al., 2009), the total volume uncertainty $\sigma_V$ is derived directly from the domain-average Kriging thickness standard error $\bar{\sigma}_{\text{D}}$:
+
+  <p align="center">
+  $$\sigma_V = A_{\text{total}} \cdot \bar{\sigma}_{\text{D}} = \sum_{i \in \text{glacier}} \sigma_{\text{D}, i} \cdot \Delta A \quad [\text{m}^3 \text{ or } \text{km}^3]$$
+  </p>
+
+  Equivalently, the relative volume uncertainty corresponds to the relative mean ice thickness uncertainty:
+
+  <p align="center">
+  $$\frac{\sigma_V}{V} = \frac{\bar{\sigma}_{\text{D}}}{\bar{D}}$$
+  </p>
+
 <a id="memory-guard-and-uncertainty"></a>
 #### 8. Memory Guard and Kriging Uncertainty
 Computing Kriging uncertainty is optional and controlled by `kriging_parameters.pre_migration.calculate_uncertainty` and `kriging_parameters.post_migration.calculate_uncertainty` (both default to `false` to save computational time). When `calculate_uncertainty: true` is enabled, post-migration uncertainty standard error ($`\sigma_{\text{D}}`$) is evaluated and displayed in the diagnostic figures; the `save_*_uncertainty` options control whether the uncertainty raster grids are exported to disk. If `calculate_uncertainty: false` (or if skipped by the memory guard), diagnostic uncertainty panels display *"Uncertainty not available (see log)"* and raster export is skipped with a warning. The traveltime uncertainty $`\sigma_{\text{T}}`$ is exported on request when pre-migration uncertainty is enabled, but is never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.

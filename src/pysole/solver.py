@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 import numpy as np
 import os
-from .raster import BedrockMap, load_dem, load_outline, GridGeometry, load_survey_points, save_points_csv
+from .raster import BedrockMap, load_dem, load_outline, GridGeometry, load_survey_points, save_points_csv, calculate_ice_volume, IceVolumeResult
 from .migration import migrate_eikonal_points, EikonalMigrator
 from .variogram import BSSOptimizer, OptimizationResult, compute_cutoff_wavelength, resolve_native_variogram_model
 from .interpolation import (
@@ -27,6 +27,7 @@ from .drift import (
     DriftPlan,
     build_drift_suite,
     default_model,
+    format_drift_name,
     normalize_engine,
     normalize_method,
     resolve_drift_plan,
@@ -64,6 +65,112 @@ def _compute_distribution_stats(
         float(np.std(valid)),
         float(np.max(valid)),
     )
+
+
+def format_final_result_summary(
+    volume_res: IceVolumeResult,
+    thick_stats: tuple[float, float, float, float],
+    bss_stats: tuple[float, float, float, float],
+    model_name: str | None = None,
+    model_slug: str | None = None,
+    model_terms: list[str] | None = None,
+    model_rank: int | None = None,
+    candidate_index: int | None = None,
+    candidate_total: int | None = None,
+    bss_mean_unc: float | None = None,
+) -> str:
+    """Formats a prominent terminal card summarizing glacier domain area, volume, thickness, and basal shear stress.
+
+    Parameters
+    ----------
+    volume_res : IceVolumeResult
+        Glacier domain area, volume, and propagated uncertainty result.
+    thick_stats : tuple of 4 floats
+        Ice thickness (mean, median, std_dev, max) in meters across active domain cells.
+    bss_stats : tuple of 4 floats
+        Basal shear stress (mean, median, std_dev, max) in kPa across active domain cells.
+    model_name : str or None, optional
+        Human-readable name of the evaluated drift model.
+    model_slug : str or None, optional
+        Filesystem identifier slug for the drift model.
+    model_terms : list of str or None, optional
+        List of drift component terms.
+    model_rank : int or None, optional
+        Rank of candidate model from Drift Analyzer.
+    candidate_index : int or None, optional
+        1-based candidate index if part of a multi-model evaluation suite.
+    candidate_total : int or None, optional
+        Total number of candidate models in the suite.
+    bss_mean_unc : float or None, optional
+        Domain-average Kriging uncertainty in basal shear stress in kPa.
+
+    Returns
+    -------
+    summary_card : str
+        Structured text block ready for terminal printing.
+    """
+    is_multi = candidate_total is not None and candidate_total > 1 and candidate_index is not None
+    if is_multi:
+        win_str = " (PRIMARY WINNER)" if candidate_index == 1 else ""
+        title_line = f"FINAL RESULT SUMMARY — CANDIDATE {candidate_index} OF {candidate_total}{win_str}"
+        disp_name = model_name or (format_drift_name(model_terms) if model_terms is not None else "Ordinary Kriging")
+        rank_str = f"#{model_rank or candidate_index}"
+        rec_str = " (Recommended)" if candidate_index == 1 else ""
+        sub_title = f"Model: {disp_name} | Rank: {rank_str}{rec_str}"
+        lines = [
+            "=" * 80,
+            title_line.center(80),
+            sub_title.center(80),
+            "=" * 80,
+        ]
+        terms_repr = str(model_terms) if model_terms is not None else "[]"
+        slug_repr = model_slug or "ordinary"
+        lines.append(f"   Drift Model Terms:            {terms_repr} (Slug: {slug_repr})")
+    else:
+        title_line = "FINAL RESULT SUMMARY"
+        disp_name = model_name or (format_drift_name(model_terms) if model_terms is not None else "Ordinary Kriging")
+        lines = [
+            "=" * 80,
+            title_line.center(80),
+            "=" * 80,
+            f"   Drift Model:                  {disp_name}",
+        ]
+
+    lines.append(f"   Glacier Domain Area:          {volume_res.area_km2:.3f} km\u00b2 ({volume_res.area_m2:,.0f} m\u00b2)")
+
+    if volume_res.uncertainty_km3 is not None and volume_res.uncertainty_m3 is not None:
+        lines.append(
+            f"   Total Ice Volume:             {volume_res.volume_km3:.4f} \u00b1 {volume_res.uncertainty_km3:.4f} km\u00b3 "
+            f"({volume_res.volume_m3 / 1e6:.2f} \u00b1 {volume_res.uncertainty_m3 / 1e6:.2f} \u00d7 10\u2076 m\u00b3)"
+        )
+    else:
+        lines.append(
+            f"   Total Ice Volume:             {volume_res.volume_km3:.4f} km\u00b3 "
+            f"({volume_res.volume_m3 / 1e6:.2f} \u00d7 10\u2076 m\u00b3)"
+        )
+
+    lines.append("   " + "-" * 77)
+    lines.append("   Final Ice Thickness Distribution (Figure 09):")
+    if volume_res.mean_uncertainty is not None:
+        lines.append(f"     Mean Ice Thickness:         {thick_stats[0]:.1f} \u00b1 {volume_res.mean_uncertainty:.1f} m")
+    else:
+        lines.append(f"     Mean Ice Thickness:         {thick_stats[0]:.1f} m")
+    lines.append(f"     Median Ice Thickness:       {thick_stats[1]:.1f} m")
+    lines.append(f"     Ice Thickness Std Dev:      \u00b1{thick_stats[2]:.1f} m")
+    lines.append(f"     Maximum Ice Thickness:      {thick_stats[3]:.1f} m")
+
+    lines.append("   " + "-" * 77)
+    lines.append("   Final Basal Shear Stress Distribution (Figure 11):")
+    if bss_mean_unc is not None:
+        lines.append(f"     Mean Basal Shear Stress:    {bss_stats[0]:.1f} \u00b1 {bss_mean_unc:.1f} kPa")
+    else:
+        lines.append(f"     Mean Basal Shear Stress:    {bss_stats[0]:.1f} kPa")
+    lines.append(f"     Median Basal Shear Stress:  {bss_stats[1]:.1f} kPa")
+    lines.append(f"     Basal Shear Stress Std Dev: \u00b1{bss_stats[2]:.1f} kPa")
+    lines.append(f"     Maximum Basal Shear Stress: {bss_stats[3]:.1f} kPa")
+    lines.append("=" * 80)
+
+    return "\n".join(lines)
 
 
 def _prompt_finalization_bool(prompt_text: str, default: bool) -> bool:
@@ -415,6 +522,13 @@ class Solver:
         self.kriged_std: np.ndarray | None = None
         self.final_bss: np.ndarray | None = None
         self.bss_std: np.ndarray | None = None
+        self.volume_result: IceVolumeResult | None = None
+        self.glacier_area_m2: float | None = None
+        self.glacier_area_km2: float | None = None
+        self.total_volume_m3: float | None = None
+        self.total_volume_km3: float | None = None
+        self.total_volume_unc_m3: float | None = None
+        self.total_volume_unc_km3: float | None = None
         self.opt_variogram_params: dict[str, float] | None = None
         self.pre_selected_drift_models: list[CandidateDriftResult] = []
         self.post_selected_drift_models: list[CandidateDriftResult] = []
@@ -2714,6 +2828,22 @@ class Solver:
         mean_bss = float(np.mean(bss_valid)) if bss_valid.size > 0 else 0.0
         mean_bss_unc = float(np.mean(bss_unc_valid)) if bss_unc_valid.size > 0 else 0.0
 
+        # Ice volume, glacier domain area, and propagated uncertainty
+        prim_vol = calculate_ice_volume(
+            self.final_thickness,
+            self.dx,
+            self.dy,
+            self.outline_mask,
+            self.kriged_std if self.post_calculate_uncertainty else None,
+        )
+        self.volume_result = prim_vol
+        self.glacier_area_m2 = prim_vol.area_m2
+        self.glacier_area_km2 = prim_vol.area_km2
+        self.total_volume_m3 = prim_vol.volume_m3
+        self.total_volume_km3 = prim_vol.volume_km3
+        self.total_volume_unc_m3 = prim_vol.uncertainty_m3
+        self.total_volume_unc_km3 = prim_vol.uncertainty_km3
+
         if should_plot:
             from .plotting import (
                 plot_final_ice_thickness_and_uncertainty,
@@ -2741,6 +2871,8 @@ class Solver:
                 interactive=interactive,
                 output_prefix=self.figure_prefix,
                 model_suffix=primary_suffix,
+                total_volume_km3=prim_vol.volume_km3,
+                total_volume_unc_km3=prim_vol.uncertainty_km3,
             )
             plot_final_basal_shear_stress_and_uncertainty(
                 final_bss=self.final_bss,
@@ -2769,10 +2901,40 @@ class Solver:
         if self.post_selected_drift_models:
             self.export_outputs("finalization", model_slug=primary_slug)
             records: list[DriftComparisonRecord] = []
+            summary_cards: list[str] = []
             prim_cand = self.post_selected_drift_models[0]
             prim_rank = prim_cand.rank or 1
             h_mean, h_med, h_std, h_max = _compute_distribution_stats(self.final_thickness, self.outline_mask)
             b_mean, b_med, b_std, b_max = _compute_distribution_stats(self.final_bss, self.outline_mask)
+            total_cands = len(self.post_selected_drift_models)
+            if total_cands > 1:
+                summary_cards.append(
+                    format_final_result_summary(
+                        volume_res=prim_vol,
+                        thick_stats=(h_mean, h_med, h_std, h_max),
+                        bss_stats=(b_mean, b_med, b_std, b_max),
+                        model_name=prim_cand.name,
+                        model_slug=primary_slug,
+                        model_terms=prim_cand.terms,
+                        model_rank=prim_rank,
+                        candidate_index=1,
+                        candidate_total=total_cands,
+                        bss_mean_unc=mean_bss_unc if self.post_calculate_uncertainty else None,
+                    )
+                )
+            else:
+                summary_cards.append(
+                    format_final_result_summary(
+                        volume_res=prim_vol,
+                        thick_stats=(h_mean, h_med, h_std, h_max),
+                        bss_stats=(b_mean, b_med, b_std, b_max),
+                        model_name=prim_cand.name,
+                        model_slug=primary_slug,
+                        model_terms=prim_cand.terms,
+                        model_rank=prim_rank,
+                        bss_mean_unc=mean_bss_unc if self.post_calculate_uncertainty else None,
+                    )
+                )
             records.append(
                 DriftComparisonRecord(
                     pass_label="Pass 2",
@@ -2906,6 +3068,26 @@ class Solver:
                         cand_final_bss[~self.outline_mask] = np.nan
                         cand_bss_std[~self.outline_mask] = np.nan
 
+                    cand_mask_thick = (self.outline_mask & (cand_final_thick > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (cand_final_thick > 0)
+                    c_th_valid = cand_final_thick[cand_mask_thick & np.isfinite(cand_final_thick)]
+                    c_unc_valid = cand_kriged_std[cand_mask_thick & np.isfinite(cand_kriged_std)]
+                    c_mean_thick = float(np.mean(c_th_valid)) if c_th_valid.size > 0 else 0.0
+                    c_mean_unc = float(np.mean(c_unc_valid)) if c_unc_valid.size > 0 else 0.0
+
+                    cand_mask_bss = (self.outline_mask & (cand_final_bss > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (cand_final_bss > 0)
+                    c_bss_valid = cand_final_bss[cand_mask_bss & np.isfinite(cand_final_bss)]
+                    c_bss_unc_valid = cand_bss_std[cand_mask_bss & np.isfinite(cand_bss_std)]
+                    c_mean_bss = float(np.mean(c_bss_valid)) if c_bss_valid.size > 0 else 0.0
+                    c_mean_bss_unc = float(np.mean(c_bss_unc_valid)) if c_bss_unc_valid.size > 0 else 0.0
+
+                    cand_vol = calculate_ice_volume(
+                        cand_final_thick,
+                        self.dx,
+                        self.dy,
+                        self.outline_mask,
+                        cand_kriged_std if self.post_calculate_uncertainty else None,
+                    )
+
                     cand_plots_dir = Path(self.plots_dir) / cand_slug if self.plots_dir else None
                     if cand_plots_dir:
                         from .plotting import (
@@ -2916,18 +3098,6 @@ class Solver:
                             plot_final_basal_shear_stress_and_uncertainty,
                             plot_final_basal_shear_stress_histogram,
                         )
-                        cand_mask_thick = (self.outline_mask & (cand_final_thick > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (cand_final_thick > 0)
-                        c_th_valid = cand_final_thick[cand_mask_thick & np.isfinite(cand_final_thick)]
-                        c_unc_valid = cand_kriged_std[cand_mask_thick & np.isfinite(cand_kriged_std)]
-                        c_mean_thick = float(np.mean(c_th_valid)) if c_th_valid.size > 0 else 0.0
-                        c_mean_unc = float(np.mean(c_unc_valid)) if c_unc_valid.size > 0 else 0.0
-
-                        cand_mask_bss = (self.outline_mask & (cand_final_bss > 0)) if (self.outline_mask is not None and np.any(self.outline_mask)) else (cand_final_bss > 0)
-                        c_bss_valid = cand_final_bss[cand_mask_bss & np.isfinite(cand_final_bss)]
-                        c_bss_unc_valid = cand_bss_std[cand_mask_bss & np.isfinite(cand_bss_std)]
-                        c_mean_bss = float(np.mean(c_bss_valid)) if c_bss_valid.size > 0 else 0.0
-                        c_mean_bss_unc = float(np.mean(c_bss_unc_valid)) if c_bss_unc_valid.size > 0 else 0.0
-
                         plot_kriging_bedrock_and_uncertainty(
                             kriged_bedrock=cand_bed,
                             kriged_std=cand_kriged_std,
@@ -2966,6 +3136,8 @@ class Solver:
                             interactive=False,
                             output_prefix=self.figure_prefix,
                             model_suffix=cand_slug,
+                            total_volume_km3=cand_vol.volume_km3,
+                            total_volume_unc_km3=cand_vol.uncertainty_km3,
                         )
                         plot_final_basal_shear_stress_and_uncertainty(
                             final_bss=cand_final_bss,
@@ -3000,6 +3172,20 @@ class Solver:
                     cb_mean, cb_med, cb_std, cb_max = _compute_distribution_stats(cand_final_bss, self.outline_mask)
                     cand_unc_mean = c_mean_unc if self.post_calculate_uncertainty else None
                     failed = False
+                    summary_cards.append(
+                        format_final_result_summary(
+                            volume_res=cand_vol,
+                            thick_stats=(ch_mean, ch_med, ch_std, ch_max),
+                            bss_stats=(cb_mean, cb_med, cb_std, cb_max),
+                            model_name=cand.name,
+                            model_slug=cand_slug,
+                            model_terms=cand.terms,
+                            model_rank=cand_rank,
+                            candidate_index=idx,
+                            candidate_total=total_cands,
+                            bss_mean_unc=c_mean_bss_unc if self.post_calculate_uncertainty else None,
+                        )
+                    )
                 except Exception as e:
                     logger.warning(f"   [Drift Comparison] Interpolation failed for '{cand.name}': {e}")
                     ch_mean, ch_med, ch_std, ch_max = 0.0, 0.0, 0.0, 0.0
@@ -3047,9 +3233,23 @@ class Solver:
                     pre_records=self.pre_drift_comparison_records,
                     post_records=self.post_drift_comparison_records,
                 )
+            for card in summary_cards:
+                print(f"\n{card}")
             print(format_drift_comparison_table(records, "Pass 2"))
         else:
             self.export_outputs("finalization")
+            h_stats = _compute_distribution_stats(self.final_thickness, self.outline_mask)
+            b_stats = _compute_distribution_stats(self.final_bss, self.outline_mask)
+            disp_model_name = format_drift_name(self.post_drift_terms) if self.post_drift_terms is not None else "Ordinary Kriging"
+            summary_card = format_final_result_summary(
+                volume_res=prim_vol,
+                thick_stats=h_stats,
+                bss_stats=b_stats,
+                model_name=disp_model_name,
+                model_terms=self.post_drift_terms,
+                bss_mean_unc=mean_bss_unc if self.post_calculate_uncertainty else None,
+            )
+            print(f"\n{summary_card}")
 
         return BedrockMap(
             grid=self.final_grid,

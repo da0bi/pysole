@@ -170,6 +170,50 @@ class TestRasterWuk(unittest.TestCase):
         self.assertEqual(mask.shape, dem.shape)
         self.assertTrue(np.all(mask))
 
+    def test_calculate_ice_volume_known_geometry(self):
+        from pysole.raster import calculate_ice_volume, IceVolumeResult
+
+        # 10x10 grid, dx=5, dy=5 -> 100 cells, cell_area = 25 m2
+        thickness = np.full((10, 10), 40.0, dtype=np.float64)
+        kriged_std = np.full((10, 10), 8.0, dtype=np.float64)
+
+        res = calculate_ice_volume(thickness, dx=5.0, dy=5.0, kriged_std=kriged_std)
+        self.assertIsInstance(res, IceVolumeResult)
+        self.assertEqual(res.cell_count, 100)
+        self.assertAlmostEqual(res.area_m2, 2500.0)
+        self.assertAlmostEqual(res.area_km2, 0.0025)
+        self.assertAlmostEqual(res.volume_m3, 100000.0)
+        self.assertAlmostEqual(res.volume_km3, 0.0001)
+        self.assertAlmostEqual(res.uncertainty_m3, 20000.0)
+        self.assertAlmostEqual(res.uncertainty_km3, 0.00002)
+        self.assertAlmostEqual(res.mean_thickness, 40.0)
+        self.assertAlmostEqual(res.mean_uncertainty, 8.0)
+
+        # Unpacking protocol (volume_m3, uncertainty_m3)
+        vol_m3, unc_m3 = res
+        self.assertAlmostEqual(vol_m3, 100000.0)
+        self.assertAlmostEqual(unc_m3, 20000.0)
+
+    def test_calculate_ice_volume_masking_and_nan(self):
+        from pysole.raster import calculate_ice_volume
+
+        thickness = np.full((10, 10), 40.0, dtype=np.float64)
+        thickness[0, 0] = np.nan
+        thickness[0, 1] = 0.0
+        thickness[0, 2] = -5.0
+
+        # Mask half of the domain (50 cells)
+        mask = np.zeros((10, 10), dtype=bool)
+        mask[5:, :] = True  # 50 cells, all are 40.0
+
+        res = calculate_ice_volume(thickness, dx=5.0, dy=5.0, outline_mask=mask, kriged_std=None)
+        self.assertEqual(res.cell_count, 50)
+        self.assertAlmostEqual(res.area_m2, 1250.0)
+        self.assertAlmostEqual(res.volume_m3, 50000.0)
+        self.assertIsNone(res.uncertainty_m3)
+        self.assertIsNone(res.uncertainty_km3)
+        self.assertIsNone(res.mean_uncertainty)
+
 
 if __name__ == "__main__":
     unittest.main()

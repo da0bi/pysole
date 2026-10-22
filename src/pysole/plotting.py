@@ -1031,13 +1031,19 @@ def plot_final_ice_thickness_histogram(
     interactive: bool = False,
     output_prefix: str = "",
     model_suffix: str = "",
+    total_volume_km3: float | None = None,
+    total_volume_unc_km3: float | None = None,
+    dx: float | None = None,
+    dy: float | None = None,
+    kriged_std: np.ndarray | None = None,
 ) -> None:
     """
     Plot statistical frequency histogram of the final ice thickness distribution.
 
     Renders a binned frequency distribution of ice depth across active glacier pixels,
     marking the domain mean with a dashed line and providing summary statistics
-    (mean, median, standard deviation, and maximum ice thickness in meters).
+    (mean, median, standard deviation, and maximum ice thickness in meters), as well as
+    displaying the total calculated ice volume and uncertainty in the figure title.
 
     Parameters
     ----------
@@ -1055,6 +1061,16 @@ def plot_final_ice_thickness_histogram(
         Configured output prefix prepended to figure filename.
     model_suffix : str, default=""
         Optional drift model identifier slug appended to the figure filename.
+    total_volume_km3 : float or None, optional
+        Total ice volume in km³. If None but dx and dy are provided, computed automatically.
+    total_volume_unc_km3 : float or None, optional
+        Total ice volume uncertainty in km³.
+    dx : float or None, optional
+        Grid resolution along X in meters.
+    dy : float or None, optional
+        Grid resolution along Y in meters.
+    kriged_std : np.ndarray or None, optional
+        2D array of Kriging thickness uncertainty in meters.
 
     Returns
     -------
@@ -1062,6 +1078,12 @@ def plot_final_ice_thickness_histogram(
     """
     try:
         import matplotlib.pyplot as plt
+
+        if total_volume_km3 is None and dx is not None and dy is not None:
+            from .raster import calculate_ice_volume
+            vol_res = calculate_ice_volume(final_thickness, dx, dy, outline_mask, kriged_std)
+            total_volume_km3 = vol_res.volume_km3
+            total_volume_unc_km3 = vol_res.uncertainty_km3
 
         fig = plt.figure("Final Ice Thickness Histogram", figsize=(7, 5))
         plt.clf()
@@ -1104,7 +1126,16 @@ def plot_final_ice_thickness_histogram(
         plt.xlim(left=0)
         plt.xlabel("Thickness [m]")
         plt.ylabel("Pixel Frequency Count")
-        plt.title("Final Thickness Distribution")
+
+        if total_volume_km3 is not None:
+            if total_volume_unc_km3 is not None:
+                vol_title_str = f"\nTotal Volume: {total_volume_km3:.4f} \u00b1 {total_volume_unc_km3:.4f} km\u00b3"
+            else:
+                vol_title_str = f"\nTotal Volume: {total_volume_km3:.4f} km\u00b3"
+        else:
+            vol_title_str = ""
+
+        plt.title(f"Final Thickness Distribution{vol_title_str}")
         plt.tight_layout()
 
         pfx_str = f"{output_prefix}_" if output_prefix else ""

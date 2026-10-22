@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **[Glacier Domain Area, Ice Volume & Kriging Uncertainty Computation] (`src/pysole/raster.py`, `src/pysole/__init__.py`, `src/pysole/solver.py`, `src/pysole/plotting.py`, `README.md`, `tests/test_raster.py`, `tests/test_audit_regressions.py`)**:
+  - **`calculate_ice_volume` & `IceVolumeResult`**: Implemented quantitative integration of total ice volume ($V = A_{\text{total}} \cdot \bar{D}$ [$\text{m}^3$ and $\text{km}^3$]), active glacier domain area ($A_{\text{total}} = N_{\text{cells}} \cdot |dx \cdot dy|$ [$\text{m}^2$ and $\text{km}^2$]), and spatially autocorrelated Kriging volume uncertainty ($\sigma_V = A_{\text{total}} \cdot \bar{\sigma}_D$ [$\pm\,\text{m}^3$ and $\pm\,\text{km}^3$]) following established glaciological error propagation methodology (Binder et al., 2009; Fischer, 2009). Exported `calculate_ice_volume` and `IceVolumeResult` in the top-level `pysole` package namespace.
+  - **Solver Volume Attributes**: `Solver.finalize_bedrock` computes and exposes `volume_result`, `glacier_area_m2`, `glacier_area_km2`, `total_volume_m3`, `total_volume_km3`, `total_volume_unc_m3`, and `total_volume_unc_km3`.
+  - **Structured Terminal Final Result Summary**: Formatted prominent terminal cards at the conclusion of bedrock finalization displaying:
+    - Drift model terms, name, and candidate ranking.
+    - Glacier domain area ($A_{\text{total}}$ in both $\text{km}^2$ and $\text{m}^2$).
+    - Total ice volume ($V \pm \sigma_V$ in $\text{km}^3$ and $10^6\,\text{m}^3$).
+    - Complete ice thickness distribution statistics matching Figure `09_` (Mean $\pm \bar{\sigma}$, Median, Std Dev, Max).
+    - Complete basal shear stress distribution statistics matching Figure `11_` (Mean $\tau_b \pm \bar{\sigma}_{\tau_b}$, Median, Std Dev, Max).
+    - Structured, numbered candidate cards (`CANDIDATE 1 OF N (PRIMARY WINNER)`, `CANDIDATE 2 OF N`, etc.) for multi-model candidate suites, followed by cross-stage comparison tables.
+  - **Diagnostic Figure `09_` Total Volume in Title**: Added calculated total ice volume and uncertainty (`Final Thickness Distribution\nTotal Volume: ... ± ... km³`) to diagnostic figure `09_<output_prefix>_final_thickness_histogram.png`.
+  - **Documentation (Section 7)**: Added geostatistical and glaciological derivation of total ice volume uncertainty ($\sigma_V = A_{\text{total}} \cdot \bar{\sigma}_D$) to Section 7 of `README.md`.
 - **[Kriging Estimation Uncertainty Computational Notice] (`src/pysole/interpolation.py`, `tests/test_audit_regressions.py`)**:
   - Emits an informative log notice (`Evaluating Kriging estimation variance (calculate_uncertainty: true); expect longer computation time due to dense O(N^2) uncertainty matrix evaluations.`) immediately following the Tikhonov matrix regularization report whenever `calculate_uncertainty: true` is evaluated in Dual Kriging interpolation passes.
 - **[Non-Interactive Multi-Model Suite Execution (`drift_analyzer: false`)] (`src/pysole/drift.py`, `src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_rules.py`, `tests/test_drift_analyzer_engine.py`)**:

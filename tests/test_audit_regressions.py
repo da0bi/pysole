@@ -1081,6 +1081,129 @@ class TestAuditRegressions(unittest.TestCase):
         self.assertIn("Optimum $k_c$ = 0.0314", title)
         self.assertIn(f"($\\lambda_c$ = {expected_wl:.2f} m)", title)
 
+    def test_plot_final_ice_thickness_histogram_title_volume(self):
+        """Verifies that plot_final_ice_thickness_histogram includes total volume and uncertainty in figure title."""
+        import matplotlib.pyplot as plt
+        from pysole.plotting import plot_final_ice_thickness_histogram
+
+        thickness = np.full((10, 10), 30.0, dtype=np.float64)
+        captured_titles = []
+        orig_title = plt.title
+
+        def spy_title(label, *args, **kwargs):
+            captured_titles.append(label)
+            return orig_title(label, *args, **kwargs)
+
+        with patch.object(plt, "title", side_effect=spy_title):
+            # Test 1: Explicit volume with uncertainty
+            plot_final_ice_thickness_histogram(
+                final_thickness=thickness,
+                outline_mask=None,
+                mean_thick=30.0,
+                plots_dir=None,
+                total_volume_km3=0.0131,
+                total_volume_unc_km3=0.0027,
+            )
+            self.assertIn("Final Thickness Distribution\nTotal Volume: 0.0131 \u00b1 0.0027 km\u00b3", captured_titles[-1])
+
+            # Test 2: Explicit volume without uncertainty
+            plot_final_ice_thickness_histogram(
+                final_thickness=thickness,
+                outline_mask=None,
+                mean_thick=30.0,
+                plots_dir=None,
+                total_volume_km3=0.0131,
+                total_volume_unc_km3=None,
+            )
+            self.assertIn("Final Thickness Distribution\nTotal Volume: 0.0131 km\u00b3", captured_titles[-1])
+
+            # Test 3: Auto-computed from dx, dy and kriged_std
+            kriged_std = np.full((10, 10), 6.0, dtype=np.float64)
+            plot_final_ice_thickness_histogram(
+                final_thickness=thickness,
+                outline_mask=None,
+                mean_thick=30.0,
+                plots_dir=None,
+                dx=5.0,
+                dy=5.0,
+                kriged_std=kriged_std,
+            )
+            # 100 cells * 25 m2 = 2500 m2; vol = 75,000 m3 = 0.000075 km3; unc = 15,000 m3 = 0.000015 km3
+            self.assertIn("Total Volume: 0.0001 \u00b1 0.0000 km\u00b3", captured_titles[-1])
+
+    def test_format_final_result_summary_single_and_multi_model(self):
+        """Verifies format_final_result_summary text layout, area, volume, and statistics."""
+        from pysole.raster import IceVolumeResult
+        from pysole.solver import format_final_result_summary
+
+        vol_res = IceVolumeResult(
+            volume_m3=13100000.0,
+            volume_km3=0.0131,
+            uncertainty_m3=2700000.0,
+            uncertainty_km3=0.0027,
+            area_m2=439725.0,
+            area_km2=0.440,
+            mean_thickness=29.8,
+            mean_uncertainty=6.1,
+            cell_count=17589,
+        )
+        thick_stats = (29.8, 28.5, 18.2, 79.7)
+        bss_stats = (48.5, 46.2, 21.4, 115.3)
+
+        # 1. Single Model Card
+        single_card = format_final_result_summary(
+            volume_res=vol_res,
+            thick_stats=thick_stats,
+            bss_stats=bss_stats,
+            model_name="Universal Kriging (sia + z_dem)",
+            bss_mean_unc=9.9,
+        )
+        self.assertIn("FINAL RESULT SUMMARY", single_card)
+        self.assertIn("Glacier Domain Area:          0.440 km\u00b2 (439,725 m\u00b2)", single_card)
+        self.assertIn("Total Ice Volume:             0.0131 \u00b1 0.0027 km\u00b3 (13.10 \u00b1 2.70 \u00d7 10\u2076 m\u00b3)", single_card)
+        self.assertIn("Mean Ice Thickness:         29.8 \u00b1 6.1 m", single_card)
+        self.assertIn("Median Ice Thickness:       28.5 m", single_card)
+        self.assertIn("Ice Thickness Std Dev:      \u00b118.2 m", single_card)
+        self.assertIn("Maximum Ice Thickness:      79.7 m", single_card)
+        self.assertIn("Mean Basal Shear Stress:    48.5 \u00b1 9.9 kPa", single_card)
+        self.assertIn("Median Basal Shear Stress:  46.2 kPa", single_card)
+        self.assertIn("Basal Shear Stress Std Dev: \u00b121.4 kPa", single_card)
+        self.assertIn("Maximum Basal Shear Stress: 115.3 kPa", single_card)
+
+        # 2. Multi-Model Candidate Card 1 (Winner)
+        cand1_card = format_final_result_summary(
+            volume_res=vol_res,
+            thick_stats=thick_stats,
+            bss_stats=bss_stats,
+            model_name="sia + z_dem",
+            model_slug="sia_z_dem",
+            model_terms=["sia", "z_dem"],
+            model_rank=1,
+            candidate_index=1,
+            candidate_total=2,
+            bss_mean_unc=9.9,
+        )
+        self.assertIn("FINAL RESULT SUMMARY \u2014 CANDIDATE 1 OF 2 (PRIMARY WINNER)", cand1_card)
+        self.assertIn("Model: sia + z_dem | Rank: #1 (Recommended)", cand1_card)
+        self.assertIn("Drift Model Terms:            ['sia', 'z_dem'] (Slug: sia_z_dem)", cand1_card)
+
+        # 3. Multi-Model Candidate Card 2
+        cand2_card = format_final_result_summary(
+            volume_res=vol_res,
+            thick_stats=thick_stats,
+            bss_stats=bss_stats,
+            model_name="sia",
+            model_slug="sia",
+            model_terms=["sia"],
+            model_rank=2,
+            candidate_index=2,
+            candidate_total=2,
+            bss_mean_unc=9.7,
+        )
+        self.assertIn("FINAL RESULT SUMMARY \u2014 CANDIDATE 2 OF 2", cand2_card)
+        self.assertIn("Model: sia | Rank: #2", cand2_card)
+        self.assertIn("Drift Model Terms:            ['sia'] (Slug: sia)", cand2_card)
+
 
 if __name__ == "__main__":
     unittest.main()
