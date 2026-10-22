@@ -1,9 +1,9 @@
 <p align="center">
   <img src="images/pysole_nano_logo_v2_transparent.png" width="360" alt="PySole Logo">
 </p>
-<p style="text-align: center; font-size: 20px;"><strong>Physically-Informed Bedrock Interpolation & 3D Migration for Sparse Geophysical Datasets</strong></p>
+<p style="text-align: center; font-size: 20px;"><strong>Physically-Informed Bedrock Interpolation & 3D Ray-Based Migration for Sparse Geophysical Datasets</strong></p>
 
-`PySole` is designed to reconstruct the thickness distribution and basal topography (sole) of glaciers, landslides, and other gravity-driven, viscous flow phenomena. The highly simplified **Shallow Ice Approximation** describes gravity-driven, viscous flow by its fundamental inverse relation between depth of the creeping body and its surface slope, where greater depths correspond to gentler surface slopes and vice versa. `PySole` leverages real field data to adapt this basic viscous flow characteristic into simple, but powerful thickness predictors. It is also specifically engineered for sparse geophysical datasets where 3D wavefield migration to image the bedrock is impossible due to insufficient spatial sampling. `PySole` transforms limited survey points into robust, physically-constrained 3D bedrock models.
+`PySole` is designed to reconstruct the thickness distribution and basal topography (sole) of glaciers, landslides, and other gravity-driven, viscous flow phenomena. The highly simplified **Shallow Ice Approximation** describes gravity-driven, viscous flow by its fundamental inverse relation between depth of the creeping body and its surface slope, where greater depths correspond to gentler surface slopes and vice versa. `PySole` leverages real field data to adapt this basic viscous flow characteristic into simple, but powerful thickness predictors. It is specifically engineered for sparse geophysical datasets where 3D wavefield migration to image the bedrock is impossible due to insufficient spatial sampling. `PySole` transforms limited survey points into robust, physically-constrained 3D bedrock models.
 
 ---
 
