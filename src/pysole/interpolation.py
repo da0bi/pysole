@@ -21,13 +21,13 @@ from scipy.ndimage import distance_transform_edt, gaussian_filter
 from sklearn.ensemble import RandomForestRegressor
 from .raster import GridGeometry
 from .drift import (
-    DEFAULT_REGRESSION_DRIFT_TERMS,
-    FALLBACK_QUADRATIC_NOTICE,
     RASTER_DRIFT_TERMS,
+    default_regression_drift_terms,
     normalize_engine,
     normalize_method,
     parse_drift_terms,
-    prune_redundant_drift_terms,
+    prune_drift_terms_with_notices,
+    resolve_available_optional_terms,
 )
 from .logging import logger, get_progress_bar
 from .smoothing import compute_gradients, compute_surface_curvature
@@ -91,6 +91,9 @@ class KrigingEngine:
         n_cores: int = -1,
         engine: str = "native",
         show_progress: bool = True,
+        external_drift_grid: np.ndarray | dict[str, np.ndarray] | None = None,
+        mass_balance_grid: np.ndarray | None = None,
+        velocity_grid: np.ndarray | None = None,
     ) -> KrigingResult:
         """
         Execute Kriging spatial interpolation using this engine's spatial geometry and DEM.
@@ -115,6 +118,12 @@ class KrigingEngine:
             Underlying Kriging computation backend.
         show_progress : bool, default=True
             Whether to display a progress bar during computation.
+        external_drift_grid : np.ndarray or dict of str to np.ndarray, optional
+            Pre-computed raster drift covariates (e.g. 'mass_balance', 'velocity', 'velocity_sia').
+        mass_balance_grid : np.ndarray, optional
+            2D grid of glacier surface mass balance values (raw, unsmoothed).
+        velocity_grid : np.ndarray, optional
+            2D grid of glacier surface flow velocity magnitude values.
 
         Returns
         -------
@@ -134,6 +143,9 @@ class KrigingEngine:
             n_cores=n_cores,
             engine=engine,
             show_progress=show_progress,
+            external_drift_grid=external_drift_grid,
+            mass_balance_grid=mass_balance_grid,
+            velocity_grid=velocity_grid,
         )
 
 
@@ -164,7 +176,13 @@ class BedrockFinalizer:
         self.geometry = geometry
         self.outline_mask = outline_mask
 
-    def fill_holes(self, bedrock_grid: np.ndarray, n_cores: int = -1, show_progress: bool = True) -> np.ndarray:
+    def fill_holes(
+        self,
+        bedrock_grid: np.ndarray,
+        n_cores: int = -1,
+        show_progress: bool = True,
+        extra_feature_grids: dict[str, np.ndarray] | None = None,
+    ) -> np.ndarray:
         """
         Train a Random Forest model on known bedrock soundings to predict unmeasured interior gaps.
 
@@ -176,6 +194,8 @@ class BedrockFinalizer:
             Number of CPU cores for parallel tree training (-1 for all cores).
         show_progress : bool, default=True
             Whether to display a progress bar.
+        extra_feature_grids : dict of str to np.ndarray, optional
+            Optional auxiliary 2D covariate grids (e.g. mass_balance, velocity) included as RF features.
 
         Returns
         -------
@@ -189,6 +209,7 @@ class BedrockFinalizer:
             geometry=self.geometry,
             n_cores=n_cores,
             show_progress=show_progress,
+            extra_feature_grids=extra_feature_grids,
         )
 
     def blend_margin(
@@ -322,6 +343,8 @@ def build_drift_grids(
     opt_slope_grid: np.ndarray | None = None,
     slope_floor_deg: float = 5.0,
     provided: dict[str, np.ndarray] | None = None,
+    mass_balance_grid: np.ndarray | None = None,
+    velocity_grid: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """
     Builds the raster covariate grids required by raster drift terms (single source for production and analyzer).
@@ -329,7 +352,7 @@ def build_drift_grids(
     Parameters
     ----------
     drift_terms : list or set of str
-        Primitive drift terms; only ``'sia'``, ``'z_dem'`` and ``'curvature_dem'`` need a grid.
+        Primitive drift terms; only raster terms in :data:`RASTER_DRIFT_TERMS` need a grid.
     geometry : GridGeometry
         Grid definition; all returned grids have ``geometry.shape``.
     dem_grid : np.ndarray, optional
@@ -338,10 +361,15 @@ def build_drift_grids(
     opt_slope_grid : np.ndarray, optional
         Optimised smoothed slope grid [rad]; ``sia`` = ``1 / max(sin(alpha), sin(slope_floor_deg))``.
     slope_floor_deg : float, default 5.0
-        Lower bound of the surface slope [deg] for the SIA drift.
+        Lower bound of the surface slope [deg] for the SIA and ``velocity_sia`` drifts.
     provided : dict of str to np.ndarray, optional
-        Pre-computed grids (e.g. the k_c-smoothed ``curvature_dem`` of the Solver, or user-supplied external
-        drifts). They are returned unchanged, are never recomputed and may carry any name.
+        Pre-computed grids (e.g. the k_c-smoothed ``curvature_dem`` or ``velocity`` of the Solver, or
+        user-supplied external drifts). They are returned unchanged, are never recomputed and may carry any name.
+    mass_balance_grid : np.ndarray, optional
+        Unsmoothed decadal-mean surface mass balance grid aligned to ``geometry.shape``.
+    velocity_grid : np.ndarray, optional
+        Surface flow velocity magnitude grid aligned to ``geometry.shape`` (used for ``velocity`` and
+        ``velocity_sia`` if not already present in ``provided``).
 
     Returns
     -------
@@ -351,21 +379,27 @@ def build_drift_grids(
     Raises
     ------
     ValueError
-        If a requested raster term cannot be built because the required DEM / slope grid is missing.
+        If a requested raster term cannot be built because the required DEM / slope / auxiliary grid is missing.
     """
     grids: dict[str, np.ndarray] = dict(provided) if provided else {}
     terms = set(drift_terms or [])
     shape = tuple(geometry.shape)
     dem_ok = dem_grid is not None and dem_grid.shape == shape
 
-    if "sia" in terms and "sia" not in grids:
+    def _resolve_safe_slope_sin(term_label: str) -> np.ndarray:
         if opt_slope_grid is not None and opt_slope_grid.shape == shape:
-            slope_sin = np.sin(opt_slope_grid)
+            s_sin = np.sin(opt_slope_grid)
         elif dem_ok:
-            slope_sin = np.sin(compute_gradients(dem_grid, dx=geometry.dx, dy=geometry.dy)["slope_rad"])
+            s_sin = np.sin(compute_gradients(dem_grid, dx=geometry.dx, dy=geometry.dy)["slope_rad"])
         else:
-            raise ValueError("Universal Kriging with 'sia' drift requested, but neither surface DEM grid nor slope grid was provided.")
-        grids["sia"] = 1.0 / np.maximum(slope_sin, np.sin(np.radians(slope_floor_deg)))
+            raise ValueError(
+                f"Universal Kriging with '{term_label}' drift requested, "
+                "but neither surface DEM grid nor slope grid was provided."
+            )
+        return np.maximum(s_sin, np.sin(np.radians(slope_floor_deg)))
+
+    if "sia" in terms and "sia" not in grids:
+        grids["sia"] = 1.0 / _resolve_safe_slope_sin("sia")
 
     if "z_dem" in terms and "z_dem" not in grids:
         if not dem_ok:
@@ -376,6 +410,33 @@ def build_drift_grids(
         if not dem_ok:
             raise ValueError("Universal Kriging with 'curvature_dem' drift requested, but surface DEM grid was not provided.")
         grids["curvature_dem"] = compute_surface_curvature(dem_grid, dx=geometry.dx, dy=geometry.dy)
+
+    if "mass_balance" in terms and "mass_balance" not in grids:
+        if mass_balance_grid is None or mass_balance_grid.shape != shape:
+            raise ValueError(
+                "Universal Kriging with 'mass_balance' drift requested, "
+                "but surface mass balance grid was not provided."
+            )
+        grids["mass_balance"] = np.asarray(mass_balance_grid, dtype=np.float64)
+
+    if "velocity" in terms and "velocity" not in grids:
+        if velocity_grid is None or velocity_grid.shape != shape:
+            raise ValueError(
+                "Universal Kriging with 'velocity' drift requested, "
+                "but surface flow velocity grid was not provided."
+            )
+        grids["velocity"] = np.maximum(np.asarray(velocity_grid, dtype=np.float64), 0.0)
+
+    if "velocity_sia" in terms and "velocity_sia" not in grids:
+        vel_src = grids.get("velocity") if "velocity" in grids else velocity_grid
+        if vel_src is None or vel_src.shape != shape:
+            raise ValueError(
+                "Universal Kriging with 'velocity_sia' drift requested, "
+                "but surface flow velocity grid was not provided."
+            )
+        safe_sin = _resolve_safe_slope_sin("velocity_sia")
+        vel_pos = np.maximum(np.asarray(vel_src, dtype=np.float64), 0.0)
+        grids["velocity_sia"] = (vel_pos ** 0.25) / (safe_sin ** 0.75)
 
     return grids
 
@@ -886,6 +947,8 @@ def kriging_interpolation(
     external_drift_grid: np.ndarray | dict[str, np.ndarray] | None = None,
     return_variance: bool = True,
     max_memory_fraction: float = 0.5,
+    mass_balance_grid: np.ndarray | None = None,
+    velocity_grid: np.ndarray | None = None,
 ) -> KrigingResult:
     """
     Applies Kriging spatial interpolation on scattered points supporting three methods:
@@ -918,7 +981,8 @@ def kriging_interpolation(
         Optimised smoothed slope grid [rad] used to build the SIA drift ``1 / sin(alpha)``.
     drift_terms : list of str, optional
         Primitive drift terms of ONE multi-drift model: ``"sia"``, ``"z_dem"``, ``"curvature_dem"``,
-        ``"linear_xy"``, ``"quadratic_xy"``. ``"universal"`` needs at least one term (or ``external_drift_grid``);
+        ``"mass_balance"``, ``"velocity"``, ``"velocity_sia"``, ``"linear_xy"``, ``"quadratic_xy"``.
+        ``"universal"`` needs at least one term (or ``external_drift_grid``);
         ``"ordinary"`` ignores them with a warning. An unknown name raises ``ValueError``.
     outline_mask : np.ndarray, optional
         Boolean glacier mask; also defines the boundary used for the zero-value boundary condition.
@@ -940,6 +1004,11 @@ def kriging_interpolation(
     max_memory_fraction : float, default 0.5
         Native engine only. RAM budget as a fraction of the available memory (``0 < f <= 0.9``); threads are
         reduced first, the variance is skipped only as a last resort (see ``built_in_kriging_interpolation``).
+    mass_balance_grid : np.ndarray, optional
+        Co-registered decadal-mean surface mass balance raster for ``"mass_balance"``.
+    velocity_grid : np.ndarray, optional
+        Co-registered and spectrally smoothed decadal-mean surface flow velocity magnitude raster for
+        ``"velocity"`` and ``"velocity_sia"``.
 
     Returns
     -------
@@ -1017,22 +1086,26 @@ def kriging_interpolation(
     elif method_clean == "regression":
         if drift_terms is None and not external_drift_grids:
             if dem_grid is not None:
-                valid_terms = list(DEFAULT_REGRESSION_DRIFT_TERMS)
+                avail = resolve_available_optional_terms(
+                    has_mass_balance=mass_balance_grid is not None,
+                    has_velocity=velocity_grid is not None,
+                )
+                valid_terms = default_regression_drift_terms(avail)
             else:
                 logger.warning(
                     "   [Dual Kriging Engine] DEM grid is missing for Regression Kriging default drift terms; "
                     "falling back to coordinate regression ['linear_xy']."
                 )
                 valid_terms = ["linear_xy"]
-        valid_terms, pruned = prune_redundant_drift_terms(valid_terms)
-        if pruned:
-            logger.warning(FALLBACK_QUADRATIC_NOTICE)
+        valid_terms, prune_notices = prune_drift_terms_with_notices(valid_terms)
+        for _, msg in prune_notices:
+            logger.warning(msg)
     elif method_clean == "universal":
-        valid_terms, pruned = prune_redundant_drift_terms(valid_terms)
-        if pruned:
-            logger.warning(FALLBACK_QUADRATIC_NOTICE)
+        valid_terms, prune_notices = prune_drift_terms_with_notices(valid_terms)
+        for _, msg in prune_notices:
+            logger.warning(msg)
 
-    # Raster drift covariates (SIA 1/sin(alpha), DEM elevation z_dem, surface curvature_dem)
+    # Raster drift covariates (SIA 1/sin(alpha), DEM elevation z_dem, surface curvature_dem, mass_balance, velocity, velocity_sia)
     external_drift_grids = build_drift_grids(
         valid_terms,
         geometry=geometry,
@@ -1040,6 +1113,8 @@ def kriging_interpolation(
         opt_slope_grid=opt_slope_grid,
         slope_floor_deg=slope_floor_deg,
         provided=external_drift_grids,
+        mass_balance_grid=mass_balance_grid,
+        velocity_grid=velocity_grid,
     )
 
     if method_clean == "universal" and not valid_terms and not external_drift_grids:
@@ -1087,14 +1162,16 @@ def random_forest_hole_filling(
     geometry: GridGeometry,
     n_cores: int = -1,
     show_progress: bool = True,
+    extra_feature_grids: dict[str, np.ndarray] | None = None,
 ) -> np.ndarray:
     """
     Intelligent Random Forest machine learning model for glaciological bedrock hole filling.
 
     Trains a non-linear Random Forest regressor on known bedrock sounding pixels inside
     the glacier boundary using spatial covariates (easting X, northing Y, surface elevation,
-    and local surface slope). Predicts missing ice thickness strictly across internal data gaps
-    and unprobed tributary basins, preserving measured soundings and respecting boundary margins.
+    local surface slope, and any optional auxiliary grids such as mass balance or flow velocity).
+    Predicts missing ice thickness strictly across internal data gaps and unprobed tributary basins,
+    preserving measured soundings and respecting boundary margins.
 
     Parameters
     ----------
@@ -1110,6 +1187,8 @@ def random_forest_hole_filling(
         Number of CPU cores for parallelized tree fitting (-1 for all available cores).
     show_progress : bool, default=True
         Whether to display a progress bar during model training and gap prediction.
+    extra_feature_grids : dict of str to np.ndarray, optional
+        Optional auxiliary 2D covariate grids (e.g. mass_balance, velocity) included as RF features.
 
     Returns
     -------
@@ -1128,7 +1207,14 @@ def random_forest_hole_filling(
     dist_flat = dist_from_margin.ravel()
     margin_threshold = max(geometry.dx, geometry.dy) * 2.0
 
-    features = np.column_stack((xx.ravel(), yy.ravel(), dem.ravel(), slope_grid.ravel()))
+    feature_cols = [xx.ravel(), yy.ravel(), dem.ravel(), slope_grid.ravel()]
+    if extra_feature_grids:
+        for _, g in extra_feature_grids.items():
+            if g is not None and g.shape == dem.shape:
+                g_arr = np.asarray(g, dtype=np.float64)
+                finite_mean = float(np.nanmean(g_arr)) if np.any(np.isfinite(g_arr)) else 0.0
+                feature_cols.append(np.nan_to_num(g_arr, nan=finite_mean).ravel())
+    features = np.column_stack(feature_cols)
     bedrock_flat = bedrock_grid.ravel()
     mask_flat = boundary_mask.ravel()
 
@@ -1183,15 +1269,16 @@ class DriftBasis:
     ``GridGeometry.create_interpolator`` (outside the grid, or at NaN cells, the standardised value is 0); the
     polynomial columns use the grid-coordinate centring and range scaling of the production engine.
 
-    Column order: ``sia``, ``z_dem``, ``curvature_dem`` (raster terms, as available), then ``x``, ``y`` for
-    ``linear_xy`` and ``x, y, x^2, y^2, xy`` for ``quadratic_xy`` (``quadratic_xy`` contains the linear
-    columns, so ``linear_xy`` + ``quadratic_xy`` does not duplicate them).
+    Column order: ``sia``, ``z_dem``, ``curvature_dem``, ``mass_balance``, ``velocity``, ``velocity_sia``
+    (raster terms, as available), then ``x``, ``y`` for ``linear_xy`` and ``x, y, x^2, y^2, xy`` for
+    ``quadratic_xy`` (``quadratic_xy`` contains the linear columns, so ``linear_xy`` + ``quadratic_xy`` does not
+    duplicate them).
 
     Parameters
     ----------
     drift_terms : list of str
-        Primitive drift term identifiers (``'sia'``, ``'z_dem'``, ``'curvature_dem'``, ``'linear_xy'``,
-        ``'quadratic_xy'``).
+        Primitive drift term identifiers (``'sia'``, ``'z_dem'``, ``'curvature_dem'``, ``'mass_balance'``,
+        ``'velocity'``, ``'velocity_sia'``, ``'linear_xy'``, ``'quadratic_xy'``).
     x_ref : np.ndarray
         Sample easting coordinates in meters; used for the polynomial standardisation only when no
         ``geometry`` is given.
@@ -1202,8 +1289,8 @@ class DriftBasis:
         Spatial grid definition of the drift rasters. Required for the raster terms.
     drift_grids : dict of str to np.ndarray, optional
         Raster covariates of shape ``geometry.shape`` keyed by term name (``'sia'`` = ``1 / sin(alpha)``,
-        ``'z_dem'``, ``'curvature_dem'``), e.g. from :func:`build_drift_grids`. A requested raster term without
-        its grid raises ``ValueError``.
+        ``'z_dem'``, ``'curvature_dem'``, ``'mass_balance'``, ``'velocity'``, ``'velocity_sia'``), e.g. from
+        :func:`build_drift_grids`. A requested raster term without its grid raises ``ValueError``.
     """
     def __init__(
         self,
@@ -1214,9 +1301,9 @@ class DriftBasis:
         drift_grids: dict[str, np.ndarray] | None = None,
     ):
         raw_terms = parse_drift_terms(drift_terms)[0] if drift_terms else []
-        self.drift_terms, pruned = prune_redundant_drift_terms(raw_terms)
-        if pruned:
-            logger.warning(FALLBACK_QUADRATIC_NOTICE)
+        self.drift_terms, prune_notices = prune_drift_terms_with_notices(raw_terms)
+        for _, msg in prune_notices:
+            logger.warning(msg)
         self.primitives: set[str] = set(self.drift_terms)
 
         self.column_names: list[str] = []

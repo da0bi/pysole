@@ -163,6 +163,8 @@ All execution options can be fully defined in a single JSON configuration file, 
         "survey_data_path": null,
         "survey_data_type": "one_way_traveltime",
         "survey_profile_column": null,
+        "mass_balance_path": null,
+        "velocity_path": null,
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,
@@ -255,6 +257,8 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[(profile_id), X, Y, value]`. If `null`, `PySole` automatically starts the interactive `Survey Planner` and saves the results to the file paths defined in the `outputs` section.  See [`here`](docs/survey_planner.md) for full details. |
 | | `survey_data_type` | `str` | `"one_way_traveltime"` | Observation data type: `"one_way_traveltime"`, `"two_way_traveltime"`, or `"depth"` (skips 3D migration). |
 | | `survey_profile_column` | `str` | `null` | Optional column name in the imported survey dataset CSV (`inputs.survey_data_path`) specifying survey line / profile IDs for the Drift Analyzer's <i>Leave-One-Profile-Out</i> (LOPO) cross-validation. |
+| | `mass_balance_path` | `str` | `null` | Optional file path to a decadal-mean surface mass balance raster (`.tif`, `.asc`, `.csv`, `.npy`). Automatically co-registered to the DEM grid (kept unsmoothed to preserve local debris/avalanche features). Enables the `"mass_balance"` drift term and serves as an additional feature in Random Forest gap filling. |
+| | `velocity_path` | `str` | `null` | Optional file path to a decadal-mean surface flow velocity magnitude raster (`.tif`, `.asc`, `.csv`, `.npy`). Automatically co-registered to the DEM grid, zero-clamped outside the glacier outline, and spectrally low-pass filtered at optimal $k_c$. Enables the `"velocity"` and `"velocity_sia"` drift terms and serves as an additional feature in Random Forest gap filling. |
 | | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (`900.0` kg/m³ for temperate glacier ice by default). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `g` | `float` | `9.81` | Gravitational acceleration constant in m/s² (`9.81` m/s²). Used to calculate basal shear stress $\tau_{\text{b}}$. |
 | | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
@@ -283,16 +287,16 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `pre_migration` | `dict` | *Sub-section* | Configuration for pre-migration traveltime field, <i>T</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `pre_migration.interpolation_target` | `str` | `"P"` | Pre-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>T</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct signal traveltimes (<i>T</i><sub>i</sub>). |
 | | `pre_migration.method` | `str` | *by target* | Kriging approach: `"ordinary"` (constant mean, the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (external drift, the default for `pre_migration.interpolation_target`: `"T"`) or `"regression"` (only through `PyKrige`). `"ordinary"` overrides `pre_migration.drift_analyzer` and `pre_migration.drift_terms`: both are ignored and one warning is logged. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
-| | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, the `Drift Analyzer` cross-validates all candidate drift models of `method: "universal"` and lets you choose in the terminal (batch mode: the best-ranked one) and applies the model  - see [here](docs/drift_analyzer.md) for full details. `drift_terms` then define the candidate suite (`null`: the default suite of 24 candidates). Skipped with a warning for `"regression"`, ignored for `"ordinary"`; overridden (log info) if `drift_terms` define exactly one candidate - see [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. |
-| | `pre_migration.drift_terms` | `list[str]` / `null` | `null` | `null` or a flat list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"linear_xy"`, `"quadratic_xy"`. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. All single and multi drift models are described [here](#universal-kriging-drift-models). |
+| | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, the `Drift Analyzer` cross-validates all candidate drift models of `method: "universal"` and lets you choose in the terminal (batch mode: the best-ranked one) and applies the model  - see [here](docs/drift_analyzer.md) for full details. `drift_terms` then define the candidate suite (`null`: the default suite of 24 candidates, expanding to 48, 60, or 120 candidates when `mass_balance_path` and/or `velocity_path` are provided). Skipped with a warning for `"regression"`, ignored for `"ordinary"`; overridden (log info) if `drift_terms` define exactly one candidate - see [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. |
+| | `pre_migration.drift_terms` | `list[str]` / `null` | `null` | `null` or a flat/nested list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`, `"linear_xy"`, `"quadratic_xy"`. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. All single and multi drift models are described [here](#universal-kriging-drift-models). |
 | | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). Note: `"linear"` is only supported under `engine: "pykrige"`. For `engine: "native"`, `"linear"` automatically falls back to `"spherical"`. |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 s) along the perimeter and rock outcrop margin outline(s). |
 | | `pre_migration.calculate_uncertainty` | `bool` | `false` | If `true`, computes the Kriging estimation variance during pre-migration Kriging. Defaults to `false` to save computational time. |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth, <i>D</i>(<i>x</i>,<i>y</i>), interpolation. |
 | | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"D"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
 | | `post_migration.method` | `str` | *by target* |  Kriging approach: `"ordinary"` (constant mean, the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (external drift, the default for `post_migration.interpolation_target`: `"T"`) or `"regression"` (only through `PyKrige`). `"ordinary"` overrides `post_migration.drift_analyzer` and `post_migration.drift_terms`: both are ignored and one warning is logged. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
-| | `post_migration.drift_analyzer` | `bool` | `false` |  If `true`, the `Drift Analyzer` cross-validates all candidate drift models of `method: "universal"` and lets you choose in the terminal (batch mode: the best-ranked one) and applies the model  - see [here](docs/drift_analyzer.md) for full details. `drift_terms` then define the candidate suite (`null`: the default suite of 24 candidates). Skipped with a warning for `"regression"`, ignored for `"ordinary"`; overridden (log info) if `drift_terms` define exactly one candidate - see [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. |
-| | `post_migration.drift_terms` | `list[str]` / `null` | `null` |  `null` or a flat list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"linear_xy"`, `"quadratic_xy"`. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. All single and multi drift models are described [here](#universal-kriging-drift-models). |
+| | `post_migration.drift_analyzer` | `bool` | `false` |  If `true`, the `Drift Analyzer` cross-validates all candidate drift models of `method: "universal"` and lets you choose in the terminal (batch mode: the best-ranked one) and applies the model  - see [here](docs/drift_analyzer.md) for full details. `drift_terms` then define the candidate suite (`null`: the default suite of 24 candidates, expanding to 48, 60, or 120 candidates when `mass_balance_path` and/or `velocity_path` are provided). Skipped with a warning for `"regression"`, ignored for `"ordinary"`; overridden (log info) if `drift_terms` define exactly one candidate - see [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. |
+| | `post_migration.drift_terms` | `list[str]` / `null` | `null` |  `null` or a flat/nested list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`, `"linear_xy"`, `"quadratic_xy"`. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. All single and multi drift models are described [here](#universal-kriging-drift-models). |
 | | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). Note: `"linear"` is only supported under `engine: "pykrige"`. For `engine: "native"`, `"linear"` automatically falls back to `"spherical"`. |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
 | | `post_migration.calculate_uncertainty` | `bool` | `false` | If `true`, computes the Kriging estimation variance during post-migration Kriging. Defaults to `false` to save computational time. |
@@ -529,6 +533,33 @@ In principle, the `Drift Analyzer` can be activated for pre- and/or post-migrati
 
    <i>This models morphometric terrain curvature—predicting smaller depths at convex peaks and ridges ($\nabla^2 Z < 0$), and larger depths at concave bowls and valleys ($\nabla^2 Z > 0$).</i>
 
+- **Surface Mass Balance Drift Model (`["mass_balance"]`)**:
+   Uses a decadal-mean surface mass balance spatial field $\dot{b}(x,y)$ (configured via `inputs.mass_balance_path` or `Solver(..., mass_balance=...)`), co-registered onto the DEM grid and kept **unsmoothed** to preserve localized accumulation and ablation anomalies (e.g. debris cover, avalanche cones, wind redistribution, topographic shading):
+
+   <p align="center">
+   $$U(x,y) = \dot{b}(x,y)$$
+   </p>
+
+   <i>This captures mass-conservation forcing where localized accumulation and reduced ablation anomalies drive downstream ice flux and thickness anomalies independent of elevation alone.</i>
+
+- **Surface Flow Velocity Magnitude Drift Model (`["velocity"]`)**:
+   Uses a decadal-mean surface flow velocity magnitude field $u_{s,\text{smooth}, k_c}(x,y) = |\mathbf{u}_s(x,y)|_{k_c}$ (configured via `inputs.velocity_path` or `Solver(..., velocity=...)`), zero-clamped outside the glacier outline (`~outline_mask -> 0`) and spectrally low-pass filtered at the optimal cutoff wavenumber $k_c$:
+
+   <p align="center">
+   $$U(x,y) = u_{s,\text{smooth}, k_c}(x,y)$$
+   </p>
+
+   <i>This captures active trunk ice dynamics—differentiating fast-flowing deep main trunks from stagnant, shallow margins or dead-ice zones that share similar surface slopes.</i>
+
+- **Glen's Flow Law Coupled SIA–Velocity Drift Model (`["velocity_sia"]`)**:
+   Combines the spectrally smoothed surface flow velocity magnitude $u_{s,\text{smooth}, k_c}(x,y)$ and the floored optimal surface slope $\sin(\alpha_{\text{opt}}(x,y))$ according to Glen's flow law ($n = 3$) for internal ice creep ($u_d = \frac{2A}{n+1}(\rho_{\text{ice}} g \sin\alpha)^n D^{n+1} \implies D \propto u_s^{1/4} / (\sin\alpha)^{3/4}$):
+
+   <p align="center">
+   $$U(x,y) = \frac{\left(\max\left(u_{s,\text{smooth}, k_c}(x,y),\, 0\right)\right)^{1/4}}{\left(\sin(\alpha_{\text{opt}}(x,y))\right)^{3/4}}$$
+   </p>
+
+   <i>This provides a physically coupled creep-thickness covariate that jointly accounts for surface velocity and surface slope without requiring known rate factor $A$. Because `"velocity_sia"` already couples `"velocity"` and `"sia"`, it is never combined with `"sia"` or `"velocity"` in the same multi-drift model. Just like `"sia"`, use `"velocity_sia"` with direct targets (`"T"` or `"D"`) to avoid double-scaling artifacts on `"P"`.</i>
+
 - **Linear Surface Drift Model (`["linear_xy"]`)**:
    Fits a flat, tilted 2D plane across the $X$ and $Y$ grid axes whose contour lines are straight, parallel, and evenly spaced across map space:
 
@@ -550,17 +581,58 @@ In principle, the `Drift Analyzer` can be activated for pre- and/or post-migrati
 - **No Drift (`[]` - Ordinary Kriging)**:
    Assumes a constant local spatial mean without external drift covariates, which is mathematically equivalent to Ordinary Kriging (`method: "ordinary"`). To include Ordinary Kriging in a `Drift Analyzer` candidate suite, add `[]` as an entry inside the list, e.g. `drift_terms: [[], "sia", "z_dem"]`. Ordinary Kriging is evaluated solely as a standalone candidate and is never combined with external drift terms. Note that a top-level empty list (`drift_terms: []`) is invalid and rejected with an error - set `method: "ordinary"` to directly apply Ordinary Kriging.
 
-`PySole` natively supports combining any external raster drift (`"z_dem"`, `"curvature_dem"`, or `"sia"`) with polynomial spatial coordinate trends (`"linear_xy"` or `"quadratic_xy"`) into an augmented multi-drift Universal Kriging system.
+`PySole` natively supports combining external raster drifts (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, or `"velocity_sia"`) with each other and with polynomial spatial coordinate trends (`"linear_xy"` or `"quadratic_xy"`) into an augmented multi-drift Universal Kriging system (**111 combinations** in total when both `mass_balance_path` and `velocity_path` are provided; **18** core DEM-only combinations by default). To prevent collinearity, `"quadratic_xy"` is never combined with `"linear_xy"`, and `"velocity_sia"` is never combined with `"sia"` or `"velocity"`.
 <br>
 <br>`PySole` provides the following **Multi Drift Models**:
 
-**4 Multi-Raster Physical Combinations (No coordinate trend):**
+**33 Multi-Raster Physical Combinations (No coordinate trend):**
+
+*Core DEM combinations (4):*
 - `["sia", "z_dem"]`
 - `["sia", "curvature_dem"]`
 - `["z_dem", "curvature_dem"]`
 - `["sia", "z_dem", "curvature_dem"]`
 
-**7 Multi-Raster + 1st-Order Linear Spatial Trend (`linear_xy`):**
+*With `mass_balance` (7):*
+- `["sia", "mass_balance"]`
+- `["z_dem", "mass_balance"]`
+- `["curvature_dem", "mass_balance"]`
+- `["sia", "z_dem", "mass_balance"]`
+- `["sia", "curvature_dem", "mass_balance"]`
+- `["z_dem", "curvature_dem", "mass_balance"]`
+- `["sia", "z_dem", "curvature_dem", "mass_balance"]`
+
+*With `velocity` (7):*
+- `["sia", "velocity"]`
+- `["z_dem", "velocity"]`
+- `["curvature_dem", "velocity"]`
+- `["sia", "z_dem", "velocity"]`
+- `["sia", "curvature_dem", "velocity"]`
+- `["z_dem", "curvature_dem", "velocity"]`
+- `["sia", "z_dem", "curvature_dem", "velocity"]`
+
+*With `mass_balance` + `velocity` (8):*
+- `["mass_balance", "velocity"]`
+- `["sia", "mass_balance", "velocity"]`
+- `["z_dem", "mass_balance", "velocity"]`
+- `["curvature_dem", "mass_balance", "velocity"]`
+- `["sia", "z_dem", "mass_balance", "velocity"]`
+- `["sia", "curvature_dem", "mass_balance", "velocity"]`
+- `["z_dem", "curvature_dem", "mass_balance", "velocity"]`
+- `["sia", "z_dem", "curvature_dem", "mass_balance", "velocity"]`
+
+*With `velocity_sia` (7):*
+- `["z_dem", "velocity_sia"]`
+- `["curvature_dem", "velocity_sia"]`
+- `["mass_balance", "velocity_sia"]`
+- `["z_dem", "curvature_dem", "velocity_sia"]`
+- `["z_dem", "mass_balance", "velocity_sia"]`
+- `["curvature_dem", "mass_balance", "velocity_sia"]`
+- `["z_dem", "curvature_dem", "mass_balance", "velocity_sia"]`
+
+**39 Multi-Raster + 1st-Order Linear Spatial Trend (`linear_xy`):**
+
+*Core DEM + `linear_xy` (7):*
 - `["sia", "linear_xy"]`
 - `["z_dem", "linear_xy"]`
 - `["curvature_dem", "linear_xy"]`
@@ -569,7 +641,49 @@ In principle, the `Drift Analyzer` can be activated for pre- and/or post-migrati
 - `["sia", "curvature_dem", "linear_xy"]`
 - `["sia", "z_dem", "curvature_dem", "linear_xy"]`
 
-**7 Multi-Raster + 2nd-Order Quadratic Spatial Trend (`quadratic_xy`):**
+*With `mass_balance` + `linear_xy` (8):*
+- `["mass_balance", "linear_xy"]`
+- `["sia", "mass_balance", "linear_xy"]`
+- `["z_dem", "mass_balance", "linear_xy"]`
+- `["curvature_dem", "mass_balance", "linear_xy"]`
+- `["sia", "z_dem", "mass_balance", "linear_xy"]`
+- `["sia", "curvature_dem", "mass_balance", "linear_xy"]`
+- `["z_dem", "curvature_dem", "mass_balance", "linear_xy"]`
+- `["sia", "z_dem", "curvature_dem", "mass_balance", "linear_xy"]`
+
+*With `velocity` + `linear_xy` (8):*
+- `["velocity", "linear_xy"]`
+- `["sia", "velocity", "linear_xy"]`
+- `["z_dem", "velocity", "linear_xy"]`
+- `["curvature_dem", "velocity", "linear_xy"]`
+- `["sia", "z_dem", "velocity", "linear_xy"]`
+- `["sia", "curvature_dem", "velocity", "linear_xy"]`
+- `["z_dem", "curvature_dem", "velocity", "linear_xy"]`
+- `["sia", "z_dem", "curvature_dem", "velocity", "linear_xy"]`
+
+*With `mass_balance` + `velocity` + `linear_xy` (8):*
+- `["mass_balance", "velocity", "linear_xy"]`
+- `["sia", "mass_balance", "velocity", "linear_xy"]`
+- `["z_dem", "mass_balance", "velocity", "linear_xy"]`
+- `["curvature_dem", "mass_balance", "velocity", "linear_xy"]`
+- `["sia", "z_dem", "mass_balance", "velocity", "linear_xy"]`
+- `["sia", "curvature_dem", "mass_balance", "velocity", "linear_xy"]`
+- `["z_dem", "curvature_dem", "mass_balance", "velocity", "linear_xy"]`
+- `["sia", "z_dem", "curvature_dem", "mass_balance", "velocity", "linear_xy"]`
+
+*With `velocity_sia` + `linear_xy` (8):*
+- `["velocity_sia", "linear_xy"]`
+- `["z_dem", "velocity_sia", "linear_xy"]`
+- `["curvature_dem", "velocity_sia", "linear_xy"]`
+- `["mass_balance", "velocity_sia", "linear_xy"]`
+- `["z_dem", "curvature_dem", "velocity_sia", "linear_xy"]`
+- `["z_dem", "mass_balance", "velocity_sia", "linear_xy"]`
+- `["curvature_dem", "mass_balance", "velocity_sia", "linear_xy"]`
+- `["z_dem", "curvature_dem", "mass_balance", "velocity_sia", "linear_xy"]`
+
+**39 Multi-Raster + 2nd-Order Quadratic Spatial Trend (`quadratic_xy`):**
+
+*Core DEM + `quadratic_xy` (7):*
 - `["sia", "quadratic_xy"]`
 - `["z_dem", "quadratic_xy"]`
 - `["curvature_dem", "quadratic_xy"]`
@@ -577,6 +691,46 @@ In principle, the `Drift Analyzer` can be activated for pre- and/or post-migrati
 - `["sia", "z_dem", "quadratic_xy"]`
 - `["sia", "curvature_dem", "quadratic_xy"]`
 - `["sia", "z_dem", "curvature_dem", "quadratic_xy"]`
+
+*With `mass_balance` + `quadratic_xy` (8):*
+- `["mass_balance", "quadratic_xy"]`
+- `["sia", "mass_balance", "quadratic_xy"]`
+- `["z_dem", "mass_balance", "quadratic_xy"]`
+- `["curvature_dem", "mass_balance", "quadratic_xy"]`
+- `["sia", "z_dem", "mass_balance", "quadratic_xy"]`
+- `["sia", "curvature_dem", "mass_balance", "quadratic_xy"]`
+- `["z_dem", "curvature_dem", "mass_balance", "quadratic_xy"]`
+- `["sia", "z_dem", "curvature_dem", "mass_balance", "quadratic_xy"]`
+
+*With `velocity` + `quadratic_xy` (8):*
+- `["velocity", "quadratic_xy"]`
+- `["sia", "velocity", "quadratic_xy"]`
+- `["z_dem", "velocity", "quadratic_xy"]`
+- `["curvature_dem", "velocity", "quadratic_xy"]`
+- `["sia", "z_dem", "velocity", "quadratic_xy"]`
+- `["sia", "curvature_dem", "velocity", "quadratic_xy"]`
+- `["z_dem", "curvature_dem", "velocity", "quadratic_xy"]`
+- `["sia", "z_dem", "curvature_dem", "velocity", "quadratic_xy"]`
+
+*With `mass_balance` + `velocity` + `quadratic_xy` (8):*
+- `["mass_balance", "velocity", "quadratic_xy"]`
+- `["sia", "mass_balance", "velocity", "quadratic_xy"]`
+- `["z_dem", "mass_balance", "velocity", "quadratic_xy"]`
+- `["curvature_dem", "mass_balance", "velocity", "quadratic_xy"]`
+- `["sia", "z_dem", "mass_balance", "velocity", "quadratic_xy"]`
+- `["sia", "curvature_dem", "mass_balance", "velocity", "quadratic_xy"]`
+- `["z_dem", "curvature_dem", "mass_balance", "velocity", "quadratic_xy"]`
+- `["sia", "z_dem", "curvature_dem", "mass_balance", "velocity", "quadratic_xy"]`
+
+*With `velocity_sia` + `quadratic_xy` (8):*
+- `["velocity_sia", "quadratic_xy"]`
+- `["z_dem", "velocity_sia", "quadratic_xy"]`
+- `["curvature_dem", "velocity_sia", "quadratic_xy"]`
+- `["mass_balance", "velocity_sia", "quadratic_xy"]`
+- `["z_dem", "curvature_dem", "velocity_sia", "quadratic_xy"]`
+- `["z_dem", "mass_balance", "velocity_sia", "quadratic_xy"]`
+- `["curvature_dem", "mass_balance", "velocity_sia", "quadratic_xy"]`
+- `["z_dem", "curvature_dem", "mass_balance", "velocity_sia", "quadratic_xy"]`
 
 For detailed mathematical formulations, parameter counts ($n_{\text{drift}}$), and glaciological interpretations of each combination, see the comprehensive [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer.md#18-systematic-multi-drift-model-suite).
 <br>
@@ -591,18 +745,18 @@ The Kriging parameters `method` and `drift_analyzer` decide what the `drift_term
 | :--- | :--- | :--- |
 | `"ordinary"` | `any` | **Ignored** (`ordinary` overrides the analyzer and the terms; one warning if either is set). |
 | `"universal"` | `false` | **Flat Drift Model List**: all listed terms, e.g. `drift_terms: ["sia", "z_dem"]`, are applied together as **ONE multi-drift model** (a single nested candidate `[["sia", "z_dem"]]` unwraps to `["sia", "z_dem"]`). A **Non-Flat Drift Model List** (e.g. `[["sia", "z_dem"], ["sia"]]`) is executed as a **Non-Interactive Multi-Model Run** deploying the default exclusion buffer radius for the leave-block-out CV in the `Drift Analyzer`. |
-| `"universal"` | `true` | **Flat Drift Model List**: Triggers an **interactive combinatorial candidate suite** evaluating every combination of the listed terms as a separate candidate model. For example, `drift_terms: ["sia", "z_dem"]` tests three candidates: `["sia"]`, `["z_dem"]`, and `["sia", "z_dem"]`. Adding `[]`, `drift_terms: [[], "sia", "z_dem"]`, includes Ordinary Kriging as a 4th candidate. **Default (`null`)**: evaluates the full suite of **24 candidates** (Ordinary Kriging + 23 single and multi-drift models: 8 with `linear_xy`, 8 with `quadratic_xy`, and 7 raster-only). If a single candidate is defined (e.g. `["sia"]`), `drift_analyzer` is automatically disabled (`false`) and that model is applied directly. |
+| `"universal"` | `true` | **Flat Drift Model List**: Triggers an **interactive combinatorial candidate suite** evaluating every valid combination of the listed terms as a separate candidate model. For example, `drift_terms: ["sia", "z_dem"]` tests three candidates: `["sia"]`, `["z_dem"]`, and `["sia", "z_dem"]`. Adding `[]`, `drift_terms: [[], "sia", "z_dem"]`, includes Ordinary Kriging as a 4th candidate. **Default (`null`)**: dynamically evaluates **24 candidates** (DEM only), **48 candidates** (DEM + `mass_balance_path`), **60 candidates** (DEM + `velocity_path`), or **120 candidates** (DEM + `mass_balance_path` + `velocity_path`). If a single candidate is defined (e.g. `["sia"]`), `drift_analyzer` is automatically disabled (`false`) and that model is applied directly. |
 | `"universal"` | `true` | **Non-Flat Drift Model List**: Evaluates an **interactive explicit candidate suite** with exactly the specified models in the list without combinatorial expansion. For example, `drift_terms: [["sia", "z_dem"], ["sia"], []]` evaluates exactly those three specific models. If the suite defines only a single model (e.g. `[["sia", "z_dem"]]`), `drift_analyzer` is automatically disabled (`false`) and the single model is applied directly. |
-| `"regression"` | `false` | **Random Forest feature covariates**: The listed terms specify the predictor features (e.g. `["sia", "z_dem"]`) used to train a Random Forest model to predict the large-scale trend; Ordinary Kriging is then used to interpolate the residuals. **Default (`null`)**: trains on all available primitives simultaneously as a multivariate model (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]`). To use spatial coordinates only, specify `drift_terms: ["linear_xy"]`. (Executed via [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige); automatically used even if `engine: "native"`). |
+| `"regression"` | `false` | **Random Forest feature covariates**: The listed terms specify the predictor features (e.g. `["sia", "z_dem", "mass_balance"]`) used to train a Random Forest model to predict the large-scale trend; Ordinary Kriging is then used to interpolate the residuals. **Default (`null`)**: trains on all non-redundant primitives simultaneously as a multivariate model (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]` plus `"mass_balance"` and `"velocity"` when configured). To use spatial coordinates only, specify `drift_terms: ["linear_xy"]`. (Executed via [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige); automatically used even if `engine: "native"`). |
 | `"regression"` | `true` | **Analyzer skipped with warning**: The Drift Analyzer does not evaluate Random Forest models. `PySole` logs a warning, skips the analyzer, and directly runs Regression Kriging with the specified `drift_terms`. |
 <br>
 
 **Candidate suite vs. single-model rules:**
 - **Single-model auto-disable**: When `drift_analyzer: true` is configured with a single candidate model (either a single flat primitive `["sia"]` or a single non-flat candidate `[["sia", "z_dem"]]`), `PySole` logs an informative notice, automatically overrides `drift_analyzer` to `false` across configuration and solver states, and runs Universal Kriging directly without interactive prompts or redundant candidate loops.
-- **In an analyzer suite (`drift_analyzer: true`)**: Candidates never combine `linear_xy` and `quadratic_xy` *within the same candidate* (to prevent collinearity), but all models featuring `linear_xy` alone (8 candidates) and `quadratic_xy` alone (8 candidates) are fully and independently evaluated.
-- **In a single model (`drift_analyzer: false`)**: If `drift_terms: ["linear_xy", "quadratic_xy"]` is passed, `"linear_xy"` is dropped with a warning, falling back to `["quadratic_xy"]`. Passing a non-flat multi-model list with `drift_analyzer: false` executes a non-interactive multi-model run with default exclusion buffer radius.
+- **In an analyzer suite (`drift_analyzer: true`)**: Candidates never combine `linear_xy` and `quadratic_xy` *within the same candidate*, and never combine `velocity_sia` with `sia` or `velocity` *within the same candidate* (to prevent collinearity), while all valid single and multi-drift models featuring each term are independently evaluated.
+- **In a single model (`drift_analyzer: false`)**: If `drift_terms: ["linear_xy", "quadratic_xy"]` is passed, `"linear_xy"` is dropped with a warning, falling back to `["quadratic_xy"]`. Similarly, if `"velocity_sia"` is combined with `"sia"` or `"velocity"` in a single model, `"sia"` and/or `"velocity"` are dropped with a warning, keeping `"velocity_sia"`. Passing a non-flat multi-model list with `drift_analyzer: false` executes a non-interactive multi-model run with default exclusion buffer radius.
 - An empty list `[]` at the top level is rejected (use `null` instead).
-- For the `interpolation_target: "P"`, the `drift_analyzer` also ranks every candidate containing the `sia` drift model but logs a warning due to the `1/sin²(α)` double scaling.
+- For the `interpolation_target: "P"`, the `drift_analyzer` also ranks every candidate containing the `sia` or `velocity_sia` drift model but logs a warning due to the `1/sin²(α)` double scaling.
 - **Multi-Model Comparison Suite**: Users can interactively select multiple candidate models (ranges like `1-5`, lists like `1, 3`, or mixed `1-3, 5`), or pre-define an explicit candidate suite in JSON (`drift_terms: [["sia", "z_dem"], ["sia"], []]`). `PySole` evaluates each model, saves all raster outputs into the configured `<output_dir>` with the model slug suffix (`[<output_prefix>_]*_<model_slug>.<ext>`), routes post-interpolation diagnostic figures into `figures/<model_slug>/`, and exports cross-model comparison tables (`drift_model_comparison.{txt,csv,md}`) directly into `<output_dir>`. See the [Drift Analyzer Guide](docs/drift_analyzer.md#110-multi-model-comparison-suite-directory-architecture--comparison-tables) for details.
 
 **Note on the Speed of `engine: "pykrige"` with `method: "universal"`:**<br>

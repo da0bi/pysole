@@ -5,9 +5,22 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-10-22
+
+Glacier surface mass balance (`"mass_balance"`), spectrally smoothed flow velocity (`"velocity"`), and coupled SIA-velocity (`"velocity_sia"`) drift models across Native Universal Kriging, PyKrige Universal Kriging, Regression Kriging, Random Forest gap filling, and the Drift Analyzer (dynamic 24 / 48 / 60 / 120 candidate suites); quantitative glacier area, ice volume, and spatially autocorrelated volume uncertainty ($\sigma_V = A_{\text{total}} \cdot \bar{\sigma}_D$); non-interactive multi-model suite execution (`drift_analyzer: false`); flat `<output_dir>` raster exports with applied drift model slugs; and codebase streamlining.
 
 ### Added
+- **[Glacier Surface Mass Balance, Flow Velocity & Coupled SIA-Velocity Drift Models (`"mass_balance"`, `"velocity"`, `"velocity_sia"`)] (`src/pysole/drift.py`, `src/pysole/raster.py`, `src/pysole/config.py`, `src/pysole/interpolation.py`, `src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `README.md`, `docs/drift_analyzer.md`, `tests/test_drift_rules.py`, `tests/test_drift_covariates.py`, `tests/test_pykrige_drifts.py`, `tests/test_docs_sync.py`)**:
+  - **Three New Glaciological Drift Primitives**:
+    - `"mass_balance"`: Decadal-mean surface mass balance field $U_{\text{mb}}(x,y) = \dot{b}(x,y)$, kept unsmoothed on the DEM grid to preserve localized spatial anomalies from supraglacial debris cover, avalanche accumulation cones, wind-drift redistribution, and topographic shading.
+    - `"velocity"`: Off-glacier zero-clamped surface flow velocity magnitude $U_{\text{vel}}(x,y) = u_{s,\text{smooth},k_c}(x,y)$, spectrally low-pass filtered via 2D FFT Gaussian attenuation at the optimal longitudinal coupling wavenumber $k_c$.
+    - `"velocity_sia"`: Coupled SIA-velocity creep scaling $U_{\text{vel\_sia}}(x,y) = (\max(u_{s,\text{smooth},k_c}(x,y), 0))^{1/4} / (\sin\alpha_{\text{opt}}(x,y))^{3/4}$ derived from Glen's flow law ($n = 3$). Triggers `SIA_PRODUCT_WARNING` in `DriftAnalyzer` when evaluated on `interpolation_target: "P"`.
+  - **Co-Registered Auxiliary Raster Loader (`load_aligned_raster`)**: Added `inputs.mass_balance_path` and `inputs.velocity_path` in `pysole.json` (and `mass_balance` / `velocity` in `Solver`) with automatic bilinear warping and CRS/bounds alignment to the DEM `GridGeometry`.
+  - **Dynamic Combinatorial Drift Suites (`24` / `48` / `60` / `120` Models) & Collinearity Pruning**:
+    - Expanded `build_drift_suite` and `resolve_drift_plan` to dynamically construct **24** (DEM only), **48** (DEM + `mass_balance_path`), **60** (DEM + `velocity_path`), or **120** (DEM + `mass_balance_path` + `velocity_path`) candidate models when `drift_terms: null` and `drift_analyzer: true`.
+    - Enforced non-redundancy pruning so `"velocity_sia"` is never combined with `"sia"` or `"velocity"` in the same candidate model (and drops redundant `"sia"` / `"velocity"` terms with a warning in single-model configurations).
+    - Fail-fast `ConfigError` validation when `"mass_balance"`, `"velocity"`, or `"velocity_sia"` is explicitly requested without configuring the required input raster.
+  - **Full Engine & ML Integration**: Integrated all three covariates across the native Dual Kriging vector engine, PyKrige Universal Kriging, PyKrige Regression Kriging, `DriftAnalyzer`, and `random_forest_hole_filling`.
 - **[Glacier Domain Area, Ice Volume & Kriging Uncertainty Computation] (`src/pysole/raster.py`, `src/pysole/__init__.py`, `src/pysole/solver.py`, `src/pysole/plotting.py`, `README.md`, `tests/test_raster.py`, `tests/test_audit_regressions.py`)**:
   - **`calculate_ice_volume` & `IceVolumeResult`**: Implemented quantitative integration of total ice volume ($V = A_{\text{total}} \cdot \bar{D}$ [$\text{m}^3$ and $\text{km}^3$]), active glacier domain area ($A_{\text{total}} = N_{\text{cells}} \cdot |dx \cdot dy|$ [$\text{m}^2$ and $\text{km}^2$]), and spatially autocorrelated Kriging volume uncertainty ($\sigma_V = A_{\text{total}} \cdot \bar{\sigma}_D$ [$\pm\,\text{m}^3$ and $\pm\,\text{km}^3$]) following established glaciological error propagation methodology (Binder et al., 2009; Fischer, 2009). Exported `calculate_ice_volume` and `IceVolumeResult` in the top-level `pysole` package namespace.
   - **Solver Volume Attributes**: `Solver.finalize_bedrock` computes and exposes `volume_result`, `glacier_area_m2`, `glacier_area_km2`, `total_volume_m3`, `total_volume_km3`, `total_volume_unc_m3`, and `total_volume_unc_km3`.
@@ -35,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Figure 09 Mean Thickness Uncertainty**: Enhanced `plot_final_ice_thickness_histogram` to compute and display mean thickness Kriging uncertainty (`Mean (red dashed): XX.X ± YY.Y m`) in the on-figure summary text box whenever `calculate_uncertainty: true`.
 - **[Drift Model Comparison Files Relocated to `<output_dir>`] (`src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_analyzer_engine.py`)**:
   - Saved cross-model comparison tables (`drift_model_comparison.txt`, `drift_model_comparison.csv`, and `drift_model_comparison.md`) directly into the configured `<output_dir>` instead of `<plots_dir>`.
-  - Updated `save_drift_comparison_files` in `src/pysole/drift_analyzer.py` to target `output_dir` (preserving `plots_dir` as an optional fallback keyword argument for compatibility) and ensure automatic directory creation via `p_dir.mkdir(parents=True, exist_ok=True)`.
+  - Updated `save_drift_comparison_files` in `src/pysole/drift_analyzer.py` to require `output_dir: str | Path` directly and ensure automatic directory creation via `p_dir.mkdir(parents=True, exist_ok=True)`.
   - Keeps `<plots_dir>` (`figures/`) exclusively dedicated to graphical PNG diagnostic plots, placing all primary raster grids, sounding coordinate files, and comparison deliverables together in `<output_dir>`.
 - **[Flat Output Directory & Applied Drift Model Slug in Grid Filenames] (`src/pysole/solver.py`, `docs/drift_analyzer.md`, `README.md`, `tests/test_drift_analyzer_engine.py`, `tests/test_optional_outputs.py`, `tests/test_config.py`)**:
   - **Applied Drift Model Slug in Raster Filenames**: All exported spatial raster grids (`bedrock`, `thickness`, `traveltime`, `basal_shear_stress`, and their corresponding uncertainty rasters) now append the applied drift model slug at the end of the filename (e.g. `[<output_prefix>_]bedrock_<model_slug>.<ext>`), eliminating naming ambiguities across single- and multi-model runs.
@@ -43,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Soundings Point CSV Preservation**: Point soundings coordinate tables (`[<output_prefix>_]migrated_points.csv`) remain directly in `<output_dir>` without drift model suffix.
   - **Diagnostic Figures Subdirectory Isolation**: Diagnostic figures (`figures/`) retain their organized `figures/<model_slug>/` subfolder hierarchy for multi-model runs.
 - **[Unified Pass 1 & Pass 2 Drift Model Comparison Files] (`src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `tests/test_drift_analyzer_engine.py`)**:
-  - **Combined Multi-Pass Deliverables**: Merged the previously separate `drift_model_comparison_pass1.{txt,csv,md}` and `drift_model_comparison_pass2.{txt,csv,md}` files into single, unified cross-stage deliverables: `figures/drift_model_comparison.txt`, `figures/drift_model_comparison.csv`, and `figures/drift_model_comparison.md`.
+  - **Combined Multi-Pass Deliverables**: Merged the previously separate `drift_model_comparison_pass1.{txt,csv,md}` and `drift_model_comparison_pass2.{txt,csv,md}` files into single, unified cross-stage deliverables: `drift_model_comparison.txt`, `drift_model_comparison.csv`, and `drift_model_comparison.md`.
   - **Structured Markdown Tables**: Formatted markdown comparison exports (`drift_model_comparison.md`) into clean GitHub Flavored Markdown tables with structured headers and column divider bars for both Pass 1 (Traveltime Field Interpolation) and Pass 2 (Ice Thickness & Bedrock Topography Interpolation).
   - **Suppressed Redundant Sounding Export**: Suppressed redundant exports of `migrated_points.csv` during candidate multi-model evaluation runs in Pass 1, writing migrated survey soundings exclusively once for the primary (winning) model.
 - **[Continuous Black Outline in Diagnostic Plots] (`src/pysole/plotting.py`, `tests/test_audit_regressions.py`)**:
@@ -52,12 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added the corresponding physical spatial cutoff wavelength in meters ($\lambda_c = 2\pi / k_c$ [m]) to the title of the left panel in diagnostic figures `02_<output_prefix>_pass1_kc_variogram_optimization.png` and `05_<output_prefix>_pass2_kc_variogram_optimization.png` (`Optimum $k_c$ = ... ($\lambda_c$ = ... m)`), providing immediate spatial scale context.
 
 ### Removed
-- **[Dead Code Removal & Codebase Streamlining] (`src/pysole/survey_planner.py`, `src/pysole/plotting.py`, `src/pysole/logging.py`, `src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `tests/test_drift_analyzer_engine.py`, `tests/test_logging.py`)**:
+- **[Dead Code Removal, Backward Compatibility Removal & Codebase Streamlining] (`src/pysole/drift.py`, `src/pysole/interpolation.py`, `src/pysole/smoothing.py`, `src/pysole/survey_planner.py`, `src/pysole/plotting.py`, `src/pysole/logging.py`, `src/pysole/drift_analyzer.py`, `src/pysole/solver.py`, `tests/test_drift_analyzer_engine.py`, `tests/test_logging.py`)**:
+  - Unified DEM and velocity 2D FFT spectrum and smoothed grid caching in `Solver` via `_get_fft_smoothed_grid`, removing duplicate `_get_fft_dem_grids` and `_get_fft_vel_grids` methods.
+  - Consolidated drift term pruning and warning notices into a single-pass `prune_drift_terms_with_notices` helper and unified default Regression Kriging covariate resolution via `default_regression_drift_terms` in `src/pysole/drift.py`.
+  - Removed legacy `plots_dir` keyword fallback from `save_drift_comparison_files` in `src/pysole/drift_analyzer.py` and raw `np.ndarray` spectrum fallback from `fft_gaussian_smooth_precomputed` in `src/pysole/smoothing.py`.
   - Removed uncalled redundant module-level `_transform_coords_to_wgs84` function from `src/pysole/survey_planner.py`, standardizing on `SurveyPlanner._transform_coords_to_wgs84`.
   - Removed uncalled legacy `plot_calculated_bedrock_map` function from `src/pysole/plotting.py`.
   - Removed legacy `ImportError` fallback shim and `DummyBar` for `tqdm` from `src/pysole/logging.py`, importing `tqdm` directly and streamlining `get_progress_bar`. Removed obsolete `test_works_with_the_fallback_stub` from `tests/test_logging.py`.
-  - Removed backward compatibility argument sniffing and polymorphism in `save_drift_comparison_files` (`src/pysole/drift_analyzer.py`), enforcing a clean `(plots_dir: str | Path, *, pre_records=None, post_records=None)` signature. Updated all test callers in `tests/test_drift_analyzer_engine.py`.
-  - Refined type annotation of `Solver.recommend_drift_model()` in `src/pysole/solver.py` from `list[Any]` to `list[CandidateDriftResult]`.
+  - Refined type annotations of `Solver.recommend_drift_model()` and `Solver._available_optional_terms()` in `src/pysole/solver.py`.
 
 ### Fixed
 - **[Documentation Alignment & Typographical Rendering] (`README.md`, `docs/drift_analyzer.md`, `docs/survey_planner.md`)**:

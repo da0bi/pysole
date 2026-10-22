@@ -133,7 +133,7 @@ def get_welcome_banner(version: str | None = None, term_width: int | None = None
             from . import __version__
             version = __version__
         except Exception:
-            version = "0.5.3"
+            version = "0.6.0"
 
     version_str = version if str(version).startswith("v") else f"v{version}"
 

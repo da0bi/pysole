@@ -764,9 +764,8 @@ def format_drift_comparison_txt(
 
 
 def save_drift_comparison_files(
-    output_dir: str | Path | None = None,
+    output_dir: str | Path,
     *,
-    plots_dir: str | Path | None = None,
     pre_records: list[DriftComparisonRecord] | None = None,
     post_records: list[DriftComparisonRecord] | None = None,
 ) -> list[Path]:
@@ -774,10 +773,8 @@ def save_drift_comparison_files(
 
     Parameters
     ----------
-    output_dir : str or Path, optional
+    output_dir : str or Path
         Target filesystem output directory where comparison tables are saved.
-    plots_dir : str or Path, optional
-        Legacy alias for output_dir.
     pre_records : list of DriftComparisonRecord, optional
         Cross-validation and distribution records from Pass 1 (traveltime interpolation).
     post_records : list of DriftComparisonRecord, optional
@@ -788,10 +785,9 @@ def save_drift_comparison_files(
     saved_paths : list of Path
         List of absolute file paths to [drift_model_comparison.txt, .csv, .md].
     """
-    resolved_dir = output_dir if output_dir is not None else plots_dir
-    if resolved_dir is None:
+    if output_dir is None:
         raise ValueError("save_drift_comparison_files requires a valid output_dir.")
-    p_dir = Path(resolved_dir).expanduser().resolve()
+    p_dir = Path(output_dir).expanduser().resolve()
     p_dir.mkdir(parents=True, exist_ok=True)
     p1_list = list(pre_records) if pre_records else []
     p2_list = list(post_records) if post_records else []
@@ -1034,9 +1030,9 @@ class DriftAnalyzer:
         geometry : GridGeometry
             Grid definition shared with the production run.
         drift_grids : dict of str to np.ndarray
-            Raster covariates ``sia`` / ``z_dem`` / ``curvature_dem`` of the production run (see
-            :func:`pysole.interpolation.build_drift_grids`); the analyzer samples them exactly like the
-            production engine.
+            Raster covariates (``sia``, ``z_dem``, ``curvature_dem``, ``mass_balance``, ``velocity``, ``velocity_sia``)
+            of the production run (see :func:`pysole.interpolation.build_drift_grids`); the analyzer samples them
+            exactly like the production engine.
         candidates : list of list of str
             Candidate drift models as lists of primitive drift terms; the empty list is Ordinary Kriging (see
             :func:`pysole.drift.build_drift_suite`).
@@ -1088,10 +1084,11 @@ class DriftAnalyzer:
         for drift_terms in candidates:
             name = format_drift_name(drift_terms)
             warning_msg = None
-            if self.interpolation_target == "P" and "sia" in drift_terms:
+            if self.interpolation_target == "P" and ("sia" in drift_terms or "velocity_sia" in drift_terms):
                 warning_msg = SIA_PRODUCT_WARNING
+                active_sia_term = "velocity_sia" if "velocity_sia" in drift_terms else "sia"
                 logger.warning(
-                    f"   [Drift Analyzer] Candidate '{name}' contains the 'sia' drift on the BSS product P target: "
+                    f"   [Drift Analyzer] Candidate '{name}' contains the '{active_sia_term}' drift on the BSS product P target: "
                     f"{SIA_PRODUCT_WARNING} The model is evaluated and ranked normally."
                 )
             basis = DriftBasis(
@@ -1247,8 +1244,8 @@ class DriftAnalyzer:
         geometry : GridGeometry
             Grid definition shared with the production run.
         drift_grids : dict of str to np.ndarray
-            Raster covariates ``sia`` / ``z_dem`` / ``curvature_dem`` of the production run (see
-            :func:`pysole.interpolation.build_drift_grids`).
+            Raster covariates (``sia``, ``z_dem``, ``curvature_dem``, ``mass_balance``, ``velocity``, ``velocity_sia``)
+            of the production run (see :func:`pysole.interpolation.build_drift_grids`).
         candidates : list of list of str
             Candidate drift models as lists of primitive drift terms; the empty list is Ordinary Kriging (see
             :func:`pysole.drift.build_drift_suite`).
@@ -1273,7 +1270,8 @@ class DriftAnalyzer:
         t_char = "T" if "travel" in str(self.target_name).lower() else "D"
         target_descr = f"Product P(x,y) = {t_char}*sin(alpha)" if self.interpolation_target == "P" else f"Direct Field {self.interpolation_target}(x,y)"
         logger.info(f"   [Drift Analyzer] Initialized (Mode: {self.pass_label}, Target: {self.target_name} [{target_descr}], Boundary Conditions: {self.include_zero_boundary}).")
-        logger.info(f"   [Drift Analyzer] Extracting spatial covariates (Z_dem, C_kc, sin(alpha_opt)^-1, X, Y) at N = {len(z_values)} sample locations...")
+        cov_labels = list(drift_grids.keys()) + ["X", "Y"] if drift_grids else ["X", "Y"]
+        logger.info(f"   [Drift Analyzer] Extracting spatial covariates ({', '.join(cov_labels)}) at N = {len(z_values)} sample locations...")
 
         x_pts = np.asarray(x_pts, dtype=np.float64)
         y_pts = np.asarray(y_pts, dtype=np.float64)

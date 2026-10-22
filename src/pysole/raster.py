@@ -853,6 +853,105 @@ def load_dem(
     return grid_out, meta
 
 
+def load_aligned_raster(
+    raster_input: str | Path | os.PathLike | np.ndarray | BedrockMap | None,
+    geometry: GridGeometry,
+    ref_meta: dict[str, Any] | None = None,
+    name: str = "auxiliary raster",
+) -> np.ndarray | None:
+    """
+    Loads an auxiliary 2D spatial raster (e.g. surface mass balance or surface velocity) and co-registers it
+    onto the reference DEM ``GridGeometry``.
+
+    Supports all 5 PySole raster formats (GeoTIFF, ESRI ASCII Grid, CSV, NumPy ``.npy``, and in-memory
+    ``np.ndarray`` or :class:`BedrockMap`). If the source raster has a different spatial resolution or bounding
+    extent than ``geometry``, it is bilinearly resampled onto ``geometry``'s cell centers ``(x_coords, y_coords)``.
+
+    Parameters
+    ----------
+    raster_input : str, Path, os.PathLike, np.ndarray, BedrockMap, or None
+        Source path or array of the auxiliary spatial field. If ``None``, returns ``None``.
+    geometry : GridGeometry
+        Reference spatial grid geometry of the surface DEM.
+    ref_meta : dict of str to Any, optional
+        Metadata dictionary of the reference DEM (used for CRS compatibility checks).
+    name : str, default "auxiliary raster"
+        Human-readable label for log and error messages (e.g. ``'mass_balance'``, ``'velocity'``).
+
+    Returns
+    -------
+    aligned_grid : np.ndarray or None
+        2D float64 array of shape ``geometry.shape`` aligned with ``geometry``, or ``None`` if ``raster_input``
+        is ``None``.
+
+    Raises
+    ------
+    ValueError
+        If an in-memory ``np.ndarray`` does not match ``geometry.shape``, if the file does not exist, or if CRS
+        projections are incompatible.
+    """
+    if raster_input is None:
+        return None
+
+    target_shape = tuple(geometry.shape)
+    if isinstance(raster_input, BedrockMap):
+        aux_grid = np.asarray(raster_input.grid, dtype=np.float64).copy()
+        aux_bounds = tuple(float(b) for b in raster_input.bounds)
+        aux_crs = raster_input.crs
+        aux_dx = (aux_bounds[2] - aux_bounds[0]) / max(aux_grid.shape[1], 1)
+        aux_dy = (aux_bounds[3] - aux_bounds[1]) / max(aux_grid.shape[0], 1)
+    elif isinstance(raster_input, np.ndarray):
+        if raster_input.shape != target_shape:
+            raise ValueError(
+                f"In-memory '{name}' array has shape {raster_input.shape}, expected DEM shape {target_shape}."
+            )
+        return np.asarray(raster_input, dtype=np.float64).copy()
+    else:
+        p = Path(raster_input).expanduser()
+        if not p.exists():
+            raise ValueError(f"Auxiliary '{name}' raster file does not exist: {p}")
+        ext = p.suffix.lower()
+        is_headerless_file = ext == ".npy"
+        aux_grid, aux_meta = load_dem(
+            p,
+            dx=geometry.dx if is_headerless_file else None,
+            dy=geometry.dy if is_headerless_file else None,
+            bounds=geometry.bounds if is_headerless_file else None,
+        )
+        aux_bounds = aux_meta["bounds"]
+        aux_crs = aux_meta.get("crs")
+        aux_dx = float(aux_meta.get("dx", geometry.dx))
+        aux_dy = float(aux_meta.get("dy", geometry.dy))
+
+    ref_crs = ref_meta.get("crs") if isinstance(ref_meta, dict) else None
+    if ref_crs is not None and aux_crs is not None:
+        check_crs_alignment(ref_crs, aux_crs)
+
+    if aux_grid.shape == target_shape and np.allclose(aux_bounds, geometry.bounds, atol=1e-3):
+        logger.info(
+            f"   [Auxiliary Raster] Loaded '{name}' grid ({target_shape[0]}x{target_shape[1]}, "
+            f"dx={geometry.dx:.2f} m, dy={geometry.dy:.2f} m)."
+        )
+        return aux_grid
+
+    aux_geom = GridGeometry.create(
+        aux_grid.shape,
+        dx=aux_dx,
+        dy=aux_dy,
+        bounds=aux_bounds,
+    )
+    interp = aux_geom.create_interpolator(aux_grid, fill_value=np.nan, method="linear")
+    xx, yy = geometry.meshgrid
+    pts = np.column_stack((yy.ravel(), xx.ravel()))
+    aligned = interp(pts).reshape(target_shape)
+    logger.info(
+        f"   [Auxiliary Raster] Co-registered '{name}' grid from {aux_grid.shape[0]}x{aux_grid.shape[1]} "
+        f"(dx={aux_dx:.2f} m, dy={aux_dy:.2f} m) onto DEM geometry {target_shape[0]}x{target_shape[1]} "
+        f"(dx={geometry.dx:.2f} m, dy={geometry.dy:.2f} m)."
+    )
+    return np.asarray(aligned, dtype=np.float64)
+
+
 def validate_and_extract_polygons(gdf: Any) -> list[Any]:
     """
     Validate vector geometries for interior hole compliance and topological validity.

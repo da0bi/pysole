@@ -43,9 +43,12 @@ def make_asymmetric_fixture():
     dem = 2000.0 + 0.25 * ex + 1.7 * ey + 40.0 * np.sin(ex / 70.0) * np.cos(ey / 90.0) + 15.0 * (ey / 360.0) ** 2
     slope = compute_gradients(dem, dx=DX, dy=DY)["slope_rad"]
     curvature = compute_surface_curvature(gaussian_filter(dem, 1.5), dx=DX, dy=DY)
+    mb = -1.2 + 0.004 * (dem - 2000.0) + 0.3 * np.sin(ex / 80.0) * np.cos(ey / 100.0)
+    vel = 5.0 + 18.0 * np.exp(-((ex - 160.0) ** 2 + (ey - 180.0) ** 2) / (140.0 ** 2)) + 0.02 * ey
     grids = build_drift_grids(
         RASTER_DRIFT_TERMS, geometry=geom, dem_grid=dem, opt_slope_grid=slope,
-        slope_floor_deg=SLOPE_FLOOR_DEG, provided={"curvature_dem": curvature},
+        slope_floor_deg=SLOPE_FLOOR_DEG, mass_balance_grid=mb, velocity_grid=vel,
+        provided={"curvature_dem": curvature},
     )
     return geom, dem, slope, curvature, grids
 
@@ -189,13 +192,22 @@ class TestDriftBasisColumns(unittest.TestCase):
         self.assertEqual(basis.evaluate(self.x, self.y).shape, (len(self.x), 0))
 
     def test_build_drift_grids_formulas(self):
+        mb = self.grids["mass_balance"]
+        vel = self.grids["velocity"]
         grids = build_drift_grids(
-            ["sia", "z_dem", "curvature_dem"], geometry=self.geom, dem_grid=self.dem,
+            ["sia", "z_dem", "curvature_dem", "mass_balance", "velocity", "velocity_sia"],
+            geometry=self.geom, dem_grid=self.dem,
             opt_slope_grid=self.slope, slope_floor_deg=SLOPE_FLOOR_DEG,
+            mass_balance_grid=mb, velocity_grid=vel,
         )
         np.testing.assert_array_equal(grids["z_dem"], self.dem)
+        np.testing.assert_array_equal(grids["mass_balance"], mb)
+        np.testing.assert_allclose(grids["velocity"], np.maximum(vel, 0.0), rtol=1e-14)
+        min_sin = np.sin(np.radians(SLOPE_FLOOR_DEG))
+        sin_clamped = np.maximum(np.sin(self.slope), min_sin)
+        np.testing.assert_allclose(grids["sia"], 1.0 / sin_clamped, rtol=1e-14)
         np.testing.assert_allclose(
-            grids["sia"], 1.0 / np.maximum(np.sin(self.slope), np.sin(np.radians(SLOPE_FLOOR_DEG))), rtol=1e-14
+            grids["velocity_sia"], (np.maximum(vel, 0.0) ** 0.25) / (sin_clamped ** 0.75), rtol=1e-14
         )
         np.testing.assert_allclose(
             grids["curvature_dem"], compute_surface_curvature(self.dem, dx=DX, dy=DY), rtol=1e-14
@@ -223,6 +235,8 @@ class TestAnalyzerMatchesProductionEngine(unittest.TestCase):
             variogram_params=self.VARIOGRAM, dem_grid=self.dem, opt_slope_grid=self.slope, drift_terms=list(terms),
             include_zero_boundary_condition=False, n_cores=1, show_progress=False, return_variance=False,
             slope_floor_deg=SLOPE_FLOOR_DEG,
+            mass_balance_grid=self.grids.get("mass_balance"),
+            velocity_grid=self.grids.get("velocity"),
             external_drift_grid={k: self.grids[k] for k in terms if k in self.grids} or None,
         ).bedrock_grid
 
@@ -237,8 +251,11 @@ class TestAnalyzerMatchesProductionEngine(unittest.TestCase):
 
     def test_every_primitive_and_combination(self):
         cases = [
-            ["sia"], ["z_dem"], ["curvature_dem"], ["linear_xy"], ["quadratic_xy"],
+            ["sia"], ["z_dem"], ["curvature_dem"], ["mass_balance"], ["velocity"], ["velocity_sia"],
+            ["linear_xy"], ["quadratic_xy"],
             ["sia", "z_dem"], ["z_dem", "curvature_dem", "linear_xy"], ["sia", "curvature_dem", "quadratic_xy"],
+            ["z_dem", "mass_balance", "velocity_sia", "linear_xy"],
+            ["sia", "mass_balance", "velocity", "quadratic_xy"],
         ]
         for terms in cases:
             with self.subTest(terms=terms):
@@ -253,11 +270,12 @@ class TestSolverSharesDriftGrids(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        geom, self.dem, self.slope, _, _ = make_asymmetric_fixture()
+        geom, self.dem, self.slope, _, self.grids = make_asymmetric_fixture()
         self.geom = geom
         x, y, z = make_points(geom, self.dem)
         self.solver = Solver(
             dem=self.dem, bounds=geom.bounds, survey_data_type="depth",
+            mass_balance=self.grids["mass_balance"], velocity=self.grids["velocity"],
             post_kriging_method="universal", post_drift_analyzer=True,
             output_dir=os.path.join(self._tmp.name, "out"),
         )
@@ -268,14 +286,16 @@ class TestSolverSharesDriftGrids(unittest.TestCase):
         self.solver.migrated_points = pts.copy()
 
     def test_curvature_is_the_smoothed_curvature_at_opt_kc(self):
-        grids = self.solver.get_drift_grids(["curvature_dem"])
+        grids = self.solver.get_drift_grids(["curvature_dem", "velocity", "mass_balance"])
         np.testing.assert_array_equal(grids["curvature_dem"], self.solver.get_smoothed_curvature(0.03))
+        np.testing.assert_array_equal(grids["velocity"], self.solver.get_smoothed_velocity(0.03))
+        np.testing.assert_array_equal(grids["mass_balance"], self.grids["mass_balance"])
         raw = compute_surface_curvature(self.dem, dx=DX, dy=DY)
         self.assertGreater(float(np.max(np.abs(grids["curvature_dem"] - raw))), 1e-9)
 
     def test_analyzer_and_production_receive_identical_grids(self):
         fake = KrigingResult(bedrock_grid=np.zeros(SHAPE), variance_grid=np.zeros(SHAPE))
-        selected = SimpleNamespace(terms=["curvature_dem", "sia"], aicc=0.0)
+        selected = SimpleNamespace(terms=["curvature_dem", "sia", "mass_balance", "velocity"], aicc=0.0)
         with patch("pysole.solver.DriftAnalyzer") as mock_analyzer, \
                 patch("pysole.solver.kriging_interpolation", return_value=fake) as mock_kriging:
             mock_analyzer.return_value.run_diagnostics.return_value = [selected]
@@ -288,7 +308,7 @@ class TestSolverSharesDriftGrids(unittest.TestCase):
         production_grids = mock_kriging.call_args.kwargs["external_drift_grid"]
         self.assertIs(analyzer_kwargs["geometry"], self.solver.geometry)
         self.assertEqual(set(analyzer_kwargs["drift_grids"]), set(RASTER_DRIFT_TERMS))
-        self.assertEqual(set(production_grids), {"curvature_dem", "sia"})
+        self.assertEqual(set(production_grids), {"curvature_dem", "sia", "mass_balance", "velocity"})
         for term, grid in production_grids.items():
             np.testing.assert_array_equal(grid, analyzer_kwargs["drift_grids"][term])
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 import numpy as np
 import os
-from .raster import BedrockMap, load_dem, load_outline, GridGeometry, load_survey_points, save_points_csv, calculate_ice_volume, IceVolumeResult
+from .raster import BedrockMap, load_dem, load_outline, load_aligned_raster, GridGeometry, load_survey_points, save_points_csv, calculate_ice_volume, IceVolumeResult
 from .migration import migrate_eikonal_points, EikonalMigrator
 from .variogram import BSSOptimizer, OptimizationResult, compute_cutoff_wavelength, resolve_native_variogram_model
 from .interpolation import (
@@ -23,6 +23,7 @@ from .interpolation import (
     KrigingResult,
 )
 from .drift import (
+    OPTIONAL_RASTER_DRIFT_TERMS,
     RASTER_DRIFT_TERMS,
     DriftPlan,
     build_drift_suite,
@@ -30,8 +31,10 @@ from .drift import (
     format_drift_name,
     normalize_engine,
     normalize_method,
+    resolve_available_optional_terms,
     resolve_drift_plan,
     slugify_drift_name,
+    validate_required_drift_rasters,
 )
 from .smoothing import compute_gradients, precompute_fft_grid, fft_gaussian_smooth_precomputed, compute_surface_curvature
 from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir, resolve_plots_dir, configured_output_dir, sanitize_config, warn_unknown_config_keys, validate_memory_fraction
@@ -292,6 +295,8 @@ class Solver:
         show_progress: bool = True,
         max_memory_fraction: float | None = None,
         config: dict[str, Any] | None = None,
+        mass_balance: str | Path | np.ndarray | BedrockMap | None = None,
+        velocity: str | Path | np.ndarray | BedrockMap | None = None,
     ):
         """
         Parameters
@@ -314,11 +319,11 @@ class Solver:
             First-pass pre-migration Kriging method: 'ordinary', 'universal' or 'regression'. If omitted: 'universal'
             for the direct target 'T', otherwise 'ordinary' (see :func:`pysole.drift.default_model`).
         pre_drift_terms : list, optional
-            First-pass drift terms: None (omitted) or a list of 'sia', 'z_dem', 'curvature_dem', 'linear_xy',
-            'quadratic_xy' (inside an analyzer suite one nested [] adds the Ordinary candidate). 'universal'
-            without analyzer needs the list (one multi-drift model); an omitted method with target 'T' and
-            omitted terms uses ['sia']; 'ordinary' ignores terms and analyzer (with a warning); see
-            :mod:`pysole.drift` for all rules.
+            First-pass drift terms: None (omitted) or a list of 'sia', 'z_dem', 'curvature_dem', 'mass_balance',
+            'velocity', 'velocity_sia', 'linear_xy', 'quadratic_xy' (inside an analyzer suite one nested [] adds
+            the Ordinary candidate). 'universal' without analyzer needs the list (one multi-drift model); an omitted
+            method with target 'T' and omitted terms uses ['sia']; 'ordinary' ignores terms and analyzer (with a
+            warning); see :mod:`pysole.drift` for all rules.
         pre_variogram_model : str, default 'spherical'
             First-pass spatial variogram model: 'spherical', 'exponential', or 'gaussian'.
             Note: 'linear' is supported under engine='pykrige'; engine='native' falls back to 'spherical'.
@@ -378,6 +383,12 @@ class Solver:
             RAM budget of the native Kriging engine as a fraction of available memory (0 < f <= 0.9).
         config : dict of str to Any, optional
             Parsed configuration dictionary if already loaded.
+        mass_balance : str, Path, np.ndarray, or BedrockMap, optional
+            Path to or array of decadal-mean surface mass balance raster (used by the ``'mass_balance'`` drift term
+            and Random Forest gap filling).
+        velocity : str, Path, np.ndarray, or BedrockMap, optional
+            Path to or array of decadal-mean surface flow velocity magnitude raster (used by the ``'velocity'`` and
+            ``'velocity_sia'`` drift terms and Random Forest gap filling).
 
         Raises
         ------
@@ -387,6 +398,11 @@ class Solver:
         """
         self.config = dict(config) if isinstance(config, dict) else {}
         if self.config:
+            inputs_cfg = self.config.get("inputs", {}) if isinstance(self.config.get("inputs"), dict) else {}
+            if mass_balance is None and inputs_cfg.get("mass_balance_path") is not None:
+                mass_balance = inputs_cfg.get("mass_balance_path")
+            if velocity is None and inputs_cfg.get("velocity_path") is not None:
+                velocity = inputs_cfg.get("velocity_path")
             krig_cfg = self.config.get("kriging_parameters", {})
             if pre_drift_terms is None and "drift_terms" in krig_cfg.get("pre_migration", {}):
                 pre_drift_terms = krig_cfg.get("pre_migration", {}).get("drift_terms")
@@ -404,6 +420,9 @@ class Solver:
                 pre_calculate_uncertainty = krig_cfg.get("pre_migration", {}).get("calculate_uncertainty", False)
             if not post_calculate_uncertainty and "calculate_uncertainty" in krig_cfg.get("post_migration", {}):
                 post_calculate_uncertainty = krig_cfg.get("post_migration", {}).get("calculate_uncertainty", False)
+
+        self.mass_balance_grid: np.ndarray | None = mass_balance  # type: ignore[assignment]
+        self.velocity_grid: np.ndarray | None = velocity  # type: ignore[assignment]
 
         # Validate the Kriging drift configuration first: nothing is read or computed for an invalid setup.
         self.engine_type = normalize_engine(kriging_engine)
@@ -460,6 +479,30 @@ class Solver:
         self.y_coords = self.geometry.y_coords
         self.bounds = self.geometry.bounds
 
+        self.mass_balance_grid = None
+        if mass_balance is not None:
+            mb_input = self.resolve_input_path(mass_balance) if isinstance(mass_balance, (str, Path, os.PathLike)) else mass_balance
+            self.mass_balance_grid = load_aligned_raster(
+                mb_input,
+                geometry=self.geometry,
+                ref_meta=self.meta,
+                name="mass_balance",
+            )
+        self.velocity_grid = None
+        if velocity is not None:
+            vel_input = self.resolve_input_path(velocity) if isinstance(velocity, (str, Path, os.PathLike)) else velocity
+            vel_grid = load_aligned_raster(
+                vel_input,
+                geometry=self.geometry,
+                ref_meta=self.meta,
+                name="velocity",
+            )
+            vel_grid = np.maximum(vel_grid, 0.0)
+            if self.outline_mask is not None:
+                vel_grid = vel_grid.copy()
+                vel_grid[~self.outline_mask] = 0.0
+            self.velocity_grid = vel_grid
+
         # Migration & Kriging options (Pre-migration & Post-migration)
         self.pre_variogram_model = pre_variogram_model
         self.pre_zero_boundary = bool(pre_zero_boundary)
@@ -489,11 +532,14 @@ class Solver:
         self.g = float(g)
         self.show_progress = bool(show_progress)
 
-        # Gradient, DEM, Feature, and Sample Points Caches
+        # Gradient, DEM, Velocity, Feature, and Sample Points Caches
         self._gradient_cache: dict[str, np.ndarray] | None = None
         self._fft_dem_cache: tuple[np.ndarray, np.ndarray] | None = None
         self._fft_dem_pad_kc: float = float("inf")  # k_c the cached FFT padding was sized for
         self._smoothed_dem_cache: dict[float, np.ndarray] = {}
+        self._fft_vel_cache: tuple[np.ndarray, np.ndarray] | None = None
+        self._fft_vel_pad_kc: float = float("inf")
+        self._smoothed_vel_cache: dict[float, np.ndarray] = {}
         self._sample_pts_cache: dict[tuple[str, str], np.ndarray] = {}
 
         # Decoupled sub-engines strictly bound to GridGeometry
@@ -610,6 +656,13 @@ class Solver:
         """Minimum surface slope angle threshold in degrees [°] for stabilizing numerical divisions."""
         return float(self.optimization_config.get("slope_floor_deg", 5.0))
 
+    def _available_optional_terms(self) -> list[str]:
+        """Returns the list of optional raster drift terms available on this Solver instance."""
+        return resolve_available_optional_terms(
+            has_mass_balance=self.mass_balance_grid is not None,
+            has_velocity=self.velocity_grid is not None,
+        )
+
     def _drift_plan(self, stage: str, method: str | None = None) -> DriftPlan:
         """Resolves the drift plan of a stage from the current method / drift_terms / drift_analyzer settings.
 
@@ -628,15 +681,25 @@ class Solver:
         Raises
         ------
         ConfigError
-            If the combination of method, drift_terms and drift_analyzer is invalid.
+            If the combination of method, drift_terms and drift_analyzer is invalid, or if a requested
+            optional raster drift term lacks its input raster.
         """
         prefix = "pre" if stage == "pre_migration" else "post"
-        return resolve_drift_plan(
+        avail_opt = self._available_optional_terms()
+        plan = resolve_drift_plan(
             method if method is not None else getattr(self, f"{prefix}_kriging_method"),
             getattr(self, f"{prefix}_drift_analyzer"),
             getattr(self, f"{prefix}_drift_terms"),
             self.engine_type,
+            available_optional_terms=avail_opt,
         )
+        if plan.method != "ordinary":
+            validate_required_drift_rasters(
+                plan.terms if plan.terms else plan.suite,
+                has_mass_balance="mass_balance" in avail_opt,
+                has_velocity="velocity" in avail_opt,
+            )
+        return plan
 
     @staticmethod
     def _log_drift_plan(stage_label: str, plan: DriftPlan) -> None:
@@ -1193,31 +1256,32 @@ class Solver:
             self._gradient_cache = compute_gradients(self.dem_grid, dx=self.dx, dy=self.dy)
         return self._gradient_cache
 
-    def _get_fft_dem_grids(self, kc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
-        """Returns the cached reflection-padded DEM 2D FFT spectrum and wavenumber grid.
-
-        Reflection padding scales with the Gaussian kernel width ceil(4 / (k_c * dx)) px,
-        sized for the smallest k_c requested so far (capped at k_c = 0.01 rad/m). The 2D FFT
-        is recomputed only if a wider padding is demanded by a smaller k_c.
-
-        Parameters
-        ----------
-        kc : float, optional
-            Requested Gaussian filter cutoff wavenumber [rad/m].
-
-        Returns
-        -------
-        A_shift_dem : np.ndarray
-            Zero-centered 2D complex Fourier transform spectrum of the reflection-padded DEM.
-        k_grid_dem : np.ndarray
-            2D radial spatial wavenumber magnitude grid k = sqrt(kx^2 + ky^2) [rad/m].
-        """
-        kc_pad = 0.01 if (kc is None or not kc > 0) else min(float(kc), 0.01)
-        if self._fft_dem_cache is None or kc_pad < self._fft_dem_pad_kc:
-            A_shift_dem, k_grid_dem, _ = precompute_fft_grid(self.dem_grid, dx=self.dx, dy=self.dy, kc=kc_pad)
-            self._fft_dem_cache = (A_shift_dem, k_grid_dem)
-            self._fft_dem_pad_kc = kc_pad
-        return self._fft_dem_cache
+    def _get_fft_smoothed_grid(
+        self,
+        grid: np.ndarray,
+        kc: float,
+        fft_cache_attr: str,
+        pad_kc_attr: str,
+        smoothed_cache: dict[float, np.ndarray],
+        clamp_non_negative: bool = False,
+    ) -> np.ndarray:
+        """Returns a cached 2D Gaussian low-pass filtered raster grid at cutoff wavenumber ``kc`` [rad/m]."""
+        kc_key = round(float(kc), 6)
+        if kc_key not in smoothed_cache:
+            kc_pad = 0.01 if (kc is None or not kc > 0) else min(float(kc), 0.01)
+            fft_cache = getattr(self, fft_cache_attr)
+            pad_kc = getattr(self, pad_kc_attr)
+            if fft_cache is None or kc_pad < pad_kc:
+                A_shift, k_grid, _ = precompute_fft_grid(grid, dx=self.dx, dy=self.dy, kc=kc_pad)
+                fft_cache = (A_shift, k_grid)
+                setattr(self, fft_cache_attr, fft_cache)
+                setattr(self, pad_kc_attr, kc_pad)
+            A_shift, k_grid = fft_cache
+            smoothed = fft_gaussian_smooth_precomputed(A_shift, k_grid, kc=kc)
+            if clamp_non_negative:
+                smoothed = np.maximum(smoothed, 0.0)
+            smoothed_cache[kc_key] = smoothed
+        return smoothed_cache[kc_key]
 
     def get_smoothed_dem(self, kc: float) -> np.ndarray:
         """Returns the 2D surface DEM smoothed with a 2D Gaussian low-pass filter at cutoff k_c.
@@ -1234,12 +1298,9 @@ class Solver:
         smoothed_dem : np.ndarray
             2D array of smoothed surface elevations [m].
         """
-        kc_key = round(float(kc), 6)
-        if kc_key not in self._smoothed_dem_cache:
-            A_shift_dem, k_grid_dem = self._get_fft_dem_grids(kc)
-            smoothed_dem = fft_gaussian_smooth_precomputed(A_shift_dem, k_grid_dem, kc=kc)
-            self._smoothed_dem_cache[kc_key] = smoothed_dem
-        return self._smoothed_dem_cache[kc_key]
+        return self._get_fft_smoothed_grid(
+            self.dem_grid, kc, "_fft_dem_cache", "_fft_dem_pad_kc", self._smoothed_dem_cache
+        )
 
     def get_smoothed_slope(self, kc: float) -> np.ndarray:
         """Calculates the surface slope angle grid from a DEM smoothed at cutoff wavenumber k_c.
@@ -1273,11 +1334,32 @@ class Solver:
         smoothed_dem = self.get_smoothed_dem(kc)
         return compute_surface_curvature(smoothed_dem, dx=self.dx, dy=self.dy)
 
+    def get_smoothed_velocity(self, kc: float) -> np.ndarray:
+        """Returns the 2D surface flow velocity magnitude smoothed with a 2D Gaussian low-pass filter at cutoff k_c.
+
+        Parameters
+        ----------
+        kc : float
+            Spatial cutoff wavenumber k_c [rad/m] (lambda_c = 2*pi / k_c).
+
+        Returns
+        -------
+        smoothed_vel : np.ndarray
+            2D array of non-negative spectrally smoothed surface flow velocities.
+        """
+        if self.velocity_grid is None:
+            raise ValueError("Cannot compute smoothed velocity: no velocity raster was provided.")
+        return self._get_fft_smoothed_grid(
+            self.velocity_grid, kc, "_fft_vel_cache", "_fft_vel_pad_kc", self._smoothed_vel_cache, clamp_non_negative=True
+        )
+
     def get_drift_grids(self, drift_terms: list[str] | tuple[str, ...] | set[str] | None) -> dict[str, np.ndarray]:
         """Builds the raster covariates of the requested drift terms (single source for analyzer and production).
 
-        ``sia`` uses the optimised smoothed slope floored at ``slope_floor_deg``, ``z_dem`` the surface DEM and
-        ``curvature_dem`` the Laplacian curvature of the DEM smoothed at the optimal ``k_c``.
+        ``sia`` uses the optimised smoothed slope floored at ``slope_floor_deg``, ``z_dem`` the surface DEM,
+        ``curvature_dem`` the Laplacian curvature of the DEM smoothed at the optimal ``k_c``, ``mass_balance``
+        the unsmoothed decadal-mean surface mass balance raster, and ``velocity`` / ``velocity_sia`` the
+        off-glacier zero-clamped surface flow velocity magnitude smoothed at the optimal ``k_c``.
 
         Parameters
         ----------
@@ -1290,15 +1372,21 @@ class Solver:
             Raster covariate grids keyed by term name (empty if no raster term is requested).
         """
         provided: dict[str, np.ndarray] = {}
+        kc_use = self.opt_kc if self.opt_kc is not None else 0.05
         if drift_terms and "curvature_dem" in drift_terms:
-            kc_use = self.opt_kc if self.opt_kc is not None else 0.05
             provided["curvature_dem"] = self.get_smoothed_curvature(kc_use)
+        vel_grid_for_drift: np.ndarray | None = None
+        if drift_terms and ("velocity" in drift_terms or "velocity_sia" in drift_terms):
+            if self.velocity_grid is not None:
+                vel_grid_for_drift = self.get_smoothed_velocity(kc_use)
         return build_drift_grids(
             drift_terms,
             geometry=self.geometry,
             dem_grid=self.dem_grid,
             opt_slope_grid=self.opt_slope,
             slope_floor_deg=self.slope_floor_deg,
+            mass_balance_grid=self.mass_balance_grid,
+            velocity_grid=vel_grid_for_drift,
             provided=provided,
         )
 
@@ -1447,6 +1535,8 @@ class Solver:
             config_path=cfg_path_str,
             show_progress=show_progress_val,
             config=cfg,
+            mass_balance=inputs.get("mass_balance_path"),
+            velocity=inputs.get("velocity_path"),
         )
         solver.config = cfg
         solver.config_path = cfg_path_str
@@ -1619,12 +1709,18 @@ class Solver:
         is_predefined = bool(krig_cfg.get("drift_terms")) or (
             isinstance(terms, (list, tuple)) and any(isinstance(elem, (list, tuple)) for elem in terms)
         )
+        avail_opt = self._available_optional_terms()
+        suite_raster_terms = {t for cand in suite for t in cand if t in RASTER_DRIFT_TERMS}
+        active_raster_terms = tuple(
+            t for t in RASTER_DRIFT_TERMS
+            if t not in OPTIONAL_RASTER_DRIFT_TERMS or t in avail_opt or t in suite_raster_terms
+        )
         eval_results = analyzer.run_diagnostics(
             x_pts=sample_pts[:, 0],
             y_pts=sample_pts[:, 1],
             z_values=sample_pts[:, 2],
             geometry=self.geometry,
-            drift_grids=self.get_drift_grids(RASTER_DRIFT_TERMS),
+            drift_grids=self.get_drift_grids(active_raster_terms),
             candidates=suite,
             variogram_model=resolve_native_variogram_model(var_model, warn=False),
             variogram_params=use_var_params,
@@ -1767,9 +1863,10 @@ class Solver:
                 drift_terms = list(diag[0].terms)
             krig_method = "universal" if drift_terms else "ordinary"
 
-        if target_upper == "P" and krig_method == "universal" and "sia" in drift_terms:
+        if target_upper == "P" and krig_method == "universal" and ("sia" in drift_terms or "velocity_sia" in drift_terms):
+            active_sia_term = "velocity_sia" if "velocity_sia" in drift_terms else "sia"
             logger.warning(
-                f"   [Dual Kriging Engine] [{pass_name} Warning] 'sia' drift is active during BSS product P(x,y) interpolation. "
+                f"   [Dual Kriging Engine] [{pass_name} Warning] '{active_sia_term}' drift is active during BSS product P(x,y) interpolation. "
                 "This can cause 1/sin^2(alpha) double-scaling artifacts at low-slope margins. "
                 "Recommendation: Use 'ordinary' Kriging or non-slope spatial drifts (e.g. ['z_dem']) for product targets."
             )
@@ -2427,12 +2524,23 @@ class Solver:
 
         return self.kriged_bedrock, self.kriged_variance
 
+    def _extra_rf_feature_grids(self) -> dict[str, np.ndarray] | None:
+        """Builds optional auxiliary feature grids (mass_balance, velocity) for Random Forest gap filling."""
+        extra: dict[str, np.ndarray] = {}
+        if self.mass_balance_grid is not None:
+            extra["mass_balance"] = self.mass_balance_grid
+        if self.velocity_grid is not None:
+            kc_use = self.opt_kc if self.opt_kc is not None else 0.05
+            extra["velocity"] = self.get_smoothed_velocity(kc_use)
+        return extra if extra else None
+
     def fill_holes_rf(self) -> np.ndarray:
         """Fills unconstrained bedrock voids and gaps using Random Forest machine learning regression.
 
         Trains a multi-feature Random Forest regressor on Kriged bedrock elevations using terrain
-        covariates (surface elevation, slope, aspect, distance to boundary outline, surface curvature)
-        and predicts bedrock elevation in areas where Kriging uncertainty is high or data gaps exist.
+        covariates (surface elevation, slope, aspect, distance to boundary outline, surface curvature,
+        plus optional mass balance and smoothed velocity fields) and predicts bedrock elevation in
+        areas where Kriging uncertainty is high or data gaps exist.
 
         Returns
         -------
@@ -2442,7 +2550,12 @@ class Solver:
         if self.kriged_bedrock is None:
             self.calculate_bedrock()
 
-        self.rf_filled_bedrock = self.finalizer.fill_holes(self.kriged_bedrock, n_cores=self.n_cores, show_progress=self.show_progress)
+        self.rf_filled_bedrock = self.finalizer.fill_holes(
+            self.kriged_bedrock,
+            n_cores=self.n_cores,
+            show_progress=self.show_progress,
+            extra_feature_grids=self._extra_rf_feature_grids(),
+        )
         return self.rf_filled_bedrock
 
     def apply_geomorph_smoothing(self, min_gap_dist: float | None = None) -> np.ndarray:
@@ -3046,7 +3159,12 @@ class Solver:
                         cand_bed_post = cand_bed
 
                     if cur_rf:
-                        cand_rf_bed = self.finalizer.fill_holes(cand_bed_post, n_cores=self.n_cores, show_progress=False)
+                        cand_rf_bed = self.finalizer.fill_holes(
+                            cand_bed_post,
+                            n_cores=self.n_cores,
+                            show_progress=False,
+                            extra_feature_grids=self._extra_rf_feature_grids(),
+                        )
                     else:
                         cand_rf_bed = cand_bed_post
 
@@ -3272,8 +3390,9 @@ class Solver:
     ) -> list[CandidateDriftResult]:
         """Runs Universal Kriging Drift Analyzer diagnostics to recommend optimal drift functions.
 
-        Evaluates the complete default suite - Ordinary Kriging plus all 23 drift models built from SIA,
-        elevation z_dem, surface curvature and the linear / quadratic polynomial trend (see
+        Evaluates the complete dynamic default suite - Ordinary Kriging plus all non-redundant drift models
+        built from the active primitives (`sia`, `z_dem`, `curvature_dem`, `linear_xy`, `quadratic_xy`, plus
+        `mass_balance`, `velocity`, and `velocity_sia` when configured; 24, 48, 60, or 120 models, see
         :func:`pysole.drift.build_drift_suite`) - independent of the configured method and drift_terms, using
         Variance Inflation Factor (VIF), Akaike Information Criterion (AICc), and Leave-One-Profile-Out
         (LOPO) or spatial Buffer Leave-One-Out Cross-Validation.
@@ -3306,7 +3425,7 @@ class Solver:
             sample_pts=sample_pts,
             zero_boundary=getattr(self, f"{stage_prefix}_zero_boundary", True),
             var_model=getattr(self, f"{stage_prefix}_variogram_model", "spherical"),
-            suite=build_drift_suite(None),
+            suite=build_drift_suite(None, available_optional_terms=self._available_optional_terms()),
             interactive=interactive,
             variogram_params=effective_var_params,
         )

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pysole import ConfigError
 from pysole.config import DEFAULT_CONFIG, load_config
-from pysole.drift import DRIFT_PRIMITIVES, build_drift_suite, resolve_drift_plan
+from pysole.drift import DRIFT_PRIMITIVES, OPTIONAL_RASTER_DRIFT_TERMS, build_drift_suite, resolve_drift_plan
 from pysole.interpolation import DriftBasis
 from tests.test_drift_covariates import make_asymmetric_fixture, make_points
 
@@ -52,8 +52,12 @@ class TestDriftModelListsMatchCode(unittest.TestCase):
         for terms, n_drift in re.findall(r"\*\*`(\[[^`]*\])` \(\$n_\{\\text\{drift\}\} = (\d+)\$\)\*\*", section):
             documented[frozenset(json.loads(terms))] = int(n_drift)
 
-        expected = {frozenset(t) for t in build_drift_suite(None) if len(t) >= 2}
-        self.assertEqual(len(expected), 18)
+        expected = {
+            frozenset(t)
+            for t in build_drift_suite(None, available_optional_terms=OPTIONAL_RASTER_DRIFT_TERMS)
+            if len(t) >= 2
+        }
+        self.assertEqual(len(expected), 111)
         self.assertEqual(set(documented), expected)
 
         geom, dem, _, _, grids = make_asymmetric_fixture()
@@ -65,17 +69,25 @@ class TestDriftModelListsMatchCode(unittest.TestCase):
 
     def test_readme_lists_the_same_multi_drift_models(self):
         text = read(README)
-        section = text[text.index("**4 Multi-Raster Physical Combinations"):text.index("For detailed mathematical formulations")]
+        section = text[text.index("`PySole` provides the following **Multi Drift Models**:"):text.index("For detailed mathematical formulations")]
         documented = {frozenset(json.loads(m)) for m in re.findall(r"^- `(\[[^`]*\])`$", section, re.M)}
-        self.assertEqual(documented, {frozenset(t) for t in build_drift_suite(None) if len(t) >= 2})
+        expected = {
+            frozenset(t)
+            for t in build_drift_suite(None, available_optional_terms=OPTIONAL_RASTER_DRIFT_TERMS)
+            if len(t) >= 2
+        }
+        self.assertEqual(documented, expected)
 
     def test_guide_documents_the_single_primitives_and_ordinary(self):
         text = read(DRIFT_GUIDE)
         for term in DRIFT_PRIMITIVES:
             self.assertIn(f"`{term}`", text)
         self.assertEqual(len(build_drift_suite(None)), 24)
+        self.assertEqual(len(build_drift_suite(None, available_optional_terms=OPTIONAL_RASTER_DRIFT_TERMS)), 120)
         self.assertIn("**24 candidates**", text)
+        self.assertIn("**120 candidates**", text)
         self.assertIn("24 candidates", read(README))
+        self.assertIn("120 candidates", read(README))
 
 
 @unittest.skipUnless(README.exists() and DRIFT_GUIDE.exists() and SURVEY_GUIDE.exists(), "not running from a source checkout")

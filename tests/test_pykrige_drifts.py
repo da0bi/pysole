@@ -26,11 +26,18 @@ class PyKrigeFixture(unittest.TestCase):
 
     def run_engine(self, engine, method="universal", terms=None, model="spherical", params=PARAMS, **kwargs):
         terms = list(terms or [])
+        ext = {
+            k: self.grids[k]
+            for k in ("curvature_dem", "mass_balance", "velocity", "velocity_sia")
+            if k in terms and k in self.grids
+        }
         return kriging_interpolation(
             sample_points=self.pts, geometry=self.geom, method=method, variogram_model=model, variogram_params=params,
             dem_grid=self.dem, opt_slope_grid=self.slope, drift_terms=terms, include_zero_boundary_condition=False,
             n_cores=1, show_progress=False, engine=engine, return_variance=True,
-            external_drift_grid={"curvature_dem": self.curv} if "curvature_dem" in terms else None, **kwargs,
+            mass_balance_grid=self.grids.get("mass_balance"),
+            velocity_grid=self.grids.get("velocity"),
+            external_drift_grid=ext or None, **kwargs,
         )
 
 
@@ -47,6 +54,9 @@ class TestPyKrigeUniversalMatchesNative(PyKrigeFixture):
         for terms in build_drift_suite(None):
             with self.subTest(model=terms or "ordinary"):
                 self.assert_match(terms, method="universal" if terms else "ordinary")
+        for terms in (["mass_balance"], ["velocity"], ["velocity_sia"], ["z_dem", "mass_balance", "velocity_sia"]):
+            with self.subTest(model=terms):
+                self.assert_match(terms, method="universal")
 
     def test_variance_matches_for_a_multi_drift_model(self):
         native, pykrige = self.assert_match(["sia", "z_dem", "quadratic_xy"])
@@ -90,7 +100,10 @@ class TestPyKrigeUniversalMatchesNative(PyKrigeFixture):
 
     def test_every_listed_term_changes_the_result(self):
         reference = self.run_engine("pykrige", "universal", ["z_dem"]).bedrock_grid
-        for terms in (["z_dem", "sia"], ["z_dem", "curvature_dem"], ["z_dem", "linear_xy"], ["z_dem", "quadratic_xy"]):
+        for terms in (
+            ["z_dem", "sia"], ["z_dem", "curvature_dem"], ["z_dem", "mass_balance"],
+            ["z_dem", "velocity"], ["z_dem", "velocity_sia"], ["z_dem", "linear_xy"], ["z_dem", "quadratic_xy"],
+        ):
             with self.subTest(terms=terms):
                 other = self.run_engine("pykrige", "universal", terms).bedrock_grid
                 self.assertGreater(float(np.max(np.abs(other - reference))), 1e-6)

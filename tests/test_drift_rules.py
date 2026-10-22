@@ -775,6 +775,115 @@ class TestSingleModelAutoDisableAndNonFlatSuites(unittest.TestCase):
         self.assertFalse(s2.post_drift_analyzer)
 
 
+class TestMassBalanceAndVelocityDriftModels(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.geom = GridGeometry.create((12, 12), dx=10.0, dy=10.0, bounds=BOUNDS)
+        xx, yy = self.geom.meshgrid
+        self.dem = 1000.0 + 0.2 * (xx - BOUNDS[0]) + 0.1 * (yy - BOUNDS[1])
+        self.mb = -2.0 + 0.01 * (xx - BOUNDS[0]) - 0.005 * (yy - BOUNDS[1])
+        # High-frequency spike + off-glacier positive value in velocity
+        self.vel = 15.0 + 0.05 * (xx - BOUNDS[0])
+        self.vel[6, 6] += 80.0
+        self.mask = np.ones((12, 12), dtype=bool)
+        self.mask[0, :] = False  # row 0 is off-glacier
+        self.out = os.path.join(self._tmp.name, "out")
+        os.makedirs(self.out, exist_ok=True)
+
+    def test_suite_scaling_with_available_optional_terms(self):
+        from pysole.drift import OPTIONAL_RASTER_DRIFT_TERMS, resolve_available_optional_terms
+
+        self.assertEqual(len(build_drift_suite(None)), 24)
+        mb_only = resolve_available_optional_terms(has_mass_balance=True, has_velocity=False)
+        self.assertEqual(mb_only, ["mass_balance"])
+        self.assertEqual(len(build_drift_suite(None, available_optional_terms=mb_only)), 48)
+
+        vel_only = resolve_available_optional_terms(has_mass_balance=False, has_velocity=True)
+        self.assertEqual(vel_only, ["velocity", "velocity_sia"])
+        self.assertEqual(len(build_drift_suite(None, available_optional_terms=vel_only)), 60)
+
+        both = resolve_available_optional_terms(has_mass_balance=True, has_velocity=True)
+        self.assertEqual(both, list(OPTIONAL_RASTER_DRIFT_TERMS))
+        suite_120 = build_drift_suite(None, available_optional_terms=both)
+        self.assertEqual(len(suite_120), 120)
+        for cand in suite_120:
+            s = set(cand)
+            self.assertFalse({"linear_xy", "quadratic_xy"} <= s)
+            if "velocity_sia" in s:
+                self.assertNotIn("sia", s)
+                self.assertNotIn("velocity", s)
+
+    def test_velocity_sia_redundancy_pruning_with_warning(self):
+        plan1 = resolve_drift_plan("universal", False, ["sia", "velocity_sia"])
+        self.assertEqual(plan1.terms, ["velocity_sia"])
+        self.assertEqual(len(plan1.notices), 1)
+        self.assertEqual(plan1.notices[0][0], "warning")
+        self.assertIn("already couples 'velocity' and 'sia'", plan1.notices[0][1])
+
+        plan2 = resolve_drift_plan("universal", False, ["velocity", "velocity_sia", "z_dem"])
+        self.assertEqual(plan2.terms, ["z_dem", "velocity_sia"])
+        self.assertEqual(len(plan2.notices), 1)
+        self.assertIn("already couples 'velocity' and 'sia'", plan2.notices[0][1])
+
+    def test_fail_fast_when_optional_raster_missing(self):
+        with self.assertRaisesRegex(ConfigError, "mass_balance_path"):
+            load_config({
+                "outputs": {"output_dir": self.out},
+                "kriging_parameters": {
+                    "post_migration": {
+                        "method": "universal",
+                        "drift_analyzer": False,
+                        "drift_terms": ["mass_balance"],
+                    }
+                }
+            })
+        with self.assertRaisesRegex(ConfigError, "velocity_path"):
+            load_config({
+                "outputs": {"output_dir": self.out},
+                "kriging_parameters": {
+                    "post_migration": {
+                        "method": "universal",
+                        "drift_analyzer": False,
+                        "drift_terms": ["velocity_sia"],
+                    }
+                }
+            })
+        with self.assertRaisesRegex(ConfigError, "mass_balance_path"):
+            Solver(
+                dem=self.dem,
+                bounds=BOUNDS,
+                survey_data_type="depth",
+                post_kriging_method="universal",
+                post_drift_analyzer=False,
+                post_drift_terms=["sia", "mass_balance"],
+                output_dir=self.out,
+            )
+
+    def test_solver_keeps_mass_balance_unsmoothed_and_smooths_velocity_with_zero_clamping(self):
+        solver = Solver(
+            dem=self.dem,
+            bounds=BOUNDS,
+            outline=self.mask,
+            mass_balance=self.mb,
+            velocity=self.vel,
+            survey_data_type="depth",
+            post_kriging_method="universal",
+            post_drift_analyzer=False,
+            post_drift_terms=["mass_balance", "velocity_sia"],
+            output_dir=self.out,
+        )
+        solver.opt_kc = 0.05
+        grids = solver.get_drift_grids(["mass_balance", "velocity", "velocity_sia"])
+        # mass_balance is exact / unsmoothed
+        np.testing.assert_allclose(grids["mass_balance"], self.mb)
+        # velocity is smoothed (peak at [6,6] attenuated) and non-negative
+        self.assertTrue(np.all(grids["velocity"] >= 0.0))
+        self.assertLess(grids["velocity"][6, 6], self.vel[6, 6])
+        self.assertTrue(np.all(np.isfinite(grids["velocity_sia"])))
+        self.assertTrue(np.all(grids["velocity_sia"] >= 0.0))
+
+
 if __name__ == "__main__":
     unittest.main()
 

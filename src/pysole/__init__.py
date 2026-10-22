@@ -9,10 +9,10 @@ void filling, and geomorphological boundary margin blending.
 """
 
 from .solver import Solver
-from .raster import BedrockMap, load_dem, load_outline, ensure_spatial_coords, GridGeometry, load_survey_points, calculate_ice_volume, IceVolumeResult
+from .raster import BedrockMap, load_dem, load_outline, load_aligned_raster, ensure_spatial_coords, GridGeometry, load_survey_points, calculate_ice_volume, IceVolumeResult
 from .migration import migrate_eikonal_points, EikonalMigrator, MigrationResult
 from .smoothing import compute_gradients, fft_gaussian_smooth
-from .variogram import optimize_bss_variance, calculate_variogram, fit_variogram_model, BSSOptimizer, OptimizationResult
+from .variogram import optimize_bss_variance, BSSOptimizer, OptimizationResult, calculate_variogram, fit_variogram_model
 from .interpolation import blend_margin_topography, kriging_interpolation, random_forest_hole_filling, KrigingEngine, BedrockFinalizer, KrigingResult
 from .drift_analyzer import DriftAnalyzer
 from .survey_planner import SurveyPlanner
@@ -30,7 +30,7 @@ from .logging import (
 )
 from . import plotting
 
-__version__ = "0.5.3"
+__version__ = "0.6.0"
 
 __all__ = [
     "Solver",
@@ -38,6 +38,7 @@ __all__ = [
     "GridGeometry",
     "load_dem",
     "load_outline",
+    "load_aligned_raster",
     "load_survey_points",
     "calculate_ice_volume",
     "IceVolumeResult",

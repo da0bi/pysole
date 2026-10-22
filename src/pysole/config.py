@@ -10,7 +10,13 @@ import json
 import os
 import numpy as np
 from difflib import get_close_matches
-from .drift import default_model, normalize_engine, resolve_drift_plan
+from .drift import (
+    default_model,
+    normalize_engine,
+    resolve_available_optional_terms,
+    resolve_drift_plan,
+    validate_required_drift_rasters,
+)
 from .errors import ConfigError
 from .logging import logger, setup_logging
 from .memory import MAX_FRACTION_CAP
@@ -236,6 +242,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "inputs": {
         "dem_path": None,
         "outline_path": None,
+        "mass_balance_path": None,
+        "velocity_path": None,
         "survey_data_path": None,
         "survey_data_type": "one_way_traveltime",
         "survey_profile_column": None,
@@ -604,6 +612,11 @@ def load_config(
     user_kp = (user_config or {}).get("kriging_parameters", {})
     normalize_engine(kp.get("engine", "native"))
 
+    inputs_cfg = config.get("inputs", {})
+    has_mb = inputs_cfg.get("mass_balance_path") is not None
+    has_vel = inputs_cfg.get("velocity_path") is not None
+    avail_opt_terms = resolve_available_optional_terms(has_mass_balance=has_mb, has_velocity=has_vel)
+
     for section_name, direct_target_char in [("pre_migration", "T"), ("post_migration", "D")]:
         sec = kp.get(section_name, {})
         user_sec = user_kp.get(section_name, {})
@@ -624,7 +637,15 @@ def load_config(
         sec["method"] = method
         sec["drift_terms"] = terms
         try:
-            plan = resolve_drift_plan(method, sec.get("drift_analyzer", False), terms, kp.get("engine", "native"))
+            plan = resolve_drift_plan(
+                method,
+                sec.get("drift_analyzer", False),
+                terms,
+                kp.get("engine", "native"),
+                available_optional_terms=avail_opt_terms,
+            )
+            if plan.method != "ordinary":
+                validate_required_drift_rasters(terms, has_mass_balance=has_mb, has_velocity=has_vel)
             if sec.get("drift_analyzer", False) and not plan.analyze and method == "universal":
                 sec["drift_analyzer"] = False
         except ConfigError as exc:

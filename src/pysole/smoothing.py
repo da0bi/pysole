@@ -244,7 +244,7 @@ def precompute_fft_grid(
 
 
 def fft_gaussian_smooth_precomputed(
-    spectrum: FFTSpectrum | np.ndarray, k_grid: np.ndarray, kc: float = 0.05
+    spectrum: FFTSpectrum, k_grid: np.ndarray, kc: float = 0.05
 ) -> np.ndarray:
     """
     Applies Gaussian low-pass filtering using pre-computed Fourier spectra.
@@ -259,7 +259,7 @@ def fft_gaussian_smooth_precomputed(
 
     Parameters
     ----------
-    spectrum : FFTSpectrum or np.ndarray
+    spectrum : FFTSpectrum
         Pre-computed FFT spectrum container (from :func:`precompute_fft_grid`).
     k_grid : np.ndarray
         2D spatial wavenumber grid [rad/m].
@@ -272,20 +272,12 @@ def fft_gaussian_smooth_precomputed(
     smoothed_grid : np.ndarray
         Filtered spatial elevation grid [m] matching the original unpadded dimensions.
     """
-    if isinstance(spectrum, FFTSpectrum):
-        data_fft = spectrum.data_fft
-        mask_fft = spectrum.mask_fft
-        pad_m, pad_n = spectrum.pad_m, spectrum.pad_n
-        M, N = spectrum.orig_shape
-        has_nans = spectrum.has_nans
-        nan_mask = spectrum.nan_mask
-    else:
-        data_fft = spectrum
-        mask_fft = None
-        pad_m, pad_n = 0, 0
-        M, N = spectrum.shape
-        has_nans = False
-        nan_mask = None
+    data_fft = spectrum.data_fft
+    mask_fft = spectrum.mask_fft
+    pad_m, pad_n = spectrum.pad_m, spectrum.pad_n
+    M, N = spectrum.orig_shape
+    has_nans = spectrum.has_nans
+    nan_mask = spectrum.nan_mask
 
     if kc < 0:
         raise ValueError(f"Invalid corner frequency kc={kc}. Corner frequency must be non-negative (kc >= 0).")

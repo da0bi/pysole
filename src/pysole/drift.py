@@ -8,65 +8,160 @@ validated before any data is read.
 
 Rules (``resolve_drift_plan``)
 ------------------------------
-``drift_terms`` is ``None`` (omitted) or a flat list of the primitives in :data:`DRIFT_PRIMITIVES`. Inside an
-analyzer suite exactly one nested ``[]`` adds the stand-alone Ordinary Kriging candidate. A top-level ``[]`` is
-rejected (use ``None``).
+``drift_terms`` is ``None`` (omitted) or a flat list of the primitives in :data:`DRIFT_PRIMITIVES`
+(``sia``, ``z_dem``, ``curvature_dem``, ``mass_balance``, ``velocity``, ``velocity_sia``, ``linear_xy``,
+``quadratic_xy``). Inside an analyzer suite, exactly one nested ``[]`` adds the stand-alone Ordinary Kriging
+candidate, or a list of explicit candidate model lists (e.g. ``[["sia", "z_dem"], ["sia"], []]``) defines a
+custom multi-model suite. A top-level ``[]`` is rejected (use ``None``).
 
 * ``ordinary`` overrides ``drift_analyzer`` and ``drift_terms``: both are ignored (the terms are not even
   validated) and a single warning is issued if either was set.
-* ``universal`` without analyzer: ``drift_terms`` is ONE multi-drift model and must be given.
-  If both ``linear_xy`` and ``quadratic_xy`` are specified, ``linear_xy`` is dropped with a warning (fallback to
-  ``['quadratic_xy']`` which contains the linear terms [x, y]).
-* ``universal`` with analyzer: ``drift_terms`` ``None`` evaluates the default suite (Ordinary + all drift
-  models), a list evaluates all non-empty subsets of the listed primitives (never ``linear_xy`` together with
-  ``quadratic_xy``) plus Ordinary if ``[]`` is nested. A suite of exactly one candidate overrides the analyzer
-  and that model is applied.
-* ``regression``: ``drift_terms`` are the Random Forest covariates (default ``None``: all primitives
-  ``["sia", "z_dem", "curvature_dem", "quadratic_xy"]``; spatial coordinates only: ``["linear_xy"]``); the analyzer is skipped.
+* ``universal`` without analyzer: ``drift_terms`` is ONE multi-drift model (or an explicit list of candidate
+  model lists for non-interactive multi-model execution) and must be given.
+  Collinear combinations are pruned with a warning: ``linear_xy`` is dropped when combined with ``quadratic_xy``,
+  and ``sia`` / ``velocity`` are dropped when combined with ``velocity_sia``.
+* ``universal`` with analyzer: ``drift_terms`` ``None`` evaluates the dynamic default suite (Ordinary + all
+  non-redundant drift combinations of active primitives: 24, 48, 60, or 120 models depending on configured
+  ``mass_balance`` and ``velocity`` rasters). A flat list evaluates all non-empty non-redundant subsets of the
+  listed primitives plus Ordinary if ``[]`` is nested. A suite of exactly one candidate overrides the analyzer
+  and that model is applied directly.
+* ``regression``: ``drift_terms`` are the Random Forest covariates (default ``None``: core primitives
+  ``["sia", "z_dem", "curvature_dem", "quadratic_xy"]`` plus ``"mass_balance"`` and ``"velocity"`` when
+  configured; spatial coordinates only: ``["linear_xy"]``); the analyzer is skipped.
   The method is only available through PyKrige (also with ``engine`` ``native``, which is reported).
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from itertools import combinations
 from typing import Any
 
 from .errors import ConfigError
 
-DRIFT_PRIMITIVES: tuple[str, ...] = ("sia", "z_dem", "curvature_dem", "linear_xy", "quadratic_xy")
+CORE_DRIFT_PRIMITIVES: tuple[str, ...] = ("sia", "z_dem", "curvature_dem", "linear_xy", "quadratic_xy")
+"""Core DEM and coordinate drift primitives always available without auxiliary input rasters."""
+
+OPTIONAL_RASTER_DRIFT_TERMS: tuple[str, ...] = ("mass_balance", "velocity", "velocity_sia")
+"""Optional glaciological raster drift primitives requiring mass_balance or velocity input rasters."""
+
+DRIFT_PRIMITIVES: tuple[str, ...] = (
+    "sia",
+    "z_dem",
+    "curvature_dem",
+    "mass_balance",
+    "velocity",
+    "velocity_sia",
+    "linear_xy",
+    "quadratic_xy",
+)
 """Supported primitive drift terms in canonical (display and column) order."""
 
-RASTER_DRIFT_TERMS: tuple[str, ...] = ("sia", "z_dem", "curvature_dem")
+RASTER_DRIFT_TERMS: tuple[str, ...] = (
+    "sia",
+    "z_dem",
+    "curvature_dem",
+    "mass_balance",
+    "velocity",
+    "velocity_sia",
+)
 """Primitive drift terms that need a raster covariate grid, in canonical column order."""
 
 DEFAULT_REGRESSION_DRIFT_TERMS: tuple[str, ...] = ("sia", "z_dem", "curvature_dem", "quadratic_xy")
-"""Default feature covariates for method 'regression' when drift_terms is None (all primitives with quadratic_xy providing coordinates)."""
+"""Default feature covariates for method 'regression' when drift_terms is None (all core primitives with quadratic_xy providing coordinates)."""
 
 FALLBACK_QUADRATIC_NOTICE: str = (
     "drift_terms: ['linear_xy', 'quadratic_xy'] is falling back to ['quadratic_xy'] "
     "which contains the linear terms [x, y]."
 )
 
+FALLBACK_VELOCITY_SIA_NOTICE: str = (
+    "drift_terms: 'velocity_sia' already couples 'velocity' and 'sia'; redundant "
+    "'velocity' / 'sia' term(s) were dropped."
+)
+
+
+def prune_drift_terms_with_notices(terms: Iterable[str]) -> tuple[list[str], list[tuple[str, str]]]:
+    """
+    Removes redundant drift terms from a single model term list and returns any warning notices:
+    - Removes ``'linear_xy'`` if ``'quadratic_xy'`` is also present (as ``'quadratic_xy'`` already fits ``[x, y]``).
+    - Removes ``'sia'`` and ``'velocity'`` if ``'velocity_sia'`` is also present (as ``'velocity_sia'`` already
+      couples surface velocity and SIA slope scaling).
+    """
+    pruned = list(terms)
+    notices: list[tuple[str, str]] = []
+    if "linear_xy" in pruned and "quadratic_xy" in pruned:
+        pruned = [t for t in pruned if t != "linear_xy"]
+        notices.append(("warning", FALLBACK_QUADRATIC_NOTICE))
+    if "velocity_sia" in pruned and ("sia" in pruned or "velocity" in pruned):
+        pruned = [t for t in pruned if t not in ("sia", "velocity")]
+        notices.append(("warning", FALLBACK_VELOCITY_SIA_NOTICE))
+    return pruned, notices
+
 
 def prune_redundant_drift_terms(terms: list[str]) -> tuple[list[str], bool]:
     """
-    Removes 'linear_xy' from a single model term list if 'quadratic_xy' is also present,
-    as 'quadratic_xy' already fits the linear plane [x, y].
-
-    Parameters
-    ----------
-    terms : list of str
-        Primitive drift terms for a single model.
-
-    Returns
-    -------
-    pruned_terms : list of str
-        The terms with 'linear_xy' removed if 'quadratic_xy' is present.
-    was_pruned : bool
-        True if 'linear_xy' was removed because 'quadratic_xy' was present.
+    Removes redundant drift terms from a single model term list and returns ``(pruned_terms, was_pruned)``.
     """
-    if "linear_xy" in terms and "quadratic_xy" in terms:
-        return [t for t in terms if t != "linear_xy"], True
-    return list(terms), False
+    pruned, notices = prune_drift_terms_with_notices(terms)
+    return pruned, bool(notices)
+
+
+def default_regression_drift_terms(
+    available_optional_terms: Iterable[str] | None = None,
+) -> list[str]:
+    """Returns canonical default Regression Kriging drift terms given available optional rasters."""
+    opt_set = set(available_optional_terms or ())
+    reg_set = set(DEFAULT_REGRESSION_DRIFT_TERMS) | (opt_set & {"mass_balance", "velocity"})
+    return [t for t in DRIFT_PRIMITIVES if t in reg_set]
+
+
+def resolve_available_optional_terms(
+    has_mass_balance: bool = False,
+    has_velocity: bool = False,
+) -> list[str]:
+    """Returns the canonical list of optional raster drift terms available for the given inputs."""
+    avail: list[str] = []
+    if has_mass_balance:
+        avail.append("mass_balance")
+    if has_velocity:
+        avail.extend(["velocity", "velocity_sia"])
+    return avail
+
+
+def validate_required_drift_rasters(
+    drift_terms: Any,
+    has_mass_balance: bool = False,
+    has_velocity: bool = False,
+) -> None:
+    """
+    Validates that any explicitly requested optional glacier drift terms have their input rasters configured.
+
+    Raises
+    ------
+    ConfigError
+        If ``'mass_balance'`` is requested without a mass balance raster, or if ``'velocity'`` /
+        ``'velocity_sia'`` is requested without a velocity raster.
+    """
+    if not drift_terms or not isinstance(drift_terms, (list, tuple)):
+        return
+    flat_terms: list[str] = []
+    for item in drift_terms:
+        if isinstance(item, (list, tuple)):
+            flat_terms.extend(str(t) for t in item)
+        elif isinstance(item, str):
+            flat_terms.append(item)
+    if "mass_balance" in flat_terms and not has_mass_balance:
+        raise ConfigError(
+            "Drift term 'mass_balance' requires a surface mass balance raster: "
+            "set 'inputs.mass_balance_path' in pysole.json or pass mass_balance=... to Solver."
+        )
+    for vel_term in ("velocity", "velocity_sia"):
+        if vel_term in flat_terms and not has_velocity:
+            raise ConfigError(
+                f"Drift term '{vel_term}' requires a surface flow velocity raster: "
+                "set 'inputs.velocity_path' in pysole.json or pass velocity=... to Solver."
+            )
+
 
 KRIGING_METHODS: tuple[str, ...] = ("ordinary", "universal", "regression")
 KRIGING_ENGINES: tuple[str, ...] = ("native", "pykrige")
@@ -206,21 +301,30 @@ def _suite_from_primitives(primitives: list[str], has_ordinary: bool) -> list[li
         for subset in combinations(primitives, size):
             if "linear_xy" in subset and "quadratic_xy" in subset:
                 continue  # quadratic_xy already contains the linear columns
+            if "velocity_sia" in subset and ("sia" in subset or "velocity" in subset):
+                continue  # velocity_sia already couples velocity with SIA slope scaling
             suite.append(list(subset))
     return suite
 
 
-def build_drift_suite(drift_terms: list | None) -> list[list[str]]:
+def build_drift_suite(
+    drift_terms: list | None,
+    available_optional_terms: Iterable[str] | None = None,
+) -> list[list[str]]:
     """
     Builds the candidate suite of the Drift Analyzer.
 
     Parameters
     ----------
     drift_terms : list or None
-        ``None``: default suite - Ordinary (``[]``) plus all 23 non-empty subsets of the five primitives
-        that do not contain ``linear_xy`` and ``quadratic_xy`` together. A list of primitives: all subsets of the
-        listed primitives, plus Ordinary if the list contains one nested ``[]``. If a list of candidate model
-        lists is provided (e.g. ``[["sia", "z_dem"], ["sia"], []]``), those explicit models form the suite directly.
+        ``None``: default suite - Ordinary (``[]``) plus all non-redundant subsets of the active primitives
+        (the 5 core primitives plus any optional glacier raster primitives in ``available_optional_terms``).
+        A list of primitives: all non-redundant subsets of the listed primitives, plus Ordinary if the list
+        contains one nested ``[]``. If a list of candidate model lists is provided (e.g.
+        ``[["sia", "z_dem"], ["sia"], []]``), those explicit models form the suite directly.
+    available_optional_terms : iterable of str, optional
+        Optional raster primitives (from :data:`OPTIONAL_RASTER_DRIFT_TERMS`) whose input rasters are available.
+        Only used when ``drift_terms is None``.
 
     Returns
     -------
@@ -228,7 +332,11 @@ def build_drift_suite(drift_terms: list | None) -> list[list[str]]:
         Candidates ordered Ordinary first, then by size and canonical term order. Ordinary is ``[]``.
     """
     if drift_terms is None:
-        return _suite_from_primitives(list(DRIFT_PRIMITIVES), True)
+        opt_set = set(available_optional_terms or ())
+        active_primitives = [
+            t for t in DRIFT_PRIMITIVES if (t in CORE_DRIFT_PRIMITIVES or t in opt_set)
+        ]
+        return _suite_from_primitives(active_primitives, True)
     if any(isinstance(elem, (list, tuple)) and len(elem) > 0 for elem in drift_terms):
         suite: list[list[str]] = []
         for cand in drift_terms:
@@ -328,7 +436,13 @@ class DriftPlan:
         return f"Universal Kriging (drift: {format_drift_name(self.terms)})"
 
 
-def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | None, engine: str = "native") -> DriftPlan:
+def resolve_drift_plan(
+    method: Any,
+    drift_analyzer: bool,
+    drift_terms: list | None,
+    engine: str = "native",
+    available_optional_terms: Iterable[str] | None = None,
+) -> DriftPlan:
     """
     Resolves ``method`` / ``drift_analyzer`` / ``drift_terms`` of one stage according to the module rules.
 
@@ -342,6 +456,7 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
     method_clean = normalize_method(method)
     engine_clean = normalize_engine(engine)
     analyzer = bool(drift_analyzer)
+    opt_set = set(available_optional_terms or ())
 
     if method_clean == "ordinary":
         notices = []
@@ -357,12 +472,11 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
     if method_clean == "regression":
         notices = []
         if drift_terms is None:
-            terms = list(DEFAULT_REGRESSION_DRIFT_TERMS)
+            terms = default_regression_drift_terms(opt_set)
         else:
             raw_terms = parse_drift_terms(drift_terms)[0]
-            terms, pruned = prune_redundant_drift_terms(raw_terms)
-            if pruned:
-                notices.append(("warning", FALLBACK_QUADRATIC_NOTICE))
+            terms, prune_notices = prune_drift_terms_with_notices(raw_terms)
+            notices.extend(prune_notices)
         if engine_clean == "native":
             notices.append((
                 "info",
@@ -388,7 +502,7 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
             if len(drift_terms) == 1 and isinstance(drift_terms[0], (list, tuple)):
                 effective_terms = list(drift_terms[0])
             else:
-                suite = build_drift_suite(drift_terms)
+                suite = build_drift_suite(drift_terms, available_optional_terms=opt_set)
                 if len(suite) == 1:
                     only = suite[0]
                     return DriftPlan(
@@ -415,13 +529,11 @@ def resolve_drift_plan(method: Any, drift_analyzer: bool, drift_terms: list | No
             effective_terms = drift_terms
 
         raw_terms, _ = parse_drift_terms(effective_terms)
-        terms, pruned = prune_redundant_drift_terms(raw_terms)
-        notices = list(slow_universal)
-        if pruned:
-            notices.append(("warning", FALLBACK_QUADRATIC_NOTICE))
+        terms, prune_notices = prune_drift_terms_with_notices(raw_terms)
+        notices = list(slow_universal) + prune_notices
         return DriftPlan(method="universal", terms=terms, notices=notices)
 
-    suite = build_drift_suite(drift_terms)
+    suite = build_drift_suite(drift_terms, available_optional_terms=opt_set)
     if len(suite) == 1:
         only = suite[0]
         return DriftPlan(
