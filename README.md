@@ -323,7 +323,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 ## Technical & Methodological Notes
 
 <a id="supported-dem-formats"></a>
-#### 1. Supported DEM Formats
+### 1. Supported DEM Formats
 `PySole` supports 5 distinct DEM formats:
 
 - **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, CRS, pixel resolution, and `nodata` values using [`rasterio`](https://rasterio.readthedocs.io).
@@ -333,7 +333,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 - **NumPy 2D Array (`np.ndarray`)**: In-memory array passed directly into the `Solver` constructor (`dem=dem_grid`); spatial metadata defined via `spatial_parameters`.
 
 <a id="parsing-rock-outcrops"></a>
-#### 2. Parsing of Rock Outcrop Input Files
+### 2. Parsing of Rock Outcrop Input Files
 Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>Z</i> = <i>Z</i><sub>Surface</sub>). When boundary conditions are enabled, the perimeters of interior rings are included with <i>T</i> = 0 s or <i>D</i> = 0 m.
 
 For rock outcrop holes to be detected from a Shapefile (`.shp`):
@@ -342,7 +342,7 @@ For rock outcrop holes to be detected from a Shapefile (`.shp`):
 - **CRS Alignment**: Must match the DEM raster projection.
 
 <a id="parsing-survey-data-csv"></a>
-#### 3. Parsing of Survey Data CSV Files
+### 3. Parsing of Survey Data CSV Files
 `PySole` ingests point survey datasets (`inputs.survey_data_path`) containing scattered soundings of two-way traveltime [ns], one-way traveltime [ns], or direct ice thickness [m]. Internally, soundings are mapped into a standardized array:
 
 <p align="center">
@@ -359,7 +359,7 @@ $$\begin{bmatrix} X & Y & Z_{\text{surface}} & \text{value} & [\text{profile\_id
 > - **Header Present:** Column order is flexible. If <i>Z</i><sub>surface</sub> is omitted or `profile_id` is in a non-standard position, always include a header row and set `"survey_profile_column"` to match the header name.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
-#### 4. Wavenumbers and Wavelengths
+### 4. Wavenumbers and Wavelengths
 In `PySole`, 2D spatial Gaussian low-pass smoothing operates in the physical 2D spatial frequency domain with wavenumber components <i>k</i><sub>x</sub>, <i>k</i><sub>y</sub> [rad/m] and magnitude <i>k</i> = √(<i>k</i><sub>x</sub>² + <i>k</i><sub>y</sub>²):
 
 <p align="center">
@@ -379,7 +379,7 @@ where <i>dx</i>, <i>dy</i> [m] are grid cell resolutions and <i>N</i><sub>x</sub
 
 *Table 1: Physical Reference Conversion Table.*
 
-##### Derivation of FFT Filter Parameter Defaults
+#### Derivation of FFT Filter Parameter Defaults
 When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` derives defaults from the grid resolution and maximum domain extent <i>L</i><sub>max</sub> = max(<i>N</i><sub>x</sub> · |<i>dx</i>|, <i>M</i><sub>y</sub> · |<i>dy</i>|):
 - **Maximum Wavenumber `kc_max` / Minimum Wavelength `lambda_min`**: Defaults to the Nyquist limit <i>k</i><sub>c,max</sub> = <i>k</i><sub>Nyquist</sub> = <i>π</i> / min(|<i>dx</i>|, |<i>dy</i>|) (<i>λ</i><sub>min</sub> = 2 · min(|<i>dx</i>|, |<i>dy</i>|)). Custom `lambda_min` converts via <i>k</i><sub>c,max</sub> = 2<i>π</i> / <i>λ</i><sub>min</sub>.
 - **Minimum Wavenumber `kc_min` / Maximum Wavelength `lambda_max`**: Defaults to the half-domain limit <i>k</i><sub>c,min</sub> = 4<i>π</i> / <i>L</i><sub>max</sub> (<i>λ</i><sub>max</sub> = <i>L</i><sub>max</sub> / 2). Custom `lambda_max` converts via <i>k</i><sub>c,min</sub> = 2<i>π</i> / <i>λ</i><sub>max</sub>.
@@ -391,7 +391,7 @@ When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `n
 After each surface slope optimization pass, both <i>k</i><sub>c,opt</sub> [rad/m] and <i>λ</i><sub>c,opt</sub> [m] are logged to the console and `pysole.log`.
 
 <a id="variogram-binning"></a>
-#### 5. Variogram Binning with Minimum Pair Threshold
+### 5. Variogram Binning with Minimum Pair Threshold
 Experimental variogram lag distance bins are calculated from pairwise Euclidean distances across <i>N</i> survey points. When `nrbins` is `null` (default), `PySole` sets the bin count from the number of point pairs within the variogram range <i>h</i> ≤ <i>h</i><sub>max</sub> (half of the maximum pairwise distance) to ensure at least **30 point pairs per bin** (Webster & Oliver, 2007), bounded to [3, 30]:
 
 $$
@@ -401,7 +401,7 @@ $$
 If a user-specified `nrbins` yields fewer than 30 average pairs per bin, a warning is logged while honoring the explicit choice (enforcing a floor of 3 bins). For large surveys (<i>N</i> &gt; 5000), lag statistics are accumulated in chunks using <i>N</i><sub>pairs</sub> = <i>N</i>(<i>N</i> − 1)/2.
 
 <a id="dual-kriging-vector-engine"></a>
-#### 6. High-Performance Dual Kriging Vector Engine
+### 6. High-Performance Dual Kriging Vector Engine
 `PySole` features a native geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike Primal Kriging (which solves a separate linear system at every target grid node), Dual Kriging solves the global (<i>N</i> + <i>L</i>) × (<i>N</i> + <i>L</i>) linear system **once** via LU decomposition (`scipy.linalg.lu_factor`):
 
 <p align="center">
@@ -410,10 +410,10 @@ $$\mathbf{K} \mathbf{w}_z = \mathbf{z}_{\text{aug}}, \qquad Z_{\text{grid}}(x,y)
 
 where <b>K</b> is the augmented sample variogram and drift matrix, <b>w</b><sub>z</sub> = [<b>w</b><sub>sample</sub><sup>T</sup>, <b>w</b><sub>drift</sub><sup>T</sup>]<sup>T</sup> is the solved global dual weight vector, and <b>k</b><sub>grid</sub> = [<b>Γ</b><sub>grid</sub><sup>T</sup>, <b>F</b><sub>grid</sub><sup>T</sup>]<sup>T</sup> combines the 1D sample-to-grid cross-variogram vector <b>Γ</b><sub>grid</sub> and the drift basis vector <b>F</b><sub>grid</sub> evaluated at (<i>x</i>,<i>y</i>). Point prediction across <i>m</i> grid nodes reduces to an <i>O</i>(<i>N</i> · <i>m</i>) BLAS dot product (~180x speedup over loop-based solvers, interpolating 300,000+ nodes in under 50 ms). The production solver and the `Drift Analyzer` share the same unified `KrigingSystem`.
 
-##### Thread-Safe Level-3 BLAS Variance Engine
+#### Thread-Safe Level-3 BLAS Variance Engine
 While point prediction requires only an <i>O</i>(<i>N</i> · <i>m</i>) vector dot product, evaluating Kriging estimation variance <i>σ</i>²(<i>x</i>,<i>y</i>) = <i>C</i>(0) − <b>k</b><sub>grid</sub><sup>T</sup> <b>K</b><sup>−1</sup> <b>k</b><sub>grid</sub> scales as <i>O</i>(<i>N</i>² · <i>m</i>) (disabled by default via `calculate_uncertainty: false`). When enabled, `PySole` pre-computes the explicit inverse <b>K</b><sup>−1</sup> once via `lu_solve(lu_piv, np.eye(N_aug))` prior to grid chunking, and worker threads (`ThreadPoolExecutor`) evaluate chunk variance weights via lock-free Level-3 BLAS matrix products (<b>W</b><sub>sub</sub> = <b>K</b><sup>−1</sup> <b>K</b><sub>rhs,sub</sub>) while `threadpoolctl` prevents BLAS thread oversubscription.
 
-##### Adaptive Diagonal Tikhonov Regularization & Scale Invariance
+#### Adaptive Diagonal Tikhonov Regularization & Scale Invariance
 To prevent ill-conditioning when soundings are densely spaced along GPR profiles, `PySole` applies adaptive diagonal Tikhonov regularization strictly to the <i>N</i> × <i>N</i> sample observation block <b>K</b><sub>ii</sub> += <i>λ</i><sub>reg</sub> (<i>i</i> = 1, …, <i>N</i>), scaled by the empirical variogram sill <i>S</i>:
 
 <p align="center">
@@ -423,10 +423,10 @@ $$\lambda_{\text{reg}} = \epsilon_{\text{reg}} \cdot S = 10^{-6} \cdot S$$
 Because both <b>Γ</b> and <i>λ</i><sub>reg</sub><b>I</b> scale proportionally with <i>S</i> while the drift Lagrange blocks remain unperturbed (<b>F</b><sup>T</sup> <b>w</b><sub>sample</sub> = <b>0</b>), predictions are strictly invariant to linear rescaling of the input data.
 
 <a id="universal-kriging-drift-models"></a>
-#### 7. Universal Kriging Drift Models
+### 7. Universal Kriging Drift Models
 The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kriging (`drift_analyzer: true`) to automatically evaluate, rank, and compare candidate drift models using spatial cross-validation metrics — see the [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer.md) for full details. Because statistical rankings should always be paired with glaciological judgment, the governing assumptions of all primitive and multi-drift models are summarized below.
 
-##### Single Drift Models (8 Primitives + Ordinary Kriging)
+#### Single Drift Models (8 Primitives + Ordinary Kriging)
 
 - **Shallow Ice Approximation Physical Drift Model (`["sia"]`)**:
    Rearranging basal shear stress <i>τ</i><sub>b</sub> = <i>ρ</i><sub>ice</sub> <i>g</i> <i>D</i> sin(<i>α</i>) for ice depth <i>D</i> yields an inverse relationship with the optimally smoothed surface slope sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) (clamped at `slope_floor_deg`, default 5.0°):
@@ -505,7 +505,7 @@ The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kri
 
 ---
 
-##### Multi-Drift Model Structure & Maximum Available Models: 120 (119 Drift Models + Ordinary Kriging)
+#### Multi-Drift Model Structure & Maximum Available Models: 120 (119 Drift Models + Ordinary Kriging)
 
 `PySole` combines the physical raster drifts (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`) with each other and with the spatial polynomial coordinate trends (`"linear_xy"`, `"quadratic_xy"`) into an augmented multi-drift Universal Kriging system.
 
@@ -526,7 +526,7 @@ With all 8 primitives active, the combinatorial space is governed by **three ind
 
 In total, **5 × 8 × 3 = 120 candidate models**: selecting `[]` across all three groups yields **Ordinary Kriging** (`[]`), while the remaining **119** combinations are **Universal Kriging drift models** (8 single-drift + 111 multi-drift).
 
-###### Breakdown of the 120 Candidates
+##### Breakdown of the 120 Candidates
 
 | Category | Count | Details |
 | :--- | :---: | :--- |
@@ -538,7 +538,7 @@ In total, **5 × 8 × 3 = 120 candidate models**: selecting `[]` across all thre
 | **Total Universal Kriging Drift Models** | **119** | **8 Single + 111 Multi Drift Models** (33 + 39 + 39 = 111) |
 | **Total Evaluated by `DriftAnalyzer`** | **120** | **119 Universal Kriging Drift Models + Ordinary Kriging** |
 
-###### Dynamic Suite Size by Configured Input Rasters (`drift_terms: null`, `drift_analyzer: true`)
+##### Dynamic Suite Size by Configured Input Rasters (`drift_terms: null`, `drift_analyzer: true`)
 
 | Configured Input Rasters | Active Primitives | Single Drift | Multi Drift | Ordinary | Total Suite Size |
 | :--- | :--- | :---: | :---: | :---: | :---: |
@@ -553,7 +553,7 @@ In total, **5 × 8 × 3 = 120 candidate models**: selecting `[]` across all thre
 ---
 
 <a id="how-drift-terms-is-interpreted"></a>
-##### How `drift_terms` is Interpreted
+#### How `drift_terms` is Interpreted
 
 The Kriging parameters `method` and `drift_analyzer` determine how `drift_terms` is resolved:
 
@@ -565,7 +565,7 @@ The Kriging parameters `method` and `drift_analyzer` determine how `drift_terms`
 | `"regression"` | `false` | **Random Forest feature covariates**: Predictor features used to train a Random Forest trend model before Ordinary Kriging of residuals (**only available through `PyKrige`**; automatically switches engine if `engine: "native"`). **Default (`null`)**: Uses `["sia", "z_dem", "curvature_dem", "quadratic_xy"]` plus `"mass_balance"` and `"velocity"` when configured. |
 | `"regression"` | `true` | **Analyzer skipped with warning**: Logs a warning, skips the analyzer, and runs Regression Kriging with `drift_terms`. |
 
-##### Candidate Suite & Single-Model Rules
+#### Candidate Suite & Single-Model Rules
 - **Single-model auto-disable**: When `drift_analyzer: true` resolves to a single candidate (e.g. `["sia"]` or `[["sia", "z_dem"]]`), `PySole` logs an `INFO` notice, sets `drift_analyzer = false`, and runs Universal Kriging directly.
 - **Collinearity pruning**: In an analyzer suite (`drift_analyzer: true`), candidates never combine `linear_xy` with `quadratic_xy` or `velocity_sia` with `sia` / `velocity` within the same model. In a single model (`drift_analyzer: false`), redundant `"linear_xy"` or `"sia"`/`"velocity"` terms are automatically dropped with a warning in favor of `"quadratic_xy"` or `"velocity_sia"`.
 - **Top-level empty list**: An empty list `[]` at the top level is rejected (use `null` instead).
@@ -574,7 +574,7 @@ The Kriging parameters `method` and `drift_analyzer` determine how `drift_terms`
 - **`engine: "pykrige"` performance note**: `PyKrige`'s `UniversalKriging` computes an internal leave-one-out statistic on instantiation that scales as <i>O</i>(<i>N</i>³–<i>N</i>⁴) in the number of survey points. Use `engine: "native"` for Universal Kriging on datasets with more than a few hundred points.
 
 <a id="kriging-uncertainty-derivation"></a>
-#### 8. Kriging Uncertainty Derivation
+### 8. Kriging Uncertainty Derivation
 When `calculate_uncertainty: true` is enabled, `PySole` evaluates the 2D Kriging estimation variance field <i>σ</i>²(<i>x</i>,<i>y</i>) and converts it into the **Kriging Standard Error <i>σ</i>(<i>x</i>,<i>y</i>)** (±1.00 <i>σ</i> corresponds to the 68.3% Gaussian confidence interval; ±1.96 <i>σ</i> to 95%):
 
 - **Direct Target Interpolation (`interpolation_target`: `"D"` or `"T"`)**:
@@ -599,7 +599,7 @@ When `calculate_uncertainty: true` is enabled, `PySole` evaluates the 2D Kriging
   </p>
 
 <a id="memory-guard-and-uncertainty"></a>
-#### 9. Memory Guard and Kriging Uncertainty
+### 9. Memory Guard and Kriging Uncertainty
 When `calculate_uncertainty: true`, post-migration standard error (<i>σ</i><sub>D</sub>) is plotted in diagnostic figures and exported when `save_*_uncertainty: true` (`save_traveltime_uncertainty` exports <i>σ</i><sub>T</sub> when pre-migration uncertainty is enabled). Because Kriging standard error depends only on sample geometry and the variogram, it represents a lower bound on total uncertainty.
 
 Before allocating the (<i>N</i> + <i>n</i><sub>drift</sub>)² inverse matrix and per-thread grid chunks, `PySole`'s memory guard compares estimated peak RAM against `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of available RAM (respecting Linux *cgroup* container quotas in Docker/Kubernetes/HPC):
@@ -608,7 +608,7 @@ Before allocating the (<i>N</i> + <i>n</i><sub>drift</sub>)² inverse matrix and
 3. If available RAM cannot be determined, the guard is disabled.
 
 <a id="dem-spatial-smoothing"></a>
-#### 10. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
+### 10. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
 When `smooth_bedrock: true`, `PySole` applies the spatial smoothing operator <i>S</i> (`"gaussian"`, `"median"`, or `"fft_lowpass"`) **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)** before subtracting from the surface DEM:
 
 <p align="center">
