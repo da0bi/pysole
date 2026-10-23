@@ -16,8 +16,8 @@
 [JSON Configuration Parameter Reference](#json-configuration-parameter-reference)<br><br>
 [Technical & Methodological Notes](#technical-and-methodological-notes)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Formats](#supported-dem-formats)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Survey Data CSV Files](#parsing-survey-data-csv)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[3. Parsing of Rock Outcrop Input Files](#parsing-rock-outcrops)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop Input Files](#parsing-rock-outcrops)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[3. Parsing of Survey Data CSV Files](#parsing-survey-data-csv)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[4. Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[5. Variogram Binning with Minimum Pair Threshold](#variogram-binning)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[6. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
@@ -332,47 +332,31 @@ All execution options can be fully defined in a single JSON configuration file, 
 - **NumPy Binary Array (`.npy`)**: Fast 2D binary array format; spatial metadata (`origin`, `crs`, `dx`, `dy`) defined via `spatial_parameters`.
 - **NumPy 2D Array (`np.ndarray`)**: In-memory array passed directly into the `Solver` constructor (`dem=dem_grid`); spatial metadata defined via `spatial_parameters`.
 
-<a id="parsing-survey-data-csv"></a>
-#### 2. Parsing of Survey Data CSV Files
-`PySole` ingests point survey datasets (`inputs.survey_data_path`) containing scattered soundings of two-way traveltime [ns], one-way traveltime [ns], or direct ice thickness [m]. Internally, survey soundings are mapped into a standardized array:
-
-<p align="center">
-$$\begin{bmatrix} X & Y & Z_{\text{surface}} & \text{value} & [\text{profile\_id}] \end{bmatrix}$$
-</p>
-
-##### Missing Surface Elevation <i>Z</i><sub>surface</sub> (3- vs. 4-Column Inputs)
-- **3-Column Points [<i>X</i>, <i>Y</i>, value]**: If surface elevation is omitted, `PySole` detects `pts.shape[1] == 3`, interpolates <i>Z</i><sub>surface</sub> from the glacier surface DEM grid (`inputs.dem_path`) at each point coordinate using 2D bilinear interpolation (`scipy.interpolate.RegularGridInterpolator`), and inserts it into Column 2.
-- **4-Column Points [<i>X</i>, <i>Y</i>, <i>Z</i>, value]**: The explicit surface elevation <i>Z</i> provided in the file is preserved directly without modification from the DEM.
-
-##### Header vs. Headerless CSV Parsing
-- **Files WITH a Header Row** (e.g. `profile_id,x,y,z,twt` or `x,y,twt,profile_id`):
-  `PySole` uses [`pandas`](https://pandas.pydata.org) to locate the profile column matching `inputs.survey_profile_column` (default: `"profile_id"`). The profile column is extracted into an auxiliary array and dropped by name, allowing arbitrary column ordering in the source CSV. The remaining columns are parsed into numeric coordinates and values, and the profile IDs are appended at Column 4 (index 4). If <i>Z</i><sub>surface</sub> was omitted (e.g. `x,y,twt,profile_id`), dropping the profile column leaves 3 columns, triggering automatic DEM sampling of <i>Z</i><sub>surface</sub> before appending `profile_id`. Discrete profiles with at least 3 unique tracks enable Leave-One-Profile-Out cross-validation (LOPO-CV) in the `Drift Analyzer`.
-- **Files WITHOUT a Header Row (Pure Numeric CSV)**:
-  `PySole` falls back to direct positional reading via [`numpy`](https://numpy.org)'s `loadtxt`. The columns must strictly match standard positional ordering:
-  - 3 columns: [<i>X</i>, <i>Y</i>, value] &rarr; <i>Z</i><sub>surface</sub> interpolated from DEM.
-  - 4 columns: [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value] &rarr; used directly.
-  - 5 columns: [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value, profile_id] &rarr; profile ID placed in the last column.
-
-  Setting `"survey_profile_column": null` in `pysole.json` bypasses searching for column headers and prevents spurious "header not found" warnings on headerless files.
-
-> [!WARNING]
-> **Positional Pitfalls in Headerless Files:**
-> - Placing profile IDs in Column 0 of a headerless file (e.g. `1, 601234.5, 5123456.7, ...`) causes `PySole` to mistake the profile IDs for projected <i>X</i> coordinates, raising a spatial DEM bounds error.
-> - Providing a headerless 4-column file without surface elevation (e.g. `x, y, twt, profile_id`) causes `PySole` to interpret traveltime as surface elevation <i>Z</i><sub>surface</sub> and profile ID as measured traveltime.
-
-> [!TIP]
-> **Rule of Thumb for Survey CSVs:**
-> - **Headerless CSV:** Follow strict positional ordering: `[X, Y, value]`, `[X, Y, Z_surface, value]`, or `[X, Y, Z_surface, value, profile_id]`. Set `"survey_profile_column": null`.
-> - **Header Present:** Column order is flexible. If <i>Z</i><sub>surface</sub> is omitted or `profile_id` is in a non-standard position, always include a header row and set `"survey_profile_column"` to match the header name.
-
 <a id="parsing-rock-outcrops"></a>
-#### 3. Parsing of Rock Outcrop Input Files
+#### 2. Parsing of Rock Outcrop Input Files
 Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>Z</i> = <i>Z</i><sub>Surface</sub>). When boundary conditions are enabled, the perimeters of interior rings are included with <i>T</i> = 0 s or <i>D</i> = 0 m.
 
 For rock outcrop holes to be detected from a Shapefile (`.shp`):
 - **Topology**: Stored as interior rings (`polygon.interiors`) within a `Polygon` / `MultiPolygon` feature (e.g. QGIS "Add Ring" or ArcGIS "Construct Hole").
 - **Winding Order & Validity**: Standard OGC orientation (Clockwise exterior, Counter-Clockwise interior rings) without self-intersections (`validate_and_extract_polygons()` auto-repairs minor topology issues on load).
 - **CRS Alignment**: Must match the DEM raster projection.
+
+<a id="parsing-survey-data-csv"></a>
+#### 3. Parsing of Survey Data CSV Files
+`PySole` ingests point survey datasets (`inputs.survey_data_path`) containing scattered soundings of two-way traveltime [ns], one-way traveltime [ns], or direct ice thickness [m]. Internally, soundings are mapped into a standardized array:
+
+<p align="center">
+$$\begin{bmatrix} X & Y & Z_{\text{surface}} & \text{value} & [\text{profile\_id}] \end{bmatrix}$$
+</p>
+
+- **Missing Surface Elevation <i>Z</i><sub>surface</sub> (3- vs. 4-Column Inputs)**: For 3-column inputs [<i>X</i>, <i>Y</i>, value], `PySole` automatically samples <i>Z</i><sub>surface</sub> from the surface DEM (`inputs.dem_path`) using 2D bilinear interpolation. For 4-column inputs [<i>X</i>, <i>Y</i>, <i>Z</i>, value], the explicit surface elevation <i>Z</i> is preserved directly.
+- **With Header Row** (e.g. `profile_id,x,y,z,twt` or `x,y,twt,profile_id`): `PySole` extracts the profile column matching `inputs.survey_profile_column` (default: `"profile_id"`) by name, enabling arbitrary column ordering and Leave-One-Profile-Out cross-validation (LOPO-CV). If <i>Z</i><sub>surface</sub> is omitted (e.g. `x,y,twt,profile_id`), `PySole` samples <i>Z</i><sub>surface</sub> from the DEM automatically.
+- **Without Header Row (Headerless Numeric CSV)**: Read positionally via `np.loadtxt`. Columns must strictly follow standard positional ordering: [<i>X</i>, <i>Y</i>, value], [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value], or [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value, profile_id]. Setting `"survey_profile_column": null` bypasses header searching and suppresses warnings. Non-standard ordering (e.g. placing profile IDs in Column 0, or omitting <i>Z</i> in a 4-column headerless file) causes positional misinterpretation or spatial DEM bounds errors.
+
+> [!TIP]
+> **Rule of Thumb for Survey CSVs:**
+> - **Headerless CSV:** Follow strict positional ordering `[X, Y, value]`, `[X, Y, Z_surface, value]`, or `[X, Y, Z_surface, value, profile_id]`. Set `"survey_profile_column": null`.
+> - **Header Present:** Column order is flexible. If <i>Z</i><sub>surface</sub> is omitted or `profile_id` is in a non-standard position, always include a header row and set `"survey_profile_column"` to match the header name.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
 #### 4. Wavenumbers and Wavelengths
