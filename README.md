@@ -499,8 +499,10 @@ With all 8 primitives active, the combinatorial space is governed by **three ind
    - `["velocity"]`
    - `["sia", "velocity"]`
    - `["velocity_sia"]` (never combined with `"sia"` or `"velocity"` in the same model because it already couples both)
+
 **Group 2 - Independent scalar rasters** (`"z_dem"`, `"curvature_dem"`, `"mass_balance"` — **2³ = 8 valid states**):
    - From `[]` (no scalar raster term) up to `["z_dem", "curvature_dem", "mass_balance"]` (each of the 3 rasters independently included or excluded).
+
 **Group 3 - Polynomial coordinate trends** (`"linear_xy"`, `"quadratic_xy"` — **3 valid states**):
    - `[]` (no polynomial term), `["linear_xy"]`, or `["quadratic_xy"]` (never combined together because `"quadratic_xy"` already contains the linear [<i>x</i>, <i>y</i>] columns).
 
