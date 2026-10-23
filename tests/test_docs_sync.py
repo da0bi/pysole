@@ -69,7 +69,11 @@ class TestDriftModelListsMatchCode(unittest.TestCase):
 
     def test_readme_documents_combinatorial_breakdown_and_references_guide(self):
         text = read(README)
-        section = text[text.index("#### 7. Universal Kriging Drift Models"):text.index("#### 8. Kriging Uncertainty Derivation")]
+        m_start = re.search(r"#{2,4}\s*7\.\s*Universal Kriging Drift Models", text)
+        m_end = re.search(r"#{2,4}\s*8\.\s*Kriging Uncertainty Derivation", text)
+        self.assertIsNotNone(m_start, "Could not find '7. Universal Kriging Drift Models' heading in README.md")
+        self.assertIsNotNone(m_end, "Could not find '8. Kriging Uncertainty Derivation' heading in README.md")
+        section = text[m_start.start():m_end.start()]
         for term in DRIFT_PRIMITIVES:
             self.assertIn(f'`["{term}"]`', section)
         self.assertEqual(len(build_drift_suite(None)), 24)
