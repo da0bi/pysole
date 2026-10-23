@@ -493,15 +493,15 @@ The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kri
 
 With all 8 primitives active, the combinatorial space is governed by **three independent groups** after applying the two collinearity pruning rules:
 
-1. **Group 1 - SIA & Velocity** (`"sia"`, `"velocity"`, `"velocity_sia"` — **5 valid states**):
+**Group 1 - SIA & Velocity** (`"sia"`, `"velocity"`, `"velocity_sia"` — **5 valid states**):
    - `[]` (no SIA or velocity term)
    - `["sia"]`
    - `["velocity"]`
    - `["sia", "velocity"]`
    - `["velocity_sia"]` (never combined with `"sia"` or `"velocity"` in the same model because it already couples both)
-2. **Group 2 - Independent scalar rasters** (`"z_dem"`, `"curvature_dem"`, `"mass_balance"` — **2³ = 8 valid states**):
+**Group 2 - Independent scalar rasters** (`"z_dem"`, `"curvature_dem"`, `"mass_balance"` — **2³ = 8 valid states**):
    - From `[]` (no scalar raster term) up to `["z_dem", "curvature_dem", "mass_balance"]` (each of the 3 rasters independently included or excluded).
-3. **Group 3 - Polynomial coordinate trends** (`"linear_xy"`, `"quadratic_xy"` — **3 valid states**):
+**Group 3 - Polynomial coordinate trends** (`"linear_xy"`, `"quadratic_xy"` — **3 valid states**):
    - `[]` (no polynomial term), `["linear_xy"]`, or `["quadratic_xy"]` (never combined together because `"quadratic_xy"` already contains the linear [<i>x</i>, <i>y</i>] columns).
 
 In total, **5 × 8 × 3 = 120 candidate models**: selecting `[]` across all three groups yields **Ordinary Kriging** (`[]`), while the remaining **119** combinations are **Universal Kriging drift models** (8 single-drift + 111 multi-drift).
