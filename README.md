@@ -38,9 +38,9 @@
 * **JSON Configuration & Terminal CLI Driven:** All processing workflow options can be defined in a [`pysole.json`](#json-configuration) file and executed via Python Application Programming Interface ([API](#api)) or directly from the terminal using the `pysole` command line interface ([CLI](#cli)).
 * **Multi-Core Parallel Acceleration:** `PySole` supports multi-core CPU parallelization across computationally intensive processing steps.
 * **Automated High-Resolution Diagnostic Plots:** Automatically generates and exports diagnostic figures for each key processing milestone.
-* **5 Supported Digital Elevation Model (DEM) Input and Output Formats:** Seamless loading and exporting of GeoTIFFs (`.tif`), ESRI ASCII Grids (`.asc`, `.txt`), 3-column-CSV matrices (`.csv`, [X, Y, Z]), 2D-CSV matrices (`.csv`, [Z<sub>nx</sub> × Z<sub>ny</sub>]), NumPy binary arrays (`.npy`), and in-memory NumPy 2D arrays (`np.ndarray`) - see [here](#supported-dem-formats) for details.
-* **Strict Coordinate Reference System & Spatial Alignment Verification:** Performs strict verification across all input layers (DEM, boundary outline, survey points). If any layer uses a different Coordinate Reference System (CRS) or falls outside the DEM spatial extent, processing halts with an explicit error.
-* **Flexible Survey Data Types:** `PySole` accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements as survey data type. In case of direct thickness/depth data the 3D migration is automatically skipped.
+* **5 Supported Digital Elevation Model (DEM) Formats:** Seamless loading and exporting of GeoTIFFs (`.tif`), ESRI ASCII Grids (`.asc`, `.txt`), 3-column or 2D CSV grids (`.csv`), NumPy binary arrays (`.npy`), and in-memory 2D arrays (`np.ndarray`) — see [Supported DEM Formats](#supported-dem-formats).
+* **Strict Coordinate Reference System & Spatial Alignment Verification:** Verifies CRS and spatial bounds across all input layers (DEM, boundary outline, survey points, and optional mass balance / velocity rasters), halting with an explicit error on misalignment.
+* **Flexible Survey Data Types:** Accepts one- or two-way signal traveltimes as well as direct thickness/depth measurements (automatically skipping 3D migration when depth data are provided).
 * 💡**DEM Surface Slope Smoothing💡:** The degree of DEM surface slope smoothing is crucial when estimating ice thickness with the <i>Shallow Ice Approximation</i> (SIA), which assumes a constant basal shear stress. By relaxing this rigid baseline constraint, Binder et al. ([2009](https://www.cambridge.org/core/journals/annals-of-glaciology/article/determination-of-total-ice-volume-and-icethickness-distribution-of-two-glaciers-in-the-hohe-tauern-region-eastern-alps-from-gpr-data/9CEE8439239FE7E9199513292C5D3D2F)) derived an objective, field-data-driven optimization criterion for the surface slope smoothing process, which is implemented in `PySole`. The optimal degree of surface slope smoothing is derived by enforcing minimum spatial variance in basal shear stress as the optimization criterion:
   <p align="center">
   $$\min_{k_{\text{c}}} \text{Var}_{xy}(\tau_{\text{b}})$$
@@ -52,13 +52,13 @@
   $$\tau_{\text{b}} = \rho_{\text{ice}} \, g \, D \sin(\alpha)$$
   </p>
 
-  where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, just the product of the two variables ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. The surface DEM is smoothed by low-pass filtering in the frequency domain from which the surface slope field is then derived. The <i>Fast Fourier Transform</i> (FFT) Gaussian low-pass filter is defined by the spatial cutoff wavenumber <i>k</i><sub>c</sub> in radians per meter [rad/m], or optionally, by the more intuitive cutoff wavelength $\lambda_c$ in meters [m] - see [here](#wavenumber-to-wavelength-conversion) for details. The spatial variance of <i>τ</i><sub>b</sub> is then quantified via variogram analysis. An interactive mode allows users to test varying degrees of smoothing across wavenumber, or wavelength, cutoffs and refine the variogram parameters. This surface slope optimization is a cornerstone of `PySole`'s workflow. The resulting optimal surface slope field directly informs subsequent processing stages, including pre- and post-migration interpolation strategies, 3D ray-based migration, and surface curvature estimation. To accelerate the optimization process, both the FFT low-pass filtering and the corresponding product variogram evaluations are executed via multi-threaded CPU parallelization.
-* **3D Ray-Based Migration:** `PySole` features an optional 3D ray-based migration - introduced by Binder et al. ([2009](https://www.cambridge.org/core/journals/annals-of-glaciology/article/determination-of-total-ice-volume-and-icethickness-distribution-of-two-glaciers-in-the-hohe-tauern-region-eastern-alps-from-gpr-data/9CEE8439239FE7E9199513292C5D3D2F)) and engineered specifically to process geophysical signal traveltimes with sparse spatial coverage. The optimally smoothed surface slope field is applied during the 3D migration to ensure numerically stable ray displacement vectors.
-* **Kriging Interpolation:** Provides a native, numerically optimized, and parallelized 2D Kriging algorithm supporting both Ordinary and Universal Kriging - see [here](#dual-kriging-vector-engine) for details. Two interpolation strategies are recommended as a **robust starting baseline**: <i>Ordinary Kriging</i> is initially recommended for interpolating basal shear stress (BSS) derived products based on the assumption of a constant spatial mean (no external drift). <i>Universal Kriging</i> using the Shallow Ice Approximation (`"sia"`) physical drift model is intially recommended for direct interpolation of signal traveltimes or (migrated) depths - see [here](#workflow-and-methodology) for details. When enabled (`calculate_uncertainty: true`), corresponding Kriging estimation uncertainty fields are calculated alongside predicted grids - see [here](#kriging-uncertainty-derivation) for details.
-* **Interactive Drift Analyzer:** A fully automated diagnostic engine to identify the optimal Universal Kriging drift model for each individual survey dataset. Evaluates and ranks the available `PySole` drift models by a suite of statistical metrics, and supports multi-model comparison suites with dedicated diagnostic figure exports and cross-model comparison tables - see [here](docs/drift_analyzer.md) for details.
-* **ML Hole Filling & Geomorphological Margin Blending:** Employs the parallelized [`scikit-learn`](https://scikit-learn.org) Random Forest regression to patch blank regions and ensure complete spatial coverage after Kriging interpolation (optional step). Furthermore, geomorphological margin blending can be applied to smoothly taper bedrock elevations into the surrounding surface DEM terrain.
-* **Final DEMs Spatial Smoothing:** As a post-processing step, spatial smoothing options are available for the calculated DEMs - see [here](#dem-spatial-smoothing) for details.
-* **Survey Planner:** While Kriging uncertainty fields clearly reveal target regions for additional surveys, the `Survey Planner` automatically generates a physically-informed survey layout for future campaigns on unprobed objects. Longitudinal flowline and transverse cross-profile survey tracks are computed based on a SIA thickness model. Exports tracks to field-ready GPX and GeoJSON vector formats along with the SIA modeled thickness map - see [`here`](docs/survey_planner.md) for details.
+  where ice density, <i>ρ</i><sub>ice</sub>, and gravitational acceleration, <i>g</i>, are assumed to be constant. Thus, only the product of ice depth and surface slope, <i>P</i> = <i>D</i> sin(<i>α</i>), is evaluated during the optimization process. The surface DEM is smoothed by Gaussian low-pass filtering in the 2D Fast Fourier Transform (FFT) frequency domain, defined by the spatial cutoff wavenumber <i>k</i><sub>c</sub> [rad/m] or cutoff wavelength <i>λ</i><sub>c</sub> [m] — see [Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion). The spatial variance of <i>τ</i><sub>b</sub> is quantified via variogram analysis, with an optional interactive mode to refine spectral cutoffs and variogram parameters. The resulting optimal surface slope field directly informs pre- and post-migration interpolation, 3D ray-based migration, surface curvature estimation, and flow velocity filtering. Both the FFT low-pass filtering and product variogram evaluations are multi-threaded across CPU cores.
+* **3D Ray-Based Migration:** Optional 3D ray-based migration introduced by Binder et al. ([2009](https://www.cambridge.org/core/journals/annals-of-glaciology/article/determination-of-total-ice-volume-and-icethickness-distribution-of-two-glaciers-in-the-hohe-tauern-region-eastern-alps-from-gpr-data/9CEE8439239FE7E9199513292C5D3D2F)) for sparse geophysical signal traveltimes, using the optimally smoothed surface slope field for numerically stable ray displacement vectors.
+* **Kriging Interpolation:** Native, parallelized 2D Dual Kriging engine supporting Ordinary and Universal Kriging (plus Regression Kriging via `PyKrige`) — see [Dual Kriging Vector Engine](#dual-kriging-vector-engine) and [Baseline Workflow & Methodology](#workflow-and-methodology). Optional Kriging estimation uncertainty fields are evaluated alongside predicted grids when `calculate_uncertainty: true` — see [Kriging Uncertainty Derivation](#kriging-uncertainty-derivation).
+* **Interactive Drift Analyzer:** Automated diagnostic engine that evaluates and ranks up to **120 candidate models** built from 8 physical and spatial drift primitives (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`, `"linear_xy"`, `"quadratic_xy"`) plus Ordinary Kriging, with support for multi-model comparison suites, per-model diagnostic plots, and cross-model comparison tables — see [Drift Analyzer Guide](docs/drift_analyzer.md).
+* **ML Hole Filling & Geomorphological Margin Blending:** Optional [`scikit-learn`](https://scikit-learn.org) Random Forest regression gap filling and geomorphological margin blending to smoothly taper bedrock elevations into surrounding surface DEM terrain.
+* **Final DEMs Spatial Smoothing:** Optional post-processing spatial smoothing (`"gaussian"`, `"median"`, `"fft_lowpass"`) for the calculated thickness and bedrock DEMs — see [Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing).
+* **Survey Planner:** Automatically generates physically-informed longitudinal flowline and transverse cross-profile survey layouts for unprobed glaciers based on a synthetic SIA thickness model, exporting field-ready GPX and GeoJSON tracks — see [Survey Planner Guide](docs/survey_planner.md).
 
 ---
 
@@ -74,48 +74,42 @@
 </p>
 
 #### 1. DEM Loading & Metadata
-Grid spacing (`dx`, `dy`) and spatial bounds are automatically extracted from GeoTIFF and ESRI ASCII DEM metadata headers (and autodetected for 3-column `.csv` tables). If target `dx` and `dy` pixel resolutions are specified, 2D bilinear grid resampling is performed automatically.
-
-For headerless DEM formats (2D `.csv` matrices, `.npy`, or `np.ndarray`), spatial parameters (`origin`, `crs`, `dx`, `dy`) should be provided under `spatial_parameters` to build the spatial metadata object. See [here](#supported-dem-formats) for more details.
+Grid spacing (`dx`, `dy`) and spatial bounds are automatically extracted from GeoTIFF and ESRI ASCII DEM metadata headers (and autodetected for 3-column `.csv` tables). If target `dx` and `dy` pixel resolutions are specified, 2D bilinear grid resampling is performed automatically. For headerless DEM formats (2D `.csv` matrices, `.npy`, or `np.ndarray`), spatial parameters (`origin`, `crs`, `dx`, `dy`) are provided under `spatial_parameters` — see [Supported DEM Formats](#supported-dem-formats).
 
 > [!CAUTION]
-> All input datasets (DEM, survey data, and outline geometries) **must share the same projected, metric coordinate reference system** ( `"crs"`, e.g. 'Universal Transverse Mercator' (UTM)). Geographic coordinates (latitude/longitude in degrees) will cause invalid distance, surface slope, and basal shear stress calculations.
+> All input datasets (DEM, survey data, outline geometries, and optional mass balance / velocity rasters) **must share a projected, metric coordinate reference system** (`"crs"`, e.g. UTM). Geographic coordinates (latitude/longitude in degrees) will cause invalid distance, surface slope, and basal shear stress calculations.
 
 <a id="interpolation-strategies"></a>
 #### 2. Pre-Migration Traveltime Interpolation
-Across spatial wavenumber cutoffs <i>k</i><sub>c</sub>, the point products of traveltime observations and corresponding low-pass filtered surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), are evaluated. Once the optimization criterion is satisfied, the optimally smoothed surface slope field, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), is deployed in the subsequent Kriging interpolation.
-
-While users are free to apply any available interpolation strategy, two **robust baseline interpolation strategies** depending on `pre_migration.interpolation_target` are recommended:
-- **BSS-derived Product `"P"` (Default Baseline)**: `PySole` interpolates <i>P</i><sub>T,i</sub> using <b>Ordinary Kriging</b> (assuming a constant local mean without external drift) with optional zero-traveltime boundary conditions (<i>T</i> = 0 s) to produce the continuous product field <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>). The continuous signal traveltime field <i>T</i>(<i>x</i>,<i>y</i>) is then reconstructed by dividing <i>P</i><sub>T</sub>(<i>x</i>,<i>y</i>) by the optimally smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)):
+Across spatial wavenumber cutoffs <i>k</i><sub>c</sub>, the point products of traveltime observations and corresponding low-pass filtered surface slopes, <i>P</i><sub>T,i</sub> = <i>T</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), are evaluated. Once the minimum-variance optimization criterion is satisfied, the optimally smoothed surface slope field, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) (clamped at `slope_floor_deg`, default <i>5°</i>, to prevent division singularities), is deployed in the subsequent Kriging interpolation:
+- **BSS-derived Product `"P"` (Default Baseline)**: Interpolates <i>P</i><sub>T,i</sub> using <b>Ordinary Kriging</b> (constant local mean without external drift) with optional zero-traveltime boundary conditions (<i>T</i> = 0 s), then reconstructs the continuous traveltime field <i>T</i>(<i>x</i>,<i>y</i>) via slope division:
 
   <p align="center">
   $$T(x,y) = \frac{P_{\text{T}}(x,y)}{\sin(\alpha_{\text{opt}}(x,y))}$$
   </p>
 
-- **Direct `"T"` Baseline**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> using <b>Universal Kriging</b> with the physically-informed <b>SIA drift model</b> ([`["sia"]`](#universal-kriging-drift-models)) by default, modeling the inverse relationship between traveltime and surface slope.
-
-- **Smoothed Surface Slope Safeguard**: A user-defined slope floor (`slope_floor_deg`, default <i>5°</i>) clamps low-gradient slope angles prior to division, preventing numerical singularities.
+- **Direct `"T"` Baseline**: Directly interpolates signal traveltimes <i>T</i><sub>i</sub> using <b>Universal Kriging</b> with the physically-informed [`["sia"]`](#universal-kriging-drift-models) drift model by default (or any candidate selected via the [Drift Analyzer](docs/drift_analyzer.md)).
 
 > [!CAUTION]
-> Avoid interpolating a BSS-derived product target (`"P"`) with Universal Kriging applying the `["sia"]` drift model! This introduces an unphysical $1/\sin^2(\alpha)$ double-scaling artifact that leads to implausibly large values at low slopes. Use `["sia"]` drift only with direct targets (`"T"` or `"D"`).
+> Avoid interpolating a BSS-derived product target (`"P"`) with Universal Kriging using `["sia"]` or `["velocity_sia"]`! Dividing <i>P</i> by sin(<i>α</i><sub>opt</sub>) after fitting an inverse-slope drift introduces an unphysical 1/sin²(<i>α</i>) double-scaling artifact at low slopes. Use `"sia"` and `"velocity_sia"` only with direct targets (`"T"` or `"D"`).
 
 #### 3. 3D Ray-Based Migration
-The migration algorithm solves the Eikonal equation to relocate subsurface reflection points, particularly improving the imaging of steep slopes and overdeepenings. An interactive mode allows users to test different signal propagation velocities and evaluate them through visualizations of migrated depths and the corresponding horizontal survey point displacements induced by the migration process.
+Solves the Eikonal equation to relocate subsurface reflection points along 3D ray paths, improving the imaging of steep valley flanks and basal overdeepenings. An optional interactive mode allows testing different signal propagation velocities and inspecting horizontal survey point displacements.
 
 #### 4. Post-Migration Surface Slope Optimization
-Analogous to the pre-migration optimization pass, `PySole` applies the optimization criterion to determine the post-migration optimally smoothed surface slope, sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)), across spatial wavenumber cutoffs <i>k</i><sub>c</sub>. Here, the optimization evaluates the products of migrated depths and corresponding smoothed surface slopes, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>). The resulting optimal slope field provides the physical basis for the final depth interpolation pass.
+Re-evaluates the spectral optimization criterion on the migrated depths, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), across wavenumber cutoffs <i>k</i><sub>c</sub> to determine the post-migration optimal surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)).
 
 #### 5. Final Depth Interpolation & Uncertainty Display
-Reconstructs continuous thickness <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) fields using one of two robust baseline strategies:
-- **BSS-derived Product `"P"` (Default Baseline)**: Interpolates point products <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) using <b>Ordinary Kriging</b> with optional zero-thickness boundary conditions (<i>D</i> = 0 m). The continuous product field <i>P</i><sub>D</sub>(<i>x</i>,<i>y</i>) is then divided by the optimally smoothed surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) to produce the final depth field <i>D</i>(<i>x</i>,<i>y</i>):
+Reconstructs continuous ice thickness <i>D</i>(<i>x</i>,<i>y</i>) and bedrock elevation <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) using either:
+- **BSS-derived Product `"P"` (Default Baseline)**: Interpolates <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>opt,i</sub>) via <b>Ordinary Kriging</b> (with optional <i>D</i> = 0 m boundary conditions) and divides by sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)):
 
   <p align="center">
   $$D(x,y) = \frac{P_{\text{D}}(x,y)}{\sin(\alpha_{\text{opt}}(x,y))}$$
   </p>
 
-- **Direct `"D"` Baseline**: Directly interpolates (migrated) survey point depths <i>D</i><sub>i</sub> using <b>Universal Kriging</b> with the physically-informed <b>SIA drift model</b> ([`["sia"]`](#universal-kriging-drift-models)) by default.
+- **Direct `"D"` Baseline**: Directly interpolates (migrated) depths <i>D</i><sub>i</sub> using <b>Universal Kriging</b> (defaulting to [`["sia"]`](#universal-kriging-drift-models), or evaluated across up to 120 drift models with the [Drift Analyzer](docs/drift_analyzer.md)).
 
-When uncertainty evaluation is enabled (`calculate_uncertainty: true`), the Kriging estimation variance is converted to standard error in meters ($\sigma_{\text{depth}} = \sqrt{\sigma^2}$) to map spatial depth uncertainty across the entire domain - see [here](#kriging-uncertainty-derivation) for details.
+When `calculate_uncertainty: true`, Kriging estimation variance is converted to standard error (<i>σ</i><sub>D</sub> = √<i>σ</i>²) to map spatial thickness uncertainty and total volume uncertainty — see [Kriging Uncertainty Derivation](#kriging-uncertainty-derivation).
 
 ---
 
@@ -258,9 +252,9 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `survey_data_type` | `str` | `"one_way_traveltime"` | Observation data type: `"one_way_traveltime"`, `"two_way_traveltime"`, or `"depth"` (skips 3D migration). |
 | | `survey_profile_column` | `str` | `null` | Optional column name in the imported survey dataset CSV (`inputs.survey_data_path`) specifying survey line / profile IDs for the Drift Analyzer's <i>Leave-One-Profile-Out</i> (LOPO) cross-validation. |
 | | `mass_balance_path` | `str` | `null` | Optional file path to a decadal-mean surface mass balance raster (`.tif`, `.asc`, `.csv`, `.npy`). Automatically co-registered to the DEM grid (kept unsmoothed to preserve local debris/avalanche features). Enables the `"mass_balance"` drift term and serves as an additional feature in Random Forest gap filling. |
-| | `velocity_path` | `str` | `null` | Optional file path to a decadal-mean surface flow velocity magnitude raster (`.tif`, `.asc`, `.csv`, `.npy`). Automatically co-registered to the DEM grid, zero-clamped outside the glacier outline, and spectrally low-pass filtered at optimal $k_c$. Enables the `"velocity"` and `"velocity_sia"` drift terms and serves as an additional feature in Random Forest gap filling. |
-| | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (`900.0` kg/m³ for temperate glacier ice by default). Used to calculate basal shear stress $\tau_{\text{b}}$. |
-| | `g` | `float` | `9.81` | Gravitational acceleration constant in m/s² (`9.81` m/s²). Used to calculate basal shear stress $\tau_{\text{b}}$. |
+| | `velocity_path` | `str` | `null` | Optional file path to a decadal-mean surface flow velocity magnitude raster (`.tif`, `.asc`, `.csv`, `.npy`). Automatically co-registered to the DEM grid, zero-clamped outside the glacier outline, and spectrally low-pass filtered at optimal <i>k</i><sub>c</sub>. Enables the `"velocity"` and `"velocity_sia"` drift terms and serves as an additional feature in Random Forest gap filling. |
+| | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (`900.0` kg/m³ for temperate glacier ice by default). Used to calculate basal shear stress <i>τ</i><sub>b</sub>. |
+| | `g` | `float` | `9.81` | Gravitational acceleration constant in m/s² (`9.81` m/s²). Used to calculate basal shear stress <i>τ</i><sub>b</sub>. |
 | | `n_cores` | `int` | `-1` | Number of CPU cores applied across all parallelized processes (`-1` for all available cores). |
 | | `log_level` | `str` | `"INFO"` | Package logging level verbosity: `"INFO"` (default), `"DEBUG"`, `"WARNING"`, `"ERROR"`, or `"CRITICAL"`. Appends timestamped logs to `pysole.log`. |
 | | `show_progress` | `bool` | `true` | If `true` (default), displays terminal progress bars during heavy processing steps. Set automatically to `false` if running `PySole` in batch processing scripts. |
@@ -274,30 +268,30 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual migrated depths and horizontal displacement vector plots. |
 | | `horizontal_displacement_visualization` | `str` | `"arrows"` | Horizontal displacement visualization mode: `"arrows"` (default, quiver displacement vectors overlaid on traveltime grid) or `"grad_traveltime_grid"` (displays traveltime field without arrows, and creates a companion figure `##_<output_prefix>_3d_migration_hor_displacements.png` showing traveltime gradient grid and original and migrated survey points). |
 | **`optimization_parameters`** | `fft_filter_metric` | `str` | `"wavenumber"` | Frequency spectrum filter metric: `"wavenumber"` [rad/m] or `"wavelength"` [m]. |
-| | `kc_max` | `float` | `null` | Maximum corner frequency cutoff $k_{\text{c,max}}$ in [rad/m]. If `null`, defaults to grid Nyquist wavenumber $k_{\text{Nyquist}}$. For full details, see [here](#wavenumber-to-wavelength-conversion). |
-| | `kc_min` | `float` | `null` | Minimum corner frequency cutoff $k_{\text{c,min}}$ in [rad/m]. If `null`, defaults to half of the DEM extent. For full details, see [here](#wavenumber-to-wavelength-conversion).|
-| | `lambda_min` | `float` | `null` | Minimum spatial cutoff wavelength $\lambda_{\text{min}}$ in [m]. If `null`, falls back directly to `kc_max`. For full details, see [here](#wavenumber-to-wavelength-conversion). |
-| | `lambda_max` | `float` | `null` | Maximum spatial cutoff wavelength $\lambda_{\text{max}}$ in [m]. If `null`, falls back directly to `kc_min`. For full details, see [here](#wavenumber-to-wavelength-conversion). |
-| | `n_steps` | `int` | `null` | Number of evaluation steps across $k_{\text{c}}$ spectrum using logarithmic/geometric spacing (`np.geomspace`). If `null`, dynamically calculated from DEM grid dimensions and constrained by $[10, 50]$. For full details, see [here](#wavenumber-to-wavelength-conversion). |
+| | `kc_max` | `float` | `null` | Maximum corner frequency cutoff <i>k</i><sub>c,max</sub> in [rad/m]. If `null`, defaults to grid Nyquist wavenumber <i>k</i><sub>Nyquist</sub>. For full details, see [here](#wavenumber-to-wavelength-conversion). |
+| | `kc_min` | `float` | `null` | Minimum corner frequency cutoff <i>k</i><sub>c,min</sub> in [rad/m]. If `null`, defaults to half of the DEM extent. For full details, see [here](#wavenumber-to-wavelength-conversion).|
+| | `lambda_min` | `float` | `null` | Minimum spatial cutoff wavelength <i>λ</i><sub>min</sub> in [m]. If `null`, falls back directly to `kc_max`. For full details, see [here](#wavenumber-to-wavelength-conversion). |
+| | `lambda_max` | `float` | `null` | Maximum spatial cutoff wavelength <i>λ</i><sub>max</sub> in [m]. If `null`, falls back directly to `kc_min`. For full details, see [here](#wavenumber-to-wavelength-conversion). |
+| | `n_steps` | `int` | `null` | Number of evaluation steps across <i>k</i><sub>c</sub> spectrum using logarithmic/geometric spacing (`np.geomspace`). If `null`, dynamically calculated from DEM grid dimensions and constrained by [10, 50]. For full details, see [here](#wavenumber-to-wavelength-conversion). |
 | | `nrbins` | `int` | `null` | Number of variogram lag distance bins. If `null` (default), dynamically calculated to receive ~30 point pairs per bin. The number of bins is constrained by a maximum of 30 and an absolute minimum of 3 bins. For full details, see [here](#variogram-binning). |
 | | `slope_floor_deg` | `float` | `5.0` | Minimum surface slope angle threshold in degrees [°] enforced during surface slope optimization to prevent numerical division singularities. |
 | | `interactive_optimization` | `bool` | `false` | If `true`, enables interactive CLI prompt to inspect BSS variance curve and adjust corner frequency spectrum parameters (`kc_min`, `kc_max`, `lambda_min`, `lambda_max`, `n_steps`), lag distance bin count (`nrbins`), and correlation range (`a_range`). |
 | **`kriging_parameters`** | `engine` | `str` | `"native"` | Kriging calculation engine: `"native"` (default, high-performance Dual Kriging solver) or `"pykrige"` (uses external [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige) package - optional dependency in `pyproject.toml`). Both engines support `"ordinary"` and `"universal"` with every drift term, however, it is recommended to use the numerically optimized `"native"` engine. `"regression"` is only available through `PyKrige` (if `engine` is `"native"` automatically switches to `"pykrige"` and posts a log message). See the [engine support matrix](#how-drift-terms-is-interpreted) below. |
 | | `max_memory_fraction` | `float` | `0.5` | Fraction of the available RAM (`0 < f ≤ 0.9`) that the native Kriging solver may use. If the estimate exceeds it, the worker threads are reduced first; the Kriging variance is skipped only as a last resort. Also available as `Solver(max_memory_fraction=...)`. See [here](#memory-guard-and-uncertainty) for details. |
 | | `pre_migration` | `dict` | *Sub-section* | Configuration for pre-migration traveltime field, <i>T</i>(<i>x</i>,<i>y</i>), interpolation. |
-| | `pre_migration.interpolation_target` | `str` | `"P"` | Pre-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>T</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct signal traveltimes (<i>T</i><sub>i</sub>). |
-| | `pre_migration.method` | `str` | *by target* | Kriging approach: `"ordinary"` (constant mean, the default for `pre_migration.interpolation_target`: `"P"`), `"universal"` (external drift, the default for `pre_migration.interpolation_target`: `"T"`) or `"regression"` (only through `PyKrige`). `"ordinary"` overrides `pre_migration.drift_analyzer` and `pre_migration.drift_terms`: both are ignored and one warning is logged. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
-| | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, the `Drift Analyzer` cross-validates all candidate drift models of `method: "universal"` and lets you choose in the terminal (batch mode: the best-ranked one) and applies the model  - see [here](docs/drift_analyzer.md) for full details. `drift_terms` then define the candidate suite (`null`: the default suite of 24 candidates, expanding to 48, 60, or 120 candidates when `mass_balance_path` and/or `velocity_path` are provided). Skipped with a warning for `"regression"`, ignored for `"ordinary"`; overridden (log info) if `drift_terms` define exactly one candidate - see [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. |
-| | `pre_migration.drift_terms` | `list[str]` / `null` | `null` | `null` or a flat/nested list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`, `"linear_xy"`, `"quadratic_xy"`. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. All single and multi drift models are described [here](#universal-kriging-drift-models). |
-| | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). Note: `"linear"` is only supported under `engine: "pykrige"`. For `engine: "native"`, `"linear"` automatically falls back to `"spherical"`. |
+| | `pre_migration.interpolation_target` | `str` | `"P"` | Pre-migration interpolation target: `"P"` for BSS-derived products (<i>P</i> = <i>T</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"T"` for direct signal traveltimes (<i>T</i><sub>i</sub>). |
+| | `pre_migration.method` | `str` | *by target* | Kriging approach: `"ordinary"` (constant mean, default for `"P"`), `"universal"` (external drift, default for `"T"`), or `"regression"` (only available through `PyKrige`). `"ordinary"` overrides `pre_migration.drift_analyzer` and `pre_migration.drift_terms` (both are ignored with a warning). See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
+| | `pre_migration.drift_analyzer` | `bool` | `false` | If `true`, the [Drift Analyzer](docs/drift_analyzer.md) cross-validates candidate drift models for `method: "universal"` and prompts for selection (batch mode selects the top-ranked model). When `drift_terms` is `null`, evaluates the dynamic default suite (24, 48, 60, or 120 candidates depending on `mass_balance_path` and `velocity_path`). Ignored for `"ordinary"`, skipped with a warning for `"regression"`, and auto-disabled if `drift_terms` defines a single candidate. |
+| | `pre_migration.drift_terms` | `list` / `null` | `null` | `null` or a flat/nested list of primitives (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`, `"linear_xy"`, `"quadratic_xy"`). See [Universal Kriging Drift Models](#universal-kriging-drift-models) and [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
+| | `pre_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). `"linear"` is only supported under `engine: "pykrige"` (falls back to `"spherical"` under `"native"`). |
 | | `pre_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero traveltime boundary points (<i>T</i> = 0 s) along the perimeter and rock outcrop margin outline(s). |
 | | `pre_migration.calculate_uncertainty` | `bool` | `false` | If `true`, computes the Kriging estimation variance during pre-migration Kriging. Defaults to `false` to save computational time. |
 | | `post_migration` | `dict` | *Sub-section* | Configuration for final bedrock depth, <i>D</i>(<i>x</i>,<i>y</i>), interpolation. |
-| | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation targets: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"D"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
-| | `post_migration.method` | `str` | *by target* |  Kriging approach: `"ordinary"` (constant mean, the default for `post_migration.interpolation_target`: `"P"`), `"universal"` (external drift, the default for `post_migration.interpolation_target`: `"T"`) or `"regression"` (only through `PyKrige`). `"ordinary"` overrides `post_migration.drift_analyzer` and `post_migration.drift_terms`: both are ignored and one warning is logged. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
-| | `post_migration.drift_analyzer` | `bool` | `false` |  If `true`, the `Drift Analyzer` cross-validates all candidate drift models of `method: "universal"` and lets you choose in the terminal (batch mode: the best-ranked one) and applies the model  - see [here](docs/drift_analyzer.md) for full details. `drift_terms` then define the candidate suite (`null`: the default suite of 24 candidates, expanding to 48, 60, or 120 candidates when `mass_balance_path` and/or `velocity_path` are provided). Skipped with a warning for `"regression"`, ignored for `"ordinary"`; overridden (log info) if `drift_terms` define exactly one candidate - see [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. |
-| | `post_migration.drift_terms` | `list[str]` / `null` | `null` |  `null` or a flat/nested list of the primitive terms `"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`, `"linear_xy"`, `"quadratic_xy"`. See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted) for full details. All single and multi drift models are described [here](#universal-kriging-drift-models). |
-| | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). Note: `"linear"` is only supported under `engine: "pykrige"`. For `engine: "native"`, `"linear"` automatically falls back to `"spherical"`. |
+| | `post_migration.interpolation_target` | `str` | `"P"` | Post-migration interpolation target: `"P"` for BSS-derived products (<i>P</i> = <i>D</i><sub>i</sub> · sin <i>α</i><sub>opt, i</sub>, default) or `"D"` for direct (migrated) depths (<i>D</i><sub>i</sub>). |
+| | `post_migration.method` | `str` | *by target* | Kriging approach: `"ordinary"` (constant mean, default for `"P"`), `"universal"` (external drift, default for `"D"`), or `"regression"` (only available through `PyKrige`). `"ordinary"` overrides `post_migration.drift_analyzer` and `post_migration.drift_terms` (both are ignored with a warning). See [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
+| | `post_migration.drift_analyzer` | `bool` | `false` | If `true`, the [Drift Analyzer](docs/drift_analyzer.md) cross-validates candidate drift models for `method: "universal"` and prompts for selection (batch mode selects the top-ranked model). When `drift_terms` is `null`, evaluates the dynamic default suite (24, 48, 60, or 120 candidates depending on `mass_balance_path` and `velocity_path`). Ignored for `"ordinary"`, skipped with a warning for `"regression"`, and auto-disabled if `drift_terms` defines a single candidate. |
+| | `post_migration.drift_terms` | `list` / `null` | `null` | `null` or a flat/nested list of primitives (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`, `"linear_xy"`, `"quadratic_xy"`). See [Universal Kriging Drift Models](#universal-kriging-drift-models) and [How `drift_terms` is interpreted](#how-drift-terms-is-interpreted). |
+| | `post_migration.variogram_model` | `str` | `"spherical"` | Theoretical variogram model (`"spherical"`, `"exponential"`, `"gaussian"`, `"linear"`). `"linear"` is only supported under `engine: "pykrige"` (falls back to `"spherical"` under `"native"`). |
 | | `post_migration.include_zero_boundary_condition` | `bool` | `true` | If `true` (default), includes zero thickness boundary points (<i>D</i> = 0 m) along the perimeter and rock outcrop margin outline(s). |
 | | `post_migration.calculate_uncertainty` | `bool` | `false` | If `true`, computes the Kriging estimation variance during post-migration Kriging. Defaults to `false` to save computational time. |
 | **`finalization_parameters`** | `interactive_finalization` | `bool` | `false` | If `true`, enables interactive terminal prompts to inspect and adjust finalization parameters (smoothing, RF gap filling, margin blending) with real-time figure 07 refresh before finalizing. |
@@ -332,505 +326,278 @@ All execution options can be fully defined in a single JSON configuration file, 
 `PySole` supports 5 distinct DEM formats:
 
 - **GeoTIFF (`.tif`, `.tiff`, `.geotiff`)**: *Recommended*. Automatically extracts spatial bounds, CRS, pixel resolution, and `nodata` values using [`rasterio`](https://rasterio.readthedocs.io).
-- **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format. Automatically extracts `ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, and `nodata_value`. It is recommended to explicitly define the coordinate reference system using the `crs` parameter inside `spatial_parameters`.
-- **CSV Grid (`.csv`)**: Supports both **2D elevation matrices** ([Z<sub>nx</sub> × Z<sub>ny</sub>]) and **3-column XYZ grid tables** ([X, Y, Z]). For 3-column tables, cell spacing (`dx`, `dy`) and bounds are automatically inferred. However, it is recommended to explicitly define the coordinate reference system using the `crs` parameter. For 2D matrices, metadata is built from `spatial_parameters`.
-- **NumPy Binary Array (`.npy`)**: Fast 2D binary array format. Spatial metadata (`origin`, `crs`, `dx`, `dy`) is defined via `spatial_parameters`.
-- **NumPy 2D Array (`np.ndarray`)**: In-memory array passed directly into the `Solver` constructor (`dem=dem_grid`). Spatial metadata is defined via `spatial_parameters`.
+- **ESRI ASCII Grid (`.asc`, `.txt`)**: Standard 6-line header GIS raster format (`ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, `nodata_value`). Explicitly defining `spatial_parameters.crs` is recommended.
+- **CSV Grid (`.csv`)**: Supports both **2D elevation matrices** ([Z<sub>nx</sub> × Z<sub>ny</sub>], metadata from `spatial_parameters`) and **3-column XYZ grid tables** ([X, Y, Z], spacing and bounds inferred automatically).
+- **NumPy Binary Array (`.npy`)**: Fast 2D binary array format; spatial metadata (`origin`, `crs`, `dx`, `dy`) defined via `spatial_parameters`.
+- **NumPy 2D Array (`np.ndarray`)**: In-memory array passed directly into the `Solver` constructor (`dem=dem_grid`); spatial metadata defined via `spatial_parameters`.
 
 <a id="parsing-rock-outcrops"></a>
 #### 2. Parsing of Rock Outcrop Input Files
-Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>Z</i> = <i>Z</i><sub>Surface</sub>). When boundary conditions are enabled, the perimeters of interior rings are included, applying <i>T</i> = 0 s or <i>D</i> = 0 m.
+Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>Z</i> = <i>Z</i><sub>Surface</sub>). When boundary conditions are enabled, the perimeters of interior rings are included with <i>T</i> = 0 s or <i>D</i> = 0 m.
 
-For rock outcrop holes to be detected correctly from a Shapefile (`.shp`):
-
-- **Topology**: The outcrop must be stored as an interior ring (`polygon.interiors`) within a single `Polygon` / `MultiPolygon` feature (e.g. created using QGIS "Add Ring" or ArcGIS "Construct Hole").
-- **Winding Order**: Standard OGC orientation (Clockwise exterior boundary, Counter-Clockwise interior hole rings).
-- **CRS Alignment**: The shapefile's Coordinate Reference System must match the DEM raster projection.
-- **Valid Geometries**: Rings must not intersect themselves (`PySole` automatically executes `validate_and_extract_polygons()` on load to auto-repair geometries or fall back to the outer boundary shell if holes fail criteria).
+For rock outcrop holes to be detected from a Shapefile (`.shp`):
+- **Topology**: Stored as interior rings (`polygon.interiors`) within a `Polygon` / `MultiPolygon` feature (e.g. QGIS "Add Ring" or ArcGIS "Construct Hole").
+- **Winding Order & Validity**: Standard OGC orientation (Clockwise exterior, Counter-Clockwise interior rings) without self-intersections (`validate_and_extract_polygons()` auto-repairs minor topology issues on load).
+- **CRS Alignment**: Must match the DEM raster projection.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
 #### 3. Wavenumbers and Wavelengths
-In `PySole`, 2D spatial Gaussian low-pass smoothing operates in the physical 2D spatial frequency domain. Spatial wavenumber components along orthogonal grid axes $X$ and $Y$ are constructed in physical units of **[radians per meter]** as:
+In `PySole`, 2D spatial Gaussian low-pass smoothing operates in the physical 2D spatial frequency domain with wavenumber components <i>k</i><sub>x</sub>, <i>k</i><sub>y</sub> [rad/m] and magnitude <i>k</i> = √(<i>k</i><sub>x</sub>² + <i>k</i><sub>y</sub>²):
 
 <p align="center">
-$$\begin{aligned}
-k_x &= 2\pi \cdot f_{x,\text{phys}} = \frac{2\pi \cdot \text{fftfreq}(N_x)}{dx} \quad [\text{rad/m}] \\
-k_y &= 2\pi \cdot f_{y,\text{phys}} = \frac{2\pi \cdot \text{fftfreq}(M_y)}{dy} \quad [\text{rad/m}]
-\end{aligned}$$
+$$k_x = \frac{2\pi \cdot \text{fftfreq}(N_x)}{dx}, \quad k_y = \frac{2\pi \cdot \text{fftfreq}(M_y)}{dy}, \quad k_c = \frac{2\pi}{\lambda_c} \Longleftrightarrow \lambda_c = \frac{2\pi}{k_c}$$
 </p>
 
-where $dx, dy$ are spatial grid cell resolutions in **[meters]**, and $N_x, M_y$ are grid dimensions. The 2D spatial wavenumber magnitude is $k = \sqrt{k_x^2 + k_y^2}$ [rad/m].
+where <i>dx</i>, <i>dy</i> [m] are grid cell resolutions and <i>N</i><sub>x</sub>, <i>M</i><sub>y</sub> are grid dimensions. For a DEM with <i>dx</i> = <i>dy</i> = 5.0 m, the Nyquist wavelength is <i>λ</i><sub>Nyquist</sub> = 2 · min(|<i>dx</i>|, |<i>dy</i>|) = <b>10.0 m</b> (<i>k</i><sub>Nyquist</sub> = <i>π</i> / 5.0 ≈ <b>0.6283 rad/m</b>):
 
-Physical angular wavenumber $k_c$ [rad/m] relates directly to physical spatial wavelength $\lambda_c$ [meters] via the fundamental physical relationship:
-
-<p align="center">
-$$k_c = \frac{2\pi}{\lambda_c} \quad \Longleftrightarrow \quad \lambda_c = \frac{2\pi}{k_c}$$
-</p>
-
-#### Concrete Calculation Example
-For a DEM with spatial resolution $dx = 5.0\text{ m}, dy = 5.0\text{ m}$:
-- **Minimum Physical Nyquist Wavelength**: $\lambda_{\text{Nyquist}} = 2 \cdot \min(dx, dy) = 2 \cdot 5.0\text{ m} = \mathbf{10.0\text{ m}}$ (the shortest feature resolvable on a 5m grid).
-- **Maximum Physical Nyquist Wavenumber**: $k_{\text{Nyquist}} = \frac{2\pi}{\lambda_{\text{Nyquist}}} = \frac{\pi}{5.0} \approx \mathbf{0.6283\text{ rad/m}}$.
-
-| Cutoff Wavenumber $k_c$ [rad/m] | Spatial Wavelength $\lambda_c$ [m] | Surface Feature Scale |
+| Cutoff Wavenumber <i>k</i><sub>c</sub> [rad/m] | Spatial Wavelength <i>λ</i><sub>c</sub> [m] | Surface Feature Scale |
 | :--- | :--- | :--- |
-| **$k_{\text{Nyquist}} \approx 0.6283\text{ rad/m}$** | $\mathbf{10.0\text{ m}}$ | Nyquist limit ($2 \cdot \min(dx, dy)$, finest resolvable feature) |
-| **$0.3142\text{ rad/m}$** | $\mathbf{20.0\text{ m}}$ | Fine spatial smoothing (filters features $< 20\text{ m}$) |
-| **$0.1257\text{ rad/m}$** | $\mathbf{50.0\text{ m}}$ | Medium-fine spatial smoothing |
-| **$0.0628\text{ rad/m}$** | $\mathbf{100.0\text{ m}}$ | Medium spatial smoothing |
-| **$0.0314\text{ rad/m}$** | $\mathbf{200.0\text{ m}}$ | Broad spatial smoothing |
-| **$0.0100\text{ rad/m}$** | $\mathbf{628.3\text{ m}}$ | Very broad regional smoothing |
+| **<i>k</i><sub>Nyquist</sub> ≈ 0.6283 rad/m** | **10.0 m** | Nyquist limit (2 · min(|<i>dx</i>|, |<i>dy</i>|), finest resolvable feature) |
+| **0.3142 rad/m** | **20.0 m** | Fine spatial smoothing (filters features &lt; 20 m) |
+| **0.1257 rad/m** | **50.0 m** | Medium-fine spatial smoothing |
+| **0.0628 rad/m** | **100.0 m** | Medium spatial smoothing |
+| **0.0314 rad/m** | **200.0 m** | Broad spatial smoothing |
+| **0.0100 rad/m** | **628.3 m** | Very broad regional smoothing |
 
 *Table 1: Physical Reference Conversion Table.*
 
-#### Derivation of FFT Filter Parameter Defaults
+##### Derivation of FFT Filter Parameter Defaults
+When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` derives defaults from the grid resolution and maximum domain extent <i>L</i><sub>max</sub> = max(<i>N</i><sub>x</sub> · |<i>dx</i>|, <i>M</i><sub>y</sub> · |<i>dy</i>|):
+- **Maximum Wavenumber `kc_max` / Minimum Wavelength `lambda_min`**: Defaults to the Nyquist limit <i>k</i><sub>c,max</sub> = <i>k</i><sub>Nyquist</sub> = <i>π</i> / min(|<i>dx</i>|, |<i>dy</i>|) (<i>λ</i><sub>min</sub> = 2 · min(|<i>dx</i>|, |<i>dy</i>|)). Custom `lambda_min` converts via <i>k</i><sub>c,max</sub> = 2<i>π</i> / <i>λ</i><sub>min</sub>.
+- **Minimum Wavenumber `kc_min` / Maximum Wavelength `lambda_max`**: Defaults to the half-domain limit <i>k</i><sub>c,min</sub> = 4<i>π</i> / <i>L</i><sub>max</sub> (<i>λ</i><sub>max</sub> = <i>L</i><sub>max</sub> / 2). Custom `lambda_max` converts via <i>k</i><sub>c,min</sub> = 2<i>π</i> / <i>λ</i><sub>max</sub>.
+- **Evaluation Step Count `n_steps`**: Counts the integer Fourier modes across [<i>k</i><sub>c,min</sub>, <i>k</i><sub>c,max</sub>] clamped to [10, 50] and spaced geometrically (`np.geomspace`):
+  <p align="center">
+  $$n_{\text{steps}} = \min\left(50,\ \max\left(10,\ \left\lfloor \frac{(k_{\text{c,max}} - k_{\text{c,min}}) \cdot L_{\text{max}}}{2\pi} \right\rfloor\right)\right)$$
+  </p>
 
-When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `null` in `pysole.json`, `PySole` dynamically derives physically sound parameter defaults based on the DEM spatial resolution (&Delta;<i>x</i>, &Delta;<i>y</i>) and total domain extent (<i>L</i><sub>max</sub> = max(<i>N</i><sub>x</sub> &middot; |<i>dx</i>|, <i>M</i><sub>y</sub> &middot; |<i>dy</i>|)). The DEM spatial boundaries as well as the active cutoff wavenumbers ($k_{\text{c,min}}$, $k_{\text{Nyquist}}$) and wavelengths ($\lambda_{\text{Nyquist}}$, $\lambda_{\text{c,max}}$) defining the default spectral search range are logged to the console and in `pysole.log`.
-
-- **Maximum Frequency Cutoff <i>k</i><sub>c,max</sub> and Minimum Wavelength <i>&lambda;</i><sub>min</sub>**:
-   - **`kc_max` Default**: Defaults to the spatial Nyquist wavenumber limit of the DEM grid:
-     <p align="center">
-     $$k_{\text{c,max}} = k_{\text{Nyquist}} = \frac{\pi}{\min(|dx|, |dy|)} \quad [\text{rad/m}]$$
-     </p>
-   - **`lambda_min` Wavelength Metric & Fallback**: If the user provides a custom <i>&lambda;</i><sub>min</sub> [m], it converts directly to wavenumber as <i>k</i><sub>c,max</sub> = 2&pi; / <i>&lambda;</i><sub>min</sub> for the FFT filtering. When `lambda_min` is `null` (or when `fft_filter_metric = "wavelength"` with `null` `lambda_min`), `PySole` falls back directly to `kc_max` (<i>k</i><sub>Nyquist</sub>).
-
-- **Minimum Frequency Cutoff <i>k</i><sub>c,min</sub> and Maximum Wavelength <i>&lambda;</i><sub>max</sub>**:
-   - **`kc_min` Default (Half-Domain Limit)**: Defaults to the Half-Domain scaling limit:
-     <p align="center">
-     $$k_{\text{c,min}} = \frac{4\pi}{L_{\text{max}}} \quad [\text{rad/m}]$$
-     </p>
-     This constrains the maximum filter wavelength to half the physical DEM extent (<i>&lambda;</i><sub>max</sub> = <i>L</i><sub>max</sub> / 2).
-   - **`lambda_max` Wavelength Metric & Fallback**: If the user provides a custom <i>&lambda;</i><sub>max</sub> [m], it converts directly to wavenumber as <i>k</i><sub>c,min</sub> = 2&pi; / <i>&lambda;</i><sub>max</sub> for the FFT filtering. When `lambda_max` is `null`, `PySole` falls back directly to `kc_min` (4&pi; / <i>L</i><sub>max</sub>).
-
-- **Evaluation Step Count `n_steps` (Discrete Fourier Mode Counting)**:
-   - When `n_steps` is `null`, `PySole` dynamically calculates the number of integer Fourier modes spanning the frequency search range [<i>k</i><sub>c,min</sub>, <i>k</i><sub>c,max</sub>] over the maximum domain length <i>L</i><sub>max</sub>:
-     <p align="center">
-     $$n_{\text{modes}} = \left\lfloor \frac{(k_{\text{c,max}} - k_{\text{c,min}}) \cdot L_{\text{max}}}{2\pi} \right\rfloor$$
-     </p>
-   - The evaluation step count is then dynamically constrained between a minimum floor of 10 steps and a maximum ceiling of 50 steps:
-     <p align="center">
-     $$n_{\text{steps}} = \min(50,\ \max(10,\ n_{\text{modes}}))$$
-     </p>
-   - The candidate corner frequency vector <b>k</b><sub>c</sub> is generated as a logarithmically/geometrically spaced array (`np.geomspace`) from <i>k</i><sub>c,max</sub> down to <i>k</i><sub>c,min</sub> with <i>n</i><sub>steps</sub> evaluation passes.
-
-After completion of each DEM surface slope optimization process, both $k_{\text{c, opt}}$ [rad/m] and $\lambda_{\text{c, opt}}$ [m] are logged to the console and in `pysole.log`.
+After each surface slope optimization pass, both <i>k</i><sub>c,opt</sub> [rad/m] and <i>λ</i><sub>c,opt</sub> [m] are logged to the console and `pysole.log`.
 
 <a id="variogram-binning"></a>
 #### 4. Variogram Binning with Minimum Pair Threshold
-Experimental variogram lag distance bins are calculated from the pairwise Euclidean distances across a total of $N$ survey points. Users can specify a fixed number of lag bins via `nrbins` under `optimization_parameters` in `pysole.json`, or during the `interactive_optimization` procedure. When `nrbins` is set to `null` (default), PySole determines the bin count from the number of point pairs that actually fall inside the variogram range, i.e. pairs whose separation is at most $h_{\text{max}}$ (by default half of the maximum pairwise distance):
+Experimental variogram lag distance bins are calculated from pairwise Euclidean distances across <i>N</i> survey points. When `nrbins` is `null` (default), `PySole` sets the bin count from the number of point pairs within the variogram range <i>h</i> ≤ <i>h</i><sub>max</sub> (half of the maximum pairwise distance) to ensure at least **30 point pairs per bin** (Webster & Oliver, 2007), bounded to [3, 30]:
 
 $$
 \text{nrbins} = \min\left(30,\ \max\left(3,\ \left\lfloor \frac{N_{\text{pairs}}(h \le h_{\text{max}})}{30} \right\rfloor\right)\right)
 $$
 
-Enforcing a minimum threshold of at least **30 point pairs per lag bin** aligns with established geostatistical literature (e.g. Webster and Oliver, 2007), ensuring robust experimental variogram estimation and stable theoretical model curve fitting. The automatic bin count is capped at 30 bins. If a user-specified `nrbins` yields, however, fewer than 30 average point pairs per bin, a diagnostic warning is emitted while honoring the user's explicit bin choice. An absolute lower floor of 3 lag distance bins is enforced across all calculations (including explicit values). For very large surveys ($N > 5000$) the lag statistics are accumulated in chunks and $N_{\text{pairs}} = N(N-1)/2$ is used instead of the in-range pair count.
+If a user-specified `nrbins` yields fewer than 30 average pairs per bin, a warning is logged while honoring the explicit choice (enforcing a floor of 3 bins). For large surveys (<i>N</i> &gt; 5000), lag statistics are accumulated in chunks using <i>N</i><sub>pairs</sub> = <i>N</i>(<i>N</i> − 1)/2.
 
 <a id="dual-kriging-vector-engine"></a>
 #### 5. High-Performance Dual Kriging Vector Engine
-`PySole` features a native, numerically optimized geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike standard Kriging implementations (Primal Kriging) that solve node-specific linear systems point-by-point for every target grid node (requiring millions of repetitive matrix inversions across a high-resolution DEM), Dual Kriging solves the global linear system only once for the entire sample observation set:
+`PySole` features a native geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike Primal Kriging (which solves a separate linear system at every target grid node), Dual Kriging solves the global (<i>N</i> + <i>L</i>) × (<i>N</i> + <i>L</i>) linear system **once** via LU decomposition (`scipy.linalg.lu_factor`):
 
 <p align="center">
-$$\mathbf{K} \mathbf{w}_z = \mathbf{z}_{\text{aug}}$$
+$$\mathbf{K} \mathbf{w}_z = \mathbf{z}_{\text{aug}}, \qquad Z_{\text{grid}}(x,y) = \mathbf{w}_z \cdot \mathbf{k}_{\text{grid}} = \mathbf{w}_{\text{sample}} \cdot \boldsymbol{\Gamma}_{\text{grid}} + \mathbf{w}_{\text{drift}} \cdot \mathbf{F}_{\text{grid}}$$
 </p>
 
-where:
-- <i>K</i> is the augmented $(N+L) \times (N+L)$ sample-to-sample covariance/variogram matrix.
-- <i>z</i><sub>aug</sub> = [<i>z</i><sub>1</sub>, ..., <i>z</i><sub><i>N</i></sub>, 0, ..., 0]<sup>T</sup> is the observation vector augmented with <i>L</i> zero drift constraints.
-- <i>w</i><sub>z</sub> = [<i>w</i><sub>sample</sub><sup>T</sup>, <i>w</i><sub>drift</sub><sup>T</sup>]<sup>T</sup> = [<i>b</i><sub>1</sub>, ..., <i>b</i><sub><i>N</i></sub>, <i>a</i><sub>1</sub>, ..., <i>a</i><sub><i>L</i></sub>]<sup>T</sup> is the single global dual weight vector solved via *Lower-Upper* (LU) matrix decomposition (`scipy.linalg.lu_factor`).
+where <b>K</b> is the augmented sample variogram and drift matrix, <b>w</b><sub>z</sub> = [<b>w</b><sub>sample</sub><sup>T</sup>, <b>w</b><sub>drift</sub><sup>T</sup>]<sup>T</sup> is the solved global dual weight vector, and <b>k</b><sub>grid</sub> = [<b>Γ</b><sub>grid</sub><sup>T</sup>, <b>F</b><sub>grid</sub><sup>T</sup>]<sup>T</sup> combines the 1D sample-to-grid cross-variogram vector <b>Γ</b><sub>grid</sub> and the drift basis vector <b>F</b><sub>grid</sub> evaluated at (<i>x</i>,<i>y</i>). Point prediction across <i>m</i> grid nodes reduces to an <i>O</i>(<i>N</i> · <i>m</i>) BLAS dot product (~180x speedup over loop-based solvers, interpolating 300,000+ nodes in under 50 ms). The production solver and the `Drift Analyzer` share the same unified `KrigingSystem`.
 
-##### Unified 1D Vector Dot Product Prediction
-Once the global dual weight vector <i>w</i><sub>z</sub> is computed, spatial point estimation at any target grid node (<i>x</i>, <i>y</i>) simplifies to a single *Basic Linear Algebra Subprograms* (BLAS)-accelerated 1D vector dot product of <i>w</i><sub>z</sub> with the target node right-hand-side (RHS) vector <i>k</i><sub>grid</sub>:
-
-<p align="center">
-$$Z_{\text{grid}} = \mathbf{w}_z \cdot \mathbf{k}_{\text{grid}} = \mathbf{w}_{\text{sample}} \cdot \boldsymbol{\Gamma}_{\text{grid}} + \mathbf{w}_{\text{drift}} \cdot \mathbf{F}_{\text{grid}}$$
-</p>
-
-where:
-- <i>Z</i><sub>grid</sub> is the predicted output value (e.g., bedrock elevation or depth) at target grid node (<i>x</i>, <i>y</i>).
-- <i>w</i><sub>z</sub> = [<i>w</i><sub>sample</sub><sup>T</sup>, <i>w</i><sub>drift</sub><sup>T</sup>]<sup>T</sup> is the solved global dual weight vector.
-- <i>k</i><sub>grid</sub> = [<i>Γ</i><sub>grid</sub><sup>T</sup>, <i>F</i><sub>grid</sub><sup>T</sup>]<sup>T</sup> is the augmented target node RHS vector containing:
-  - <i>Γ</i><sub>grid</sub> = [&gamma;(<i>x</i><sub>1</sub>, <i>x</i><sub>grid</sub>), ..., &gamma;(<i>x</i><sub><i>N</i></sub>, <i>x</i><sub>grid</sub>)]<sup>T</sup>: the 1D sample-to-grid cross-variogram vector measuring spatial correlation between each data point and target node (<i>x</i>, <i>y</i>).
-  - <i>F</i><sub>grid</sub> = [<i>f</i><sub>1</sub>(<i>x</i>,<i>y</i>), ..., <i>f</i><sub><i>L</i></sub>(<i>x</i>,<i>y</i>)]<sup>T</sup>: the drift function vector evaluated at target node (<i>x</i>, <i>y</i>) (e.g. constant mean, coordinate trends, or SIA physical ice thickness drift).
-
-##### Thread-Safe Uncertainty Evaluation & Level-3 BLAS Engine
-Kriging estimation variance is optional via `kriging_parameters.pre_migration.calculate_uncertainty` and `kriging_parameters.post_migration.calculate_uncertainty` (both default to `false` to initially save computational time). Dual Kriging point prediction only requires an $O(N \cdot m)$ vector dot product $`\mathbf{w}_z \cdot \mathbf{k}_{\text{grid}}`$, executing in milliseconds. Evaluating spatial estimation variance, however, requires solving a full $(N+L) \times m$ matrix system $`\mathbf{K}^{-1} \mathbf{K}_{\text{rhs}}`$, which scales quadratically with sample size as $O(N^2 \cdot m)$ and incurs orders of magnitude higher floating-point operations and memory bandwidth.
-
-When Kriging estimation variance (&sigma;<sub>Kriging</sub><sup>2</sup>) is requested (`calculate_uncertainty: true`), per-grid node variance is evaluated using the exact same target node vector <i>k</i><sub>grid</sub>:
-
-<p align="center">
-$$\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{grid}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{grid}}$$
-</p>
-
-where <i>C</i>(0) is the zero-distance spatial covariance (the total variogram sill <i>S</i> representing maximum prior uncertainty), and <i>k</i><sub>grid</sub><sup>T</sup> <i>K</i><sup>−1</sup> <i>k</i><sub>grid</sub> is the variance reduction gained from nearby sample measurements.
-
-To prevent multi-threading memory race conditions inside concurrent LAPACK (*Linear Algebra Package*) solver workspace buffers (which cause horizontal seam artifacts under parallel CPU execution), `PySole` pre-computes the explicit inverse matrix <i>K</i><sup>−1</sup> via `lu_solve(lu_piv, np.eye(N_aug))` **once** prior to grid chunking.
-
-Parallel worker threads (`ThreadPoolExecutor`) assemble target vectors across sub-grid chunks into <i>K</i><sub>rhs,sub</sub> and evaluate chunk variance weights via lock-free, read-only Level-3 BLAS matrix products:
-
-<p align="center">
-$$\mathbf{W}_{\text{sub}} = \mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}$$
-</p>
-
-Level-3 BLAS matrix products (such as `np.dot`) use SIMD (*Single Instruction, Multiple Data*) instruction sets to process multiple floating-point values simultaneously per CPU clock cycle. This architecture eliminates lock contention, leverages SIMD hardware acceleration, and guarantees exact numerical invariance (&Delta;&sigma;<sup>2</sup> &lt; 10<sup>−12</sup>) and seamless spatial continuity across arbitrary thread counts and grid boundaries.
-
-To avoid BLAS thread oversubscription, `PySole` caps the BLAS threads (via `threadpoolctl`) to the physical cores around the factorization and the inverse, and sets them to 1 around the already parallel grid chunk threads (grid Kriging is 1.3-2.8x faster at N = 1000-2500 observations). The production run and the `Drift Analyzer` share one Kriging system (`KrigingSystem`: same variogram, regularization and drift columns).
-
-Combined with zero-centered spatial coordinate normalization, `PySole`'s Dual Kriging Vector Engine achieves a **~180x speedup** over loop-based solvers (interpolating 300,000+ DEM grid points in under 50 milliseconds).
+##### Thread-Safe Level-3 BLAS Variance Engine
+While point prediction requires only an <i>O</i>(<i>N</i> · <i>m</i>) vector dot product, evaluating Kriging estimation variance <i>σ</i>²(<i>x</i>,<i>y</i>) = <i>C</i>(0) − <b>k</b><sub>grid</sub><sup>T</sup> <b>K</b><sup>−1</sup> <b>k</b><sub>grid</sub> scales as <i>O</i>(<i>N</i>² · <i>m</i>) (disabled by default via `calculate_uncertainty: false`). When enabled, `PySole` pre-computes the explicit inverse <b>K</b><sup>−1</sup> once via `lu_solve(lu_piv, np.eye(N_aug))` prior to grid chunking, and worker threads (`ThreadPoolExecutor`) evaluate chunk variance weights via lock-free Level-3 BLAS matrix products (<b>W</b><sub>sub</sub> = <b>K</b><sup>−1</sup> <b>K</b><sub>rhs,sub</sub>) while `threadpoolctl` prevents BLAS thread oversubscription.
 
 ##### Adaptive Diagonal Tikhonov Regularization & Scale Invariance
-In Dual Kriging, the sample variogram block $\boldsymbol{\Gamma}$ has zeros along the main diagonal ($\gamma(0) = 0$). When observation soundings are densely spaced or collinear (e.g., along continuous GPR profiles), the augmented matrix $\mathbf{K}$ can become ill-conditioned or nearly singular. To guarantee numerical stability during LU decomposition, `PySole` applies diagonal Tikhonov regularization strictly to the sample observation block:
-
-<p align="center">
-$$\mathbf{K}_{ii} \mathrel{+}= \lambda_{\text{reg}} \quad \text{for } i = 1, \dots, N$$
-</p>
-
-Crucially, $\lambda_{\text{reg}}$ is **not** a hardcoded static constant. A static scalar (e.g., an arbitrary fixed $10^{-6}$) would violate dimensional scale-covariance: for small-variance targets ($S \approx 10^{-4}$), a fixed $10^{-6}$ would inject a $1\%$ artificial nugget distortion; for large-variance targets ($S \approx 10^5$), it would be negligible ($10^{-11}$) and fail to prevent matrix singularity. Instead, `PySole` employs an **adaptive relative regularization** scaled dynamically by the fitted variogram sill $S$:
+To prevent ill-conditioning when soundings are densely spaced along GPR profiles, `PySole` applies adaptive diagonal Tikhonov regularization strictly to the <i>N</i> × <i>N</i> sample observation block <b>K</b><sub>ii</sub> += <i>λ</i><sub>reg</sub> (<i>i</i> = 1, …, <i>N</i>), scaled by the empirical variogram sill <i>S</i>:
 
 <p align="center">
 $$\lambda_{\text{reg}} = \epsilon_{\text{reg}} \cdot S = 10^{-6} \cdot S$$
 </p>
 
-where $\epsilon_{\text{reg}} = 10^{-6}$ (1 part per million, or $0.0001\%$) is the constant dimensionless regularization fraction, and $S$ is the empirical variogram sill of the observation data for that stage. This guarantees:
-1. **Strict Scale Invariance**: Because both the variogram block $\boldsymbol{\Gamma}$ and the regularization term $\lambda_{\text{reg}}\mathbf{I}$ scale proportionally with $S$, the solved dual weights scale inversely ($\mathbf{w} \propto 1/S$) while the drift multipliers $\boldsymbol{\mu}$ remain unchanged. When evaluating predictions $\hat{z}(\mathbf{x}_0) = \mathbf{w}^T \boldsymbol{\gamma}_0 + \boldsymbol{\mu}^T \mathbf{f}_0$, the sill factor cancels out identically, ensuring predictions are perfectly invariant to arbitrary linear rescaling of the input data or variogram sill.
-2. **Exact Drift Constraints**: Regularization is confined strictly to the $N \times N$ sample block $\mathbf{K}[:N, :N]$. The unbiasedness and drift Lagrange multiplier blocks remain unperturbed, so $\mathbf{F}^T \mathbf{w}_{\text{sample}} = \mathbf{0}$ holds exactly.
-3. **Log File Interpretation**: In `pysole.log` and the terminal console, `PySole` reports the evaluated absolute regularization value applied to the current system:
-   ```text
-   [Dual Kriging Engine] Applied 5.7e-07 Tikhonov matrix regularization (N=6 points, n_drift=1)
-   [Dual Kriging Engine] Applied 2.7e-06 Tikhonov matrix regularization (N=5 points, n_drift=1)
-   ```
-   The reported number (e.g. `5.7e-07` or `2.7e-06`) dynamically reflects the product $\lambda_{\text{reg}} = 10^{-6} \cdot S$ for that specific target and stage (e.g. $S = 0.57 \implies \lambda_{\text{reg}} = 5.7 \times 10^{-7}$).
+Because both <b>Γ</b> and <i>λ</i><sub>reg</sub><b>I</b> scale proportionally with <i>S</i> while the drift Lagrange blocks remain unperturbed (<b>F</b><sup>T</sup> <b>w</b><sub>sample</sub> = <b>0</b>), predictions are strictly invariant to linear rescaling of the input data.
 
 <a id="universal-kriging-drift-models"></a>
 #### 6. Universal Kriging Drift Models
-In principle, the `Drift Analyzer` can be activated for pre- and/or post-migration Kriging and provides automated ranking of the available Universal Kriging drift models using quantitative statistical metrics - see [here](docs/drift_analyzer.md) for details. However, statistical rankings should not replace physical judgment. Users are therefore encouraged to check the governing assumptions and spatial behavior of whichever drift model they consider applying.
+The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kriging (`drift_analyzer: true`) to automatically evaluate, rank, and compare candidate drift models using spatial cross-validation metrics — see the [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer.md) for full details. Because statistical rankings should always be paired with glaciological judgment, the governing assumptions of all primitive and multi-drift models are summarized below.
 
-`PySole` provides the following **Single Drift Models**:
+##### Single Drift Models (8 Primitives + Ordinary Kriging)
 
 - **Shallow Ice Approximation Physical Drift Model (`["sia"]`)**:
-   `PySole` offers the physically-informed custom `"sia"` drift model. Re-arranging the basal shear stress $\tau_{\text{b}}$ for ice depth $D$ yields the inverse relationship between $D(x,y)$ and $\sin(\alpha_{\text{opt}}(x,y))$. Setting the drift term parameter to `["sia"]` informs Universal Kriging of the relative thickness distribution pattern driven directly by the optimized DEM surface slope:
+   Rearranging basal shear stress <i>τ</i><sub>b</sub> = <i>ρ</i><sub>ice</sub> <i>g</i> <i>D</i> sin(<i>α</i>) for ice depth <i>D</i> yields an inverse relationship with the optimally smoothed surface slope sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) (clamped at `slope_floor_deg`, default 5.0°):
 
    <p align="center">
    $$U(x,y) = \sin(\alpha_{\text{opt}}(x,y))^{-1}$$
    </p>
 
-   Thus, producing a terrain-conforming, physically realistic background trend across unmeasured gap regions without requiring assumptions about absolute $\tau_{\text{b}}$ values. The SIA drift model is available for both pre- and post-migration Universal Kriging interpolations, and is the default for `interpolation_target`: `"T"` or `"D"`. A surface slope floor safeguard (`slope_floor_deg`, default 5.0°) clamps low slope angles prior to computing the inverse-sine drift, preventing matrix singularities. Just use it with `interpolation_target`: `"T"`, or `"D"` to avoid double-scaling artifacts.
+   <i>Default drift model for direct targets (`"T"` or `"D"`). Produces a terrain-conforming physical background trend across unmeasured regions without requiring assumptions about absolute <i>τ</i><sub>b</sub>. Use only with direct targets (`"T"` or `"D"`) to avoid 1/sin²(<i>α</i>) double-scaling on `"P"`.</i>
 
 - **Surface Elevation Drift Model (`["z_dem"]`)**:
-   Uses the DEM surface elevation $Z_{\text{dem}}(x,y)$ as a spatial drift variable:
+   Uses the unsmoothed DEM surface elevation <i>Z</i><sub>dem</sub>(<i>x</i>,<i>y</i>):
 
    <p align="center">
    $$U(x,y) = Z_{\text{dem}}(x,y)$$
    </p>
 
-   <i>This models elevation-dependent thickness pattern—larger depths in lower valley basins/confluence zones, and smaller depths on high-altitude ridges and summits.</i>
+   <i>Captures elevation-dependent thickness patterns (e.g. thicker ice in lower valley basins/confluences or thinner ice on steep high-altitude ridges and summits).</i>
 
 - **Surface Curvature Drift Model (`["curvature_dem"]`)**:
-   Uses the 2D Laplacian surface curvature $C_{k_c}(x,y)$ derived from the optimal smoothed DEM surface:
+   Uses the 2D Laplacian surface curvature <i>C</i><sub><i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) derived from the optimally smoothed DEM surface:
 
    <p align="center">
-   $$C_{k_c}(x,y) = \nabla^2 Z_{\text{smooth, } k_c}(x,y) = \frac{\partial^2 Z}{\partial x^2} + \frac{\partial^2 Z}{\partial y^2}$$
+   $$C_{k_c}(x,y) = \nabla^2 Z_{\text{smooth}, k_c}(x,y) = \frac{\partial^2 Z}{\partial x^2} + \frac{\partial^2 Z}{\partial y^2}$$
    </p>
 
-   <i>This models morphometric terrain curvature—predicting smaller depths at convex peaks and ridges ($\nabla^2 Z < 0$), and larger depths at concave bowls and valleys ($\nabla^2 Z > 0$).</i>
+   <i>Captures morphometric terrain curvature—predicting smaller depths over convex ridges (∇²<i>Z</i> &lt; 0) and larger depths in concave bowls and troughs (∇²<i>Z</i> &gt; 0).</i>
 
 - **Surface Mass Balance Drift Model (`["mass_balance"]`)**:
-   Uses a decadal-mean surface mass balance spatial field $\dot{b}(x,y)$ (configured via `inputs.mass_balance_path` or `Solver(..., mass_balance=...)`), co-registered onto the DEM grid and kept **unsmoothed** to preserve localized accumulation and ablation anomalies (e.g. debris cover, avalanche cones, wind redistribution, topographic shading):
+   Uses a decadal-mean surface mass balance raster <i>ḃ</i>(<i>x</i>,<i>y</i>) (configured via `inputs.mass_balance_path` or `Solver(..., mass_balance=...)`), co-registered to the DEM grid and kept **unsmoothed** to preserve localized accumulation and ablation anomalies (supraglacial debris cover, avalanche cones, wind drift, topographic shading):
 
    <p align="center">
    $$U(x,y) = \dot{b}(x,y)$$
    </p>
 
-   <i>This captures mass-conservation forcing where localized accumulation and reduced ablation anomalies drive downstream ice flux and thickness anomalies independent of elevation alone.</i>
+   <i>Captures mass-conservation forcing where localized mass turnover anomalies drive ice thickness variations independent of elevation alone.</i>
 
 - **Surface Flow Velocity Magnitude Drift Model (`["velocity"]`)**:
-   Uses a decadal-mean surface flow velocity magnitude field $u_{s,\text{smooth}, k_c}(x,y) = |\mathbf{u}_s(x,y)|_{k_c}$ (configured via `inputs.velocity_path` or `Solver(..., velocity=...)`), zero-clamped outside the glacier outline (`~outline_mask -> 0`) and spectrally low-pass filtered at the optimal cutoff wavenumber $k_c$:
+   Uses a decadal-mean surface flow velocity magnitude raster <i>u</i><sub>s,smooth,<i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = |<b>u</b><sub>s</sub>(<i>x</i>,<i>y</i>)|<sub><i>k</i><sub>c</sub></sub> (configured via `inputs.velocity_path` or `Solver(..., velocity=...)`), zero-clamped outside the glacier outline (`~outline_mask -> 0`) and spectrally low-pass filtered at the optimal cutoff wavenumber <i>k</i><sub>c</sub>:
 
    <p align="center">
    $$U(x,y) = u_{s,\text{smooth}, k_c}(x,y)$$
    </p>
 
-   <i>This captures active trunk ice dynamics—differentiating fast-flowing deep main trunks from stagnant, shallow margins or dead-ice zones that share similar surface slopes.</i>
+   <i>Differentiates fast-flowing, deep main glacier trunks from stagnant, shallow margins or dead-ice zones that share similar surface slopes.</i>
 
 - **Glen's Flow Law Coupled SIA–Velocity Drift Model (`["velocity_sia"]`)**:
-   Combines the spectrally smoothed surface flow velocity magnitude $u_{s,\text{smooth}, k_c}(x,y)$ and the floored optimal surface slope $\sin(\alpha_{\text{opt}}(x,y))$ according to Glen's flow law ($n = 3$) for internal ice creep ($u_d = \frac{2A}{n+1}(\rho_{\text{ice}} g \sin\alpha)^n D^{n+1} \implies D \propto u_s^{1/4} / (\sin\alpha)^{3/4}$):
+   Couples the spectrally smoothed surface velocity <i>u</i><sub>s,smooth,<i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) and the floored optimal surface slope sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)) via Glen's flow law (<i>n</i> = 3) for internal ice creep (<i>u</i><sub>d</sub> = [2<i>A</i> / (<i>n</i> + 1)] (<i>ρ</i><sub>ice</sub> <i>g</i> sin <i>α</i>)<sup><i>n</i></sup> <i>D</i><sup><i>n</i>+1</sup> ⇒ <i>D</i> ∝ <i>u</i><sub>s</sub><sup>1/4</sup> / (sin <i>α</i>)<sup>3/4</sup>):
 
    <p align="center">
    $$U(x,y) = \frac{\left(\max\left(u_{s,\text{smooth}, k_c}(x,y),\, 0\right)\right)^{1/4}}{\left(\sin(\alpha_{\text{opt}}(x,y))\right)^{3/4}}$$
    </p>
 
-   <i>This provides a physically coupled creep-thickness covariate that jointly accounts for surface velocity and surface slope without requiring known rate factor $A$. Because `"velocity_sia"` already couples `"velocity"` and `"sia"`, it is never combined with `"sia"` or `"velocity"` in the same multi-drift model. Just like `"sia"`, use `"velocity_sia"` with direct targets (`"T"` or `"D"`) to avoid double-scaling artifacts on `"P"`.</i>
+   <i>Provides a physically coupled creep-thickness covariate without requiring a known creep rate factor <i>A</i>. Because `"velocity_sia"` already couples `"velocity"` and `"sia"`, it is never combined with `"sia"` or `"velocity"` in the same multi-drift model. Like `"sia"`, use `"velocity_sia"` only with direct targets (`"T"` or `"D"`).</i>
 
 - **Linear Surface Drift Model (`["linear_xy"]`)**:
-   Fits a flat, tilted 2D plane across the $X$ and $Y$ grid axes whose contour lines are straight, parallel, and evenly spaced across map space:
+   Fits a 1st-order planar coordinate trend across normalized map axes (<i>X</i>, <i>Y</i>):
 
    <p align="center">
    $$U(x,y) = a_1 X + a_2 Y$$
    </p>
 
-   <i>This models a constant regional spatial gradient across the entire map space—ideal for flow features with a linear regional trend.</i>
+   <i>Captures a constant regional spatial gradient across the domain.</i>
 
 - **Quadratic Surface Drift Model (`["quadratic_xy"]`)**:
-   Fits a parabolic surface (3D paraboloid, bowl, dome, or saddle) across the $X$ and $Y$ grid axes with curved parabolas, ellipses, or hyperbolas as contour lines:
+   Fits a 2nd-order parabolic surface across normalized map axes (<i>X</i>, <i>Y</i>):
 
    <p align="center">
    $$U(x,y) = a_1 X + a_2 Y + a_3 X^2 + a_4 Y^2 + a_5 X Y$$
    </p>
 
-   <i>This captures regional spatial bends, ice cap domes, or radial thickness distributions across the entire map space.</i>
+   <i>Captures regional spatial bends, basin bowls, ice cap domes, or saddle geometry across map space.</i>
 
 - **No Drift (`[]` - Ordinary Kriging)**:
-   Assumes a constant local spatial mean without external drift covariates, which is mathematically equivalent to Ordinary Kriging (`method: "ordinary"`). To include Ordinary Kriging in a `Drift Analyzer` candidate suite, add `[]` as an entry inside the list, e.g. `drift_terms: [[], "sia", "z_dem"]`. Ordinary Kriging is evaluated solely as a standalone candidate and is never combined with external drift terms. Note that a top-level empty list (`drift_terms: []`) is invalid and rejected with an error - set `method: "ordinary"` to directly apply Ordinary Kriging.
+   Assumes a constant local spatial mean without external drift covariates (equivalent to `method: "ordinary"`). Inside a `Drift Analyzer` candidate suite, include `[]` as a nested entry (e.g. `drift_terms: [[], "sia", "z_dem"]`) to evaluate Ordinary Kriging alongside Universal Kriging candidates. An empty list `[]` at the top level is rejected (use `null` instead, or set `method: "ordinary"`).
 
-`PySole` natively supports combining external raster drifts (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, or `"velocity_sia"`) with each other and with polynomial spatial coordinate trends (`"linear_xy"` or `"quadratic_xy"`) into an augmented multi-drift Universal Kriging system (**111 combinations** in total when both `mass_balance_path` and `velocity_path` are provided; **18** core DEM-only combinations by default). To prevent collinearity, `"quadratic_xy"` is never combined with `"linear_xy"`, and `"velocity_sia"` is never combined with `"sia"` or `"velocity"`.
-<br>
-<br>`PySole` provides the following **Multi Drift Models**:
+---
 
-**33 Multi-Raster Physical Combinations (No coordinate trend):**
+##### Multi-Drift Model Structure & Maximum Available Models: 120 (119 Drift Models + 1 Ordinary Kriging)
 
-*Core DEM combinations (4):*
-- `["sia", "z_dem"]`
-- `["sia", "curvature_dem"]`
-- `["z_dem", "curvature_dem"]`
-- `["sia", "z_dem", "curvature_dem"]`
+`PySole` combines the physical raster drifts (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`) with each other and with the spatial polynomial coordinate trends (`"linear_xy"`, `"quadratic_xy"`) into an augmented multi-drift Universal Kriging system.
 
-*With `mass_balance` (7):*
-- `["sia", "mass_balance"]`
-- `["z_dem", "mass_balance"]`
-- `["curvature_dem", "mass_balance"]`
-- `["sia", "z_dem", "mass_balance"]`
-- `["sia", "curvature_dem", "mass_balance"]`
-- `["z_dem", "curvature_dem", "mass_balance"]`
-- `["sia", "z_dem", "curvature_dem", "mass_balance"]`
+With all 8 primitives active, the combinatorial space is governed by **three independent groups** after applying the two collinearity pruning rules:
 
-*With `velocity` (7):*
-- `["sia", "velocity"]`
-- `["z_dem", "velocity"]`
-- `["curvature_dem", "velocity"]`
-- `["sia", "z_dem", "velocity"]`
-- `["sia", "curvature_dem", "velocity"]`
-- `["z_dem", "curvature_dem", "velocity"]`
-- `["sia", "z_dem", "curvature_dem", "velocity"]`
+1. **SIA & Velocity group** (`"sia"`, `"velocity"`, `"velocity_sia"` — **5 valid states**):
+   - ∅ (none)
+   - `["sia"]`
+   - `["velocity"]`
+   - `["sia", "velocity"]`
+   - `["velocity_sia"]` (never combined with `"sia"` or `"velocity"` in the same model because it already couples both)
+2. **Independent scalar rasters** (`"z_dem"`, `"curvature_dem"`, `"mass_balance"` — **2³ = 8 valid states**):
+   - Each of the 3 rasters can be independently included or excluded.
+3. **Polynomial coordinate trends** (`"linear_xy"`, `"quadratic_xy"` — **3 valid states**):
+   - ∅ (none), `["linear_xy"]`, or `["quadratic_xy"]` (never combined together because `"quadratic_xy"` already contains the linear [<i>x</i>, <i>y</i>] columns).
 
-*With `mass_balance` + `velocity` (8):*
-- `["mass_balance", "velocity"]`
-- `["sia", "mass_balance", "velocity"]`
-- `["z_dem", "mass_balance", "velocity"]`
-- `["curvature_dem", "mass_balance", "velocity"]`
-- `["sia", "z_dem", "mass_balance", "velocity"]`
-- `["sia", "curvature_dem", "mass_balance", "velocity"]`
-- `["z_dem", "curvature_dem", "mass_balance", "velocity"]`
-- `["sia", "z_dem", "curvature_dem", "mass_balance", "velocity"]`
+<p align="center">
+$$\text{Total Candidates} = 5 \times 8 \times 3 = 120$$
+</p>
 
-*With `velocity_sia` (7):*
-- `["z_dem", "velocity_sia"]`
-- `["curvature_dem", "velocity_sia"]`
-- `["mass_balance", "velocity_sia"]`
-- `["z_dem", "curvature_dem", "velocity_sia"]`
-- `["z_dem", "mass_balance", "velocity_sia"]`
-- `["curvature_dem", "mass_balance", "velocity_sia"]`
-- `["z_dem", "curvature_dem", "mass_balance", "velocity_sia"]`
+###### Breakdown of the 120 Candidates
 
-**39 Multi-Raster + 1st-Order Linear Spatial Trend (`linear_xy`):**
+| Category | Count | Details |
+| :--- | :---: | :--- |
+| **Ordinary Kriging baseline** | **1** | `[]` (no drift terms) |
+| **Single Drift Models** | **8** | `["sia"]`, `["z_dem"]`, `["curvature_dem"]`, `["mass_balance"]`, `["velocity"]`, `["velocity_sia"]`, `["linear_xy"]`, `["quadratic_xy"]` |
+| **Multi-Raster Drift Models (no polynomial)** | **33** | All 5 × 8 − 1 (empty) − 6 (single rasters) = 33 combinations of 2 to 5 raster terms |
+| **Multi-Drift Models with `"linear_xy"`** | **39** | All 5 × 8 − 1 = 39 non-empty raster combinations paired with `"linear_xy"` |
+| **Multi-Drift Models with `"quadratic_xy"`** | **39** | All 5 × 8 − 1 = 39 non-empty raster combinations paired with `"quadratic_xy"` |
+| **Total Universal Kriging Drift Models** | **119** | **8 Single + 111 Multi Drift Models** |
+| **Total Evaluated by `DriftAnalyzer`** | **120** | **119 Universal Kriging Drift Models + 1 Ordinary Kriging** |
 
-*Core DEM + `linear_xy` (7):*
-- `["sia", "linear_xy"]`
-- `["z_dem", "linear_xy"]`
-- `["curvature_dem", "linear_xy"]`
-- `["z_dem", "curvature_dem", "linear_xy"]`
-- `["sia", "z_dem", "linear_xy"]`
-- `["sia", "curvature_dem", "linear_xy"]`
-- `["sia", "z_dem", "curvature_dem", "linear_xy"]`
+###### Dynamic Suite Size by Configured Input Rasters (`drift_terms: null`, `drift_analyzer: true`)
 
-*With `mass_balance` + `linear_xy` (8):*
-- `["mass_balance", "linear_xy"]`
-- `["sia", "mass_balance", "linear_xy"]`
-- `["z_dem", "mass_balance", "linear_xy"]`
-- `["curvature_dem", "mass_balance", "linear_xy"]`
-- `["sia", "z_dem", "mass_balance", "linear_xy"]`
-- `["sia", "curvature_dem", "mass_balance", "linear_xy"]`
-- `["z_dem", "curvature_dem", "mass_balance", "linear_xy"]`
-- `["sia", "z_dem", "curvature_dem", "mass_balance", "linear_xy"]`
+| Configured Input Rasters | Active Primitives | Single Drift | Multi Drift | Ordinary | Total Suite Size |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **DEM only (default)** | `sia`, `z_dem`, `curvature_dem`, `linear_xy`, `quadratic_xy` (5) | 5 | 18 | 1 | **24 candidates** |
+| **DEM + `mass_balance_path`** | Core 5 + `mass_balance` (6) | 6 | 41 | 1 | **48 candidates** |
+| **DEM + `velocity_path`** | Core 5 + `velocity`, `velocity_sia` (7) | 7 | 52 | 1 | **60 candidates** |
+| **DEM + `mass_balance_path` + `velocity_path`** | All 8 primitives | 8 | 111 | 1 | **120 candidates** |
 
-*With `velocity` + `linear_xy` (8):*
-- `["velocity", "linear_xy"]`
-- `["sia", "velocity", "linear_xy"]`
-- `["z_dem", "velocity", "linear_xy"]`
-- `["curvature_dem", "velocity", "linear_xy"]`
-- `["sia", "z_dem", "velocity", "linear_xy"]`
-- `["sia", "curvature_dem", "velocity", "linear_xy"]`
-- `["z_dem", "curvature_dem", "velocity", "linear_xy"]`
-- `["sia", "z_dem", "curvature_dem", "velocity", "linear_xy"]`
+> [!NOTE]
+> For the complete catalog of all **111 Multi-Drift Models**, their mathematical formulations, parameter counts (<i>n</i><sub>drift</sub>), and glaciological interpretations, see the [**Drift Analyzer & Multi-Drift Guide (`docs/drift_analyzer.md`)**](docs/drift_analyzer.md#18-systematic-multi-drift-model-suite).
 
-*With `mass_balance` + `velocity` + `linear_xy` (8):*
-- `["mass_balance", "velocity", "linear_xy"]`
-- `["sia", "mass_balance", "velocity", "linear_xy"]`
-- `["z_dem", "mass_balance", "velocity", "linear_xy"]`
-- `["curvature_dem", "mass_balance", "velocity", "linear_xy"]`
-- `["sia", "z_dem", "mass_balance", "velocity", "linear_xy"]`
-- `["sia", "curvature_dem", "mass_balance", "velocity", "linear_xy"]`
-- `["z_dem", "curvature_dem", "mass_balance", "velocity", "linear_xy"]`
-- `["sia", "z_dem", "curvature_dem", "mass_balance", "velocity", "linear_xy"]`
-
-*With `velocity_sia` + `linear_xy` (8):*
-- `["velocity_sia", "linear_xy"]`
-- `["z_dem", "velocity_sia", "linear_xy"]`
-- `["curvature_dem", "velocity_sia", "linear_xy"]`
-- `["mass_balance", "velocity_sia", "linear_xy"]`
-- `["z_dem", "curvature_dem", "velocity_sia", "linear_xy"]`
-- `["z_dem", "mass_balance", "velocity_sia", "linear_xy"]`
-- `["curvature_dem", "mass_balance", "velocity_sia", "linear_xy"]`
-- `["z_dem", "curvature_dem", "mass_balance", "velocity_sia", "linear_xy"]`
-
-**39 Multi-Raster + 2nd-Order Quadratic Spatial Trend (`quadratic_xy`):**
-
-*Core DEM + `quadratic_xy` (7):*
-- `["sia", "quadratic_xy"]`
-- `["z_dem", "quadratic_xy"]`
-- `["curvature_dem", "quadratic_xy"]`
-- `["z_dem", "curvature_dem", "quadratic_xy"]`
-- `["sia", "z_dem", "quadratic_xy"]`
-- `["sia", "curvature_dem", "quadratic_xy"]`
-- `["sia", "z_dem", "curvature_dem", "quadratic_xy"]`
-
-*With `mass_balance` + `quadratic_xy` (8):*
-- `["mass_balance", "quadratic_xy"]`
-- `["sia", "mass_balance", "quadratic_xy"]`
-- `["z_dem", "mass_balance", "quadratic_xy"]`
-- `["curvature_dem", "mass_balance", "quadratic_xy"]`
-- `["sia", "z_dem", "mass_balance", "quadratic_xy"]`
-- `["sia", "curvature_dem", "mass_balance", "quadratic_xy"]`
-- `["z_dem", "curvature_dem", "mass_balance", "quadratic_xy"]`
-- `["sia", "z_dem", "curvature_dem", "mass_balance", "quadratic_xy"]`
-
-*With `velocity` + `quadratic_xy` (8):*
-- `["velocity", "quadratic_xy"]`
-- `["sia", "velocity", "quadratic_xy"]`
-- `["z_dem", "velocity", "quadratic_xy"]`
-- `["curvature_dem", "velocity", "quadratic_xy"]`
-- `["sia", "z_dem", "velocity", "quadratic_xy"]`
-- `["sia", "curvature_dem", "velocity", "quadratic_xy"]`
-- `["z_dem", "curvature_dem", "velocity", "quadratic_xy"]`
-- `["sia", "z_dem", "curvature_dem", "velocity", "quadratic_xy"]`
-
-*With `mass_balance` + `velocity` + `quadratic_xy` (8):*
-- `["mass_balance", "velocity", "quadratic_xy"]`
-- `["sia", "mass_balance", "velocity", "quadratic_xy"]`
-- `["z_dem", "mass_balance", "velocity", "quadratic_xy"]`
-- `["curvature_dem", "mass_balance", "velocity", "quadratic_xy"]`
-- `["sia", "z_dem", "mass_balance", "velocity", "quadratic_xy"]`
-- `["sia", "curvature_dem", "mass_balance", "velocity", "quadratic_xy"]`
-- `["z_dem", "curvature_dem", "mass_balance", "velocity", "quadratic_xy"]`
-- `["sia", "z_dem", "curvature_dem", "mass_balance", "velocity", "quadratic_xy"]`
-
-*With `velocity_sia` + `quadratic_xy` (8):*
-- `["velocity_sia", "quadratic_xy"]`
-- `["z_dem", "velocity_sia", "quadratic_xy"]`
-- `["curvature_dem", "velocity_sia", "quadratic_xy"]`
-- `["mass_balance", "velocity_sia", "quadratic_xy"]`
-- `["z_dem", "curvature_dem", "velocity_sia", "quadratic_xy"]`
-- `["z_dem", "mass_balance", "velocity_sia", "quadratic_xy"]`
-- `["curvature_dem", "mass_balance", "velocity_sia", "quadratic_xy"]`
-- `["z_dem", "curvature_dem", "mass_balance", "velocity_sia", "quadratic_xy"]`
-
-For detailed mathematical formulations, parameter counts ($n_{\text{drift}}$), and glaciological interpretations of each combination, see the comprehensive [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer.md#18-systematic-multi-drift-model-suite).
-<br>
-<br>
+---
 
 <a id="how-drift-terms-is-interpreted"></a>
-**How `drift_terms` is interpreted**
+##### How `drift_terms` is Interpreted
 
-The Kriging parameters `method` and `drift_analyzer` decide what the `drift_terms` list means:
+The Kriging parameters `method` and `drift_analyzer` determine how `drift_terms` is resolved:
 
 | `method` | `drift_analyzer` | Meaning of `drift_terms` |
 | :--- | :--- | :--- |
 | `"ordinary"` | `any` | **Ignored** (`ordinary` overrides the analyzer and the terms; one warning if either is set). |
-| `"universal"` | `false` | **Flat Drift Model List**: all listed terms, e.g. `drift_terms: ["sia", "z_dem"]`, are applied together as **ONE multi-drift model** (a single nested candidate `[["sia", "z_dem"]]` unwraps to `["sia", "z_dem"]`). A **Non-Flat Drift Model List** (e.g. `[["sia", "z_dem"], ["sia"]]`) is executed as a **Non-Interactive Multi-Model Run** deploying the default exclusion buffer radius for the leave-block-out CV in the `Drift Analyzer`. |
-| `"universal"` | `true` | **Flat Drift Model List**: Triggers an **interactive combinatorial candidate suite** evaluating every valid combination of the listed terms as a separate candidate model. For example, `drift_terms: ["sia", "z_dem"]` tests three candidates: `["sia"]`, `["z_dem"]`, and `["sia", "z_dem"]`. Adding `[]`, `drift_terms: [[], "sia", "z_dem"]`, includes Ordinary Kriging as a 4th candidate. **Default (`null`)**: dynamically evaluates **24 candidates** (DEM only), **48 candidates** (DEM + `mass_balance_path`), **60 candidates** (DEM + `velocity_path`), or **120 candidates** (DEM + `mass_balance_path` + `velocity_path`). If a single candidate is defined (e.g. `["sia"]`), `drift_analyzer` is automatically disabled (`false`) and that model is applied directly. |
-| `"universal"` | `true` | **Non-Flat Drift Model List**: Evaluates an **interactive explicit candidate suite** with exactly the specified models in the list without combinatorial expansion. For example, `drift_terms: [["sia", "z_dem"], ["sia"], []]` evaluates exactly those three specific models. If the suite defines only a single model (e.g. `[["sia", "z_dem"]]`), `drift_analyzer` is automatically disabled (`false`) and the single model is applied directly. |
-| `"regression"` | `false` | **Random Forest feature covariates**: The listed terms specify the predictor features (e.g. `["sia", "z_dem", "mass_balance"]`) used to train a Random Forest model to predict the large-scale trend; Ordinary Kriging is then used to interpolate the residuals. **Default (`null`)**: trains on all non-redundant primitives simultaneously as a multivariate model (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]` plus `"mass_balance"` and `"velocity"` when configured). To use spatial coordinates only, specify `drift_terms: ["linear_xy"]`. (Executed via [`PyKrige`](https://geostat-framework.readthedocs.io/projects/pykrige); automatically used even if `engine: "native"`). |
-| `"regression"` | `true` | **Analyzer skipped with warning**: The Drift Analyzer does not evaluate Random Forest models. `PySole` logs a warning, skips the analyzer, and directly runs Regression Kriging with the specified `drift_terms`. |
-<br>
+| `"universal"` | `false` | **Flat Drift Model List**: All listed terms (e.g. `["sia", "z_dem"]`) are applied together as **ONE multi-drift model** (a single nested candidate `[["sia", "z_dem"]]` unwraps to `["sia", "z_dem"]`). **Non-Flat Drift Model List** (e.g. `[["sia", "z_dem"], ["sia"]]`): Executed as a **Non-Interactive Multi-Model Run** using the default spatial CV exclusion buffer radius. |
+| `"universal"` | `true` | **Flat Drift Model List**: Evaluates an **interactive combinatorial candidate suite** of all valid non-redundant subsets of the listed terms (e.g. `["sia", "z_dem"]` tests `["sia"]`, `["z_dem"]`, and `["sia", "z_dem"]`; nesting `[]` adds Ordinary Kriging). **Default (`null`)**: Dynamically evaluates **24 candidates** (DEM only), **48 candidates** (DEM + `mass_balance_path`), **60 candidates** (DEM + `velocity_path`), or **120 candidates** (DEM + `mass_balance_path` + `velocity_path`). **Non-Flat Drift Model List** (e.g. `[["sia", "z_dem"], ["sia"], []]`): Evaluates the exact listed models without combinatorial expansion. |
+| `"regression"` | `false` | **Random Forest feature covariates**: Predictor features used to train a Random Forest trend model before Ordinary Kriging of residuals (**only available through `PyKrige`**; automatically switches engine if `engine: "native"`). **Default (`null`)**: Uses `["sia", "z_dem", "curvature_dem", "quadratic_xy"]` plus `"mass_balance"` and `"velocity"` when configured. |
+| `"regression"` | `true` | **Analyzer skipped with warning**: Logs a warning, skips the analyzer, and runs Regression Kriging with `drift_terms`. |
 
-**Candidate suite vs. single-model rules:**
-- **Single-model auto-disable**: When `drift_analyzer: true` is configured with a single candidate model (either a single flat primitive `["sia"]` or a single non-flat candidate `[["sia", "z_dem"]]`), `PySole` logs an informative notice, automatically overrides `drift_analyzer` to `false` across configuration and solver states, and runs Universal Kriging directly without interactive prompts or redundant candidate loops.
-- **In an analyzer suite (`drift_analyzer: true`)**: Candidates never combine `linear_xy` and `quadratic_xy` *within the same candidate*, and never combine `velocity_sia` with `sia` or `velocity` *within the same candidate* (to prevent collinearity), while all valid single and multi-drift models featuring each term are independently evaluated.
-- **In a single model (`drift_analyzer: false`)**: If `drift_terms: ["linear_xy", "quadratic_xy"]` is passed, `"linear_xy"` is dropped with a warning, falling back to `["quadratic_xy"]`. Similarly, if `"velocity_sia"` is combined with `"sia"` or `"velocity"` in a single model, `"sia"` and/or `"velocity"` are dropped with a warning, keeping `"velocity_sia"`. Passing a non-flat multi-model list with `drift_analyzer: false` executes a non-interactive multi-model run with default exclusion buffer radius.
-- An empty list `[]` at the top level is rejected (use `null` instead).
-- For the `interpolation_target: "P"`, the `drift_analyzer` also ranks every candidate containing the `sia` or `velocity_sia` drift model but logs a warning due to the `1/sin²(α)` double scaling.
-- **Multi-Model Comparison Suite**: Users can interactively select multiple candidate models (ranges like `1-5`, lists like `1, 3`, or mixed `1-3, 5`), or pre-define an explicit candidate suite in JSON (`drift_terms: [["sia", "z_dem"], ["sia"], []]`). `PySole` evaluates each model, saves all raster outputs into the configured `<output_dir>` with the model slug suffix (`[<output_prefix>_]*_<model_slug>.<ext>`), routes post-interpolation diagnostic figures into `figures/<model_slug>/`, and exports cross-model comparison tables (`drift_model_comparison.{txt,csv,md}`) directly into `<output_dir>`. See the [Drift Analyzer Guide](docs/drift_analyzer.md#110-multi-model-comparison-suite-directory-architecture--comparison-tables) for details.
-
-**Note on the Speed of `engine: "pykrige"` with `method: "universal"`:**<br>
-`PyKrige`'s `UniversalKriging` computes a leave-one-out fit statistic every time it is created (the class has no option to switch it off, unlike `OrdinaryKriging`). Its run time grows roughly with N³ to N⁴ in the number of survey points, independent of the drift terms and of the grid size: about 2 s for 400 points, 19 s for 800 and several minutes for the 1098 points of the WUK example, while the kriging itself is fast. `PySole` logs a warning when `engine: "pykrige"` is combined with `method: "universal"`. Use the `"native"` engine (all drift terms, kriging variance) for Universal Kriging with more than a few hundred survey points; `"ordinary"` and `"regression"` with `PyKrige` are not affected.
-
-
+##### Candidate Suite & Single-Model Rules
+- **Single-model auto-disable**: When `drift_analyzer: true` resolves to a single candidate (e.g. `["sia"]` or `[["sia", "z_dem"]]`), `PySole` logs an `INFO` notice, sets `drift_analyzer = false`, and runs Universal Kriging directly.
+- **Collinearity pruning**: In an analyzer suite (`drift_analyzer: true`), candidates never combine `linear_xy` with `quadratic_xy` or `velocity_sia` with `sia` / `velocity` within the same model. In a single model (`drift_analyzer: false`), redundant `"linear_xy"` or `"sia"`/`"velocity"` terms are automatically dropped with a warning in favor of `"quadratic_xy"` or `"velocity_sia"`.
+- **Top-level empty list**: An empty list `[]` at the top level is rejected (use `null` instead).
+- **Product target (`"P"`) safeguard**: For `interpolation_target: "P"`, the `Drift Analyzer` evaluates every candidate containing `"sia"` or `"velocity_sia"` but flags it with a warning and sorts it below non-penalized models due to 1/sin²(<i>α</i>) double-scaling.
+- **Multi-Model Comparison Suite**: Selecting multiple models interactively (e.g. `1-3, 5`) or passing an explicit multi-model list exports all rasters to `<output_dir>` with `<model_slug>` suffixes, routes diagnostic plots to `figures/<model_slug>/`, and saves `drift_model_comparison.{txt,csv,md}` in `<output_dir>` — see [Multi-Model Comparison Suite](docs/drift_analyzer.md#5-multi-model-comparison-suite--output-files).
+- **`engine: "pykrige"` performance note**: `PyKrige`'s `UniversalKriging` computes an internal leave-one-out statistic on instantiation that scales as <i>O</i>(<i>N</i>³–<i>N</i>⁴) in the number of survey points. Use `engine: "native"` for Universal Kriging on datasets with more than a few hundred points.
 
 <a id="kriging-uncertainty-derivation"></a>
 #### 7. Kriging Uncertainty Derivation
-Evaluating Kriging uncertainty requires substantially more computational effort and memory throughput than point prediction alone. In the Dual Kriging framework, point prediction $`z(x,y) = \mathbf{w}_z^T \mathbf{k}_{\text{grid}}`$ requires only a single $O(N \cdot m)$ vector-matrix dot product between the solved 1D dual weight vector and the target node vectors (~10 MFLOPs per chunk). By contrast, evaluating the Kriging estimation variance $`\sigma^2(x,y) = C(0) - \mathbf{k}_{\text{grid}}^T \mathbf{K}^{-1} \mathbf{k}_{\text{grid}}`$ requires solving a dense $(N+L) \times m$ matrix system $`\mathbf{K}^{-1} \mathbf{K}_{\text{rhs,sub}}`$, which scales quadratically with the number of observations as $O(N^2 \cdot m)$ operations (~90 GFLOPs per chunk for $N > 5{,}000$ points) and streams hundreds of megabytes of intermediate matrix data across the CPU memory bus per chunk. For this reason, uncertainty evaluation is optional (disabled by default via `calculate_uncertainty: false` to save computational time) and can be enabled when uncertainty rasters or diagnostic variance plots are specifically required.
-
-When enabled (`calculate_uncertainty: true`), Kriging spatial interpolation natively evaluates the 2D estimation variance field $\sigma^2(x,y)$ alongside point predictions. Taking the square root converts the variance field into the **Kriging Standard Error $\sigma(x,y)$**, serving as a quantitative measure of interpolation uncertainty across unmeasured regions.
-
-The exact calculation of the estimation variance depends on the selected `interpolation_target`:
+When `calculate_uncertainty: true` is enabled, `PySole` evaluates the 2D Kriging estimation variance field <i>σ</i>²(<i>x</i>,<i>y</i>) and converts it into the **Kriging Standard Error <i>σ</i>(<i>x</i>,<i>y</i>)** (±1.00 <i>σ</i> corresponds to the 68.3% Gaussian confidence interval; ±1.96 <i>σ</i> to 95%):
 
 - **Direct Target Interpolation (`interpolation_target`: `"D"` or `"T"`)**:
-  When directly interpolating migrated depths $D_i$ or signal traveltimes $T_i$, the Kriging estimation variance field ($`\sigma_{\text{D}}^2(x,y)`$ $[\text{m}^2]$ or $`\sigma_{\text{T}}^2(x,y)`$ $[\text{s}^2]$) is evaluated directly. Taking the square root yields the standard error in physical units:
+  The estimation variance field (<i>σ</i><sub>D</sub>²(<i>x</i>,<i>y</i>) [m²] or <i>σ</i><sub>T</sub>²(<i>x</i>,<i>y</i>) [s²]) is evaluated directly:
 
   <p align="center">
   $$\sigma_{\text{D or T}}(x,y) = \sqrt{\sigma_{\text{D or T}}^2(x,y)} \quad [\pm\,\text{m or s}]$$
   </p>
 
 - **BSS-derived Product Target Interpolation (`interpolation_target`: `"P"`)**:
-  When interpolating the BSS product field $`P(x,y) = D \cdot \sin(\alpha_{\text{opt}})`$, or $`P(x,y) = T \cdot \sin(\alpha_{\text{opt}})`$, Kriging calculates the product variance $`\sigma_{\text{P}}^2(x,y)`$. The 2D estimation variance is derived via linear error propagation with the optimal surface slope field $`\sin(\alpha_{\text{opt}}(x,y))`$:
+  The product variance <i>σ</i><sub>P</sub>²(<i>x</i>,<i>y</i>) is propagated through the optimal surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)):
 
   <p align="center">
-  $$\sigma_{\text{D or T}}^2(x,y) = \frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))} \quad [\text{m² or s²}]$$
+  $$\sigma_{\text{D or T}}(x,y) = \sqrt{\frac{\sigma_{\text{P}}^2(x,y)}{\sin^2(\alpha_{\text{opt}}(x,y))}} \quad [\pm\,\text{m or s}]$$
   </p>
 
-  Taking the square root converts the propagated variance field into the **Kriging Standard Error $`\sigma_{\text{D}}(x,y)`$ in meters** (or $`\sigma_{\text{T}}(x,y)`$ in traveltime units):
+- **Total Ice Volume Uncertainty (<i>σ</i><sub>V</sub>)**:
+  Across <i>N</i> valid glacier cells of area Δ<i>A</i> = |<i>dx</i> · <i>dy</i>| (<i>A</i><sub>total</sub> = <i>N</i> · Δ<i>A</i>), Kriging interpolation errors are spatially autocorrelated. Following Binder et al. (2009), total volume uncertainty <i>σ</i><sub>V</sub> is integrated from the domain-average thickness standard error <i>σ̄</i><sub>D</sub>:
 
   <p align="center">
-  $$\sigma_{\text{D or T}}(x,y) = \sqrt{\sigma_{\text{D or T}}^2(x,y)} \quad [\pm\,\text{m or s}]$$
-  </p>
-
-Under Gaussian linear estimation theory, $\pm 1.00 \, \sigma(x,y)$ represents the 68.3% confidence margin of error, while $\pm 1.96 \, \sigma(x,y)$ represents the 95% confidence margin of error.
-
-- **Total Ice Volume Uncertainty Derivation ($\sigma_V$)**:
-  When total ice volume is integrated across the active glacier domain of $N$ valid cells with cell area $\Delta A = |dx \cdot dy|$ ($A_{\text{total}} = N \cdot \Delta A$), Kriging interpolation errors are spatially autocorrelated. Following established glaciological error propagation methodology (e.g. Binder et al., 2009), the total volume uncertainty $\sigma_V$ is derived directly from the domain-average Kriging thickness standard error $\bar{\sigma}_{\text{D}}$:
-
-  <p align="center">
-  $$\sigma_V = A_{\text{total}} \cdot \bar{\sigma}_{\text{D}} = \sum_{i \in \text{glacier}} \sigma_{\text{D}, i} \cdot \Delta A \quad [\text{m}^3 \text{ or } \text{km}^3]$$
-  </p>
-
-  Equivalently, the relative volume uncertainty corresponds to the relative mean ice thickness uncertainty:
-
-  <p align="center">
-  $$\frac{\sigma_V}{V} = \frac{\bar{\sigma}_{\text{D}}}{\bar{D}}$$
+  $$\sigma_V = A_{\text{total}} \cdot \bar{\sigma}_{\text{D}} = \sum_{i \in \text{glacier}} \sigma_{\text{D}, i} \cdot \Delta A \quad \Longleftrightarrow \quad \frac{\sigma_V}{V} = \frac{\bar{\sigma}_{\text{D}}}{\bar{D}}$$
   </p>
 
 <a id="memory-guard-and-uncertainty"></a>
 #### 8. Memory Guard and Kriging Uncertainty
-Computing Kriging uncertainty is optional and controlled by `kriging_parameters.pre_migration.calculate_uncertainty` and `kriging_parameters.post_migration.calculate_uncertainty` (both default to `false` to save computational time). When `calculate_uncertainty: true` is enabled, post-migration uncertainty standard error ($`\sigma_{\text{D}}`$) is evaluated and displayed in the diagnostic figures; the `save_*_uncertainty` options control whether the uncertainty raster grids are exported to disk. If `calculate_uncertainty: false` (or if skipped by the memory guard), diagnostic uncertainty panels display *"Uncertainty not available (see log)"* and raster export is skipped with a warning. The traveltime uncertainty $`\sigma_{\text{T}}`$ is exported on request when pre-migration uncertainty is enabled, but is never plotted. Note that the Kriging standard error depends only on the sample geometry and the variogram, not on the data values. It is therefore a lower bound of the true error.
+When `calculate_uncertainty: true`, post-migration standard error (<i>σ</i><sub>D</sub>) is plotted in diagnostic figures and exported when `save_*_uncertainty: true` (`save_traveltime_uncertainty` exports <i>σ</i><sub>T</sub> when pre-migration uncertainty is enabled). Because Kriging standard error depends only on sample geometry and the variogram, it represents a lower bound on total uncertainty.
 
-When uncertainty computation is requested, the native engine factorizes one $(N + n_{\text{drift}})^2$ matrix and evaluates the variance in grid chunks on parallel threads. Before allocating anything, a guard estimates the peak memory and compares it with `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of the *available* RAM. Control group (*cgroup*) limits are respected, thus runs safely inside Docker, Kubernetes, and HPC clusters without exceeding assigned container memory quotas. If the estimate does not fit:
-
-1. the number of worker threads is reduced first (this does not change the results),
-2. only if even a single thread with variance does not fit, the variance is skipped. The uncertainty panels then show *"Uncertainty not available"* and uncertainty rasters are not exported (a warning is logged),
-3. if nothing fits, the run continues with one thread and no variance, and a warning is logged.
-
-If the available RAM cannot be determined, the guard is disabled.
+Before allocating the (<i>N</i> + <i>n</i><sub>drift</sub>)² inverse matrix and per-thread grid chunks, `PySole`'s memory guard compares estimated peak RAM against `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of available RAM (respecting Linux *cgroup* container quotas in Docker/Kubernetes/HPC):
+1. Worker thread count is reduced first (preserving exact numerical results).
+2. Only if a single thread with variance still exceeds the budget is variance skipped (logging a warning and displaying *"Uncertainty not available"* in diagnostic plots).
+3. If available RAM cannot be determined, the guard is disabled.
 
 <a id="dem-spatial-smoothing"></a>
 #### 9. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
-The depth field $D(x,y)$ is obtained by dividing the Kriged product field $P_{\text{D}}(x,y)$ with the optimally smoothed surface slope field $\sin(\alpha_{\text{opt}}(x,y))$. When post-processing DEM spatial smoothing is enabled (`smooth_bedrock: true`), `PySole` applies the spatial smoothing operator $S$ **directly to the ice depth field $D(x,y)$**:
+When `smooth_bedrock: true`, `PySole` applies the spatial smoothing operator <i>S</i> (`"gaussian"`, `"median"`, or `"fft_lowpass"`) **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)** before subtracting from the surface DEM:
 
 <p align="center">
-$$\begin{aligned}
-D_{\text{smooth}}(x,y) &= S(D(x,y)) \\
-Z_{\text{bed}}(x,y) &= Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)
-\end{aligned}$$
+$$D_{\text{smooth}}(x,y) = S(D(x,y)), \qquad Z_{\text{bed}}(x,y) = Z_{\text{surface}}(x,y) - D_{\text{smooth}}(x,y)$$
 </p>
 
-Applying smoothing directly to $D(x,y)$ prevents the high-frequency surface DEM roughness residual $Z_{\text{surface}} - S(Z_{\text{surface}})$ from superimposing rectangular grid artifacts onto the ice thickness map, ensuring that both $D(x,y)$ and $Z_{\text{bed}}(x,y)$ remain smooth and continuous. The available spatial smoothing operators are `"gaussian"`, `"median"`, and `"fft_lowpass"`.
+Smoothing <i>D</i>(<i>x</i>,<i>y</i>) directly prevents high-frequency surface DEM roughness residuals <i>Z</i><sub>surface</sub> − <i>S</i>(<i>Z</i><sub>surface</sub>) from imprinting onto the ice thickness map.
 
 ---
 
@@ -980,6 +747,8 @@ model = pysole.Solver(
     dem="surface_dem.asc",
     outline="creeping_body.shp",
     survey_data_type="one_way_traveltime",
+    # mass_balance="mass_balance_decadal.tif",  # Optional surface mass balance raster
+    # velocity="velocity_decadal.tif",          # Optional surface flow velocity raster
     pre_interpolation_target="T",
     pre_kriging_method="universal",
     pre_drift_terms=["sia"],

@@ -67,16 +67,24 @@ class TestDriftModelListsMatchCode(unittest.TestCase):
             columns = DriftBasis(ordered, x, y, geom, grids).n_columns
             self.assertEqual(n_drift, columns + 1, f"{ordered}: n_drift counts the constant, n_terms does not")
 
-    def test_readme_lists_the_same_multi_drift_models(self):
+    def test_readme_documents_combinatorial_breakdown_and_references_guide(self):
         text = read(README)
-        section = text[text.index("`PySole` provides the following **Multi Drift Models**:"):text.index("For detailed mathematical formulations")]
-        documented = {frozenset(json.loads(m)) for m in re.findall(r"^- `(\[[^`]*\])`$", section, re.M)}
-        expected = {
-            frozenset(t)
-            for t in build_drift_suite(None, available_optional_terms=OPTIONAL_RASTER_DRIFT_TERMS)
-            if len(t) >= 2
-        }
-        self.assertEqual(documented, expected)
+        section = text[text.index("#### 6. Universal Kriging Drift Models"):text.index("#### 7. Kriging Uncertainty Derivation")]
+        for term in DRIFT_PRIMITIVES:
+            self.assertIn(f'`["{term}"]`', section)
+        self.assertEqual(len(build_drift_suite(None)), 24)
+        self.assertEqual(len(build_drift_suite(None, available_optional_terms=("mass_balance",))), 48)
+        self.assertEqual(len(build_drift_suite(None, available_optional_terms=("velocity", "velocity_sia"))), 60)
+        self.assertEqual(len(build_drift_suite(None, available_optional_terms=OPTIONAL_RASTER_DRIFT_TERMS)), 120)
+        for phrase in (
+            "**24 candidates**",
+            "**48 candidates**",
+            "**60 candidates**",
+            "**120 candidates**",
+            "**8 Single + 111 Multi Drift Models**",
+            "docs/drift_analyzer.md#18-systematic-multi-drift-model-suite",
+        ):
+            self.assertIn(phrase, section)
 
     def test_guide_documents_the_single_primitives_and_ordinary(self):
         text = read(DRIFT_GUIDE)
@@ -178,7 +186,10 @@ class TestJsonExamplesMatchCode(unittest.TestCase):
                     if "kriging_parameters" not in block:
                         continue
                     with self.subTest(file=md.name, kriging=block["kriging_parameters"]):
-                        load_config({"outputs": {"output_dir": out}, "kriging_parameters": block["kriging_parameters"]})
+                        cfg_in = {"outputs": {"output_dir": out}, "kriging_parameters": block["kriging_parameters"]}
+                        if "inputs" in block:
+                            cfg_in["inputs"] = block["inputs"]
+                        load_config(cfg_in)
 
     def test_readme_parameter_reference_lists_every_configuration_key(self):
         text = read(README)
@@ -242,6 +253,15 @@ class TestDocumentationIntegrity(unittest.TestCase):
                         if bad:
                             problems.append(f"{md.name}:{no}: non-primitive drift name(s) {bad}")
         self.assertEqual(problems, [])
+
+    def test_readme_has_no_inline_latex_math(self):
+        """README.md uses HTML for inline math so tops of symbols are not vertically clipped."""
+        text = read(README)
+        # Strip fenced code blocks, $$...$$ display math blocks, and inline code spans
+        stripped = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+        stripped = re.sub(r"\$\$.*?\$\$", "", stripped, flags=re.DOTALL)
+        stripped = re.sub(r"`[^`]*`", "", stripped)
+        self.assertNotIn("$", stripped)
 
 
 if __name__ == "__main__":

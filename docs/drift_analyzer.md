@@ -1,6 +1,6 @@
 # Universal Kriging Drift Analyzer Guide
 
-This document provides a comprehensive methodological and mathematical reference for the **Universal Kriging Drift Analyzer (`DriftAnalyzer`)** in `PySole`, an automated diagnostic and model selection engine for evaluating, ranking, and comparing spatial drift models.
+This document provides a methodological and mathematical reference for the **Universal Kriging Drift Analyzer (`DriftAnalyzer`)** in `PySole`, an automated diagnostic and model selection engine for evaluating, ranking, and comparing spatial drift models.
 
 > [!TIP]
 > For forward campaign design on unprobed glaciers without radar sounding data, see the dedicated [Survey Planner Guide](survey_planner.md).
@@ -9,7 +9,7 @@ This document provides a comprehensive methodological and mathematical reference
 
 ## 1. Universal Kriging Drift Analyzer (`DriftAnalyzer`)
 
-### 1.1 Mathematical Formulation of Universal Kriging
+### 1.1 Mathematical Formulation & Available Drift Primitives
 
 Universal Kriging models a spatially continuous target variable $Z(\mathbf{x})$ at spatial coordinates $\mathbf{x} = (x, y)^T$ as the sum of a deterministic spatial trend surface (the **drift** $m(\mathbf{x})$) and a zero-mean, intrinsically stationary random residual process $\epsilon(\mathbf{x})$:
 
@@ -21,41 +21,62 @@ where:
 - $\beta_k$ are unknown drift coefficients estimated simultaneously with Kriging weights,
 - $\epsilon(\mathbf{x})$ is governed by a spatial covariance function $C(\mathbf{h})$ or semivariogram $\gamma(\mathbf{h}) = \frac{1}{2} E\left[(Z(\mathbf{x}+\mathbf{h}) - Z(\mathbf{x}))^2\right]$.
 
-In `PySole`, candidate spatial covariates $f_k(\mathbf{x})$ include:
-1. **`ordinary`**: Baseline constant mean $m(\mathbf{x}) = \beta_0$ (Ordinary Kriging).
-2. **`sia`**: Inverse sine of surface slope $\sin(\alpha_{\text{opt}}(\mathbf{x}))^{-1}$, representing the Shallow Ice Approximation thickness driver.
-3. **`z_dem`**: Surface elevation $Z_{\text{dem}}(\mathbf{x})$, capturing elevation-dependent ice accumulation or valley depth trends.
-4. **`curvature_dem`**: Surface Laplacian curvature $C_{k_c}(\mathbf{x}) = \nabla^2 Z_{\text{smooth}, k_c}(\mathbf{x}) = \frac{\partial^2 Z_{\text{smooth}}}{\partial x^2} + \frac{\partial^2 Z_{\text{smooth}}}{\partial y^2}$, capturing convex ridges ($C < 0$) versus concave troughs ($C > 0$).
-5. **`mass_balance`**: Unsmoothed decadal-mean surface mass balance $\dot{b}(\mathbf{x})$ (when `inputs.mass_balance_path` or `Solver(..., mass_balance=...)` is provided), preserving localized debris-cover, avalanche, and wind-redistribution anomalies.
-6. **`velocity`**: Off-glacier zero-clamped (`~outline_mask -> 0`) and spectrally low-pass filtered ($k_c$) decadal-mean surface flow velocity magnitude $u_{s,\text{smooth}, k_c}(\mathbf{x})$ (when `inputs.velocity_path` or `Solver(..., velocity=...)` is provided).
-7. **`velocity_sia`**: Glen's flow law ($n = 3$) coupled SIA–velocity creep covariate $\left(\max(u_{s,\text{smooth}, k_c}(\mathbf{x}), 0)\right)^{1/4} / \left(\sin(\alpha_{\text{opt}}(\mathbf{x}))\right)^{3/4}$ (when `inputs.velocity_path` or `Solver(..., velocity=...)` is provided).
-8. **`linear_xy`**: Planar spatial coordinates $(X, Y)$.
-9. **`quadratic_xy`**: 2nd-order spatial polynomial $(X, Y, X^2, Y^2, XY)$.
-10. **Multi-Drift Combinations**: Systematic suite of up to **111 multi-drift combinations** (**18** core DEM-only combinations by default; expanding to **41** with `mass_balance`, **52** with `velocity`, and **111** with both `mass_balance` and `velocity`) combining physical raster covariates with planar (`["linear_xy"]`) and quadratic (`["quadratic_xy"]`) regional trends (Section 1.8). Together with the single drift models and Ordinary Kriging, the default suite dynamically scales from **24 candidates** (DEM only; **48** or **60** with one auxiliary raster) up to **120 candidates** (with both auxiliary rasters).
+#### Single Drift Models & Spatial Covariate Construction
+
+`PySole` provides **8 primitive drift terms** (`sia`, `z_dem`, `curvature_dem`, `mass_balance`, `velocity`, `velocity_sia`, `linear_xy`, `quadratic_xy`) plus the constant-mean **Ordinary Kriging** baseline (`ordinary`). Below, $n_{\text{drift}} = K + 1$ denotes the total number of drift columns in the augmented Dual Kriging system **including the constant mean** $f_0(\mathbf{x}) = 1$:
+
+| Primitive / Model | Covariate Basis $f_k(\mathbf{x})$ | $n_{\text{drift}}$ | Required Input | Spectral Filtering & Domain Handling | Glaciological Interpretation |
+| :--- | :--- | :---: | :--- | :--- | :--- |
+| **`ordinary`** (`[]`) | $f_0(\mathbf{x}) = 1$ | 1 | DEM only | None | Constant local/global mean baseline (Ordinary Kriging). |
+| **`"sia"`** | $\sin(\alpha_{\text{opt}}(\mathbf{x}))^{-1}$ | 2 | DEM only | Slope from 2D FFT Gaussian-smoothed DEM at $k_c$; floored at `slope_floor_deg` ($5^\circ$) | Shallow Ice Approximation ($D \propto 1/\sin\alpha$): thicker ice on flat plateaus, thinner on steep slopes. |
+| **`"z_dem"`** | $Z_{\text{dem}}(\mathbf{x})$ | 2 | DEM only | Raw surface DEM on `GridGeometry` | Valley hypsometry and elevation-dependent accumulation/thickness gradients. |
+| **`"curvature_dem"`** | $C_{k_c}(\mathbf{x}) = \nabla^2 Z_{\text{smooth}, k_c}(\mathbf{x})$ | 2 | DEM only | Laplacian $\frac{\partial^2 Z}{\partial x^2} + \frac{\partial^2 Z}{\partial y^2}$ of $k_c$-smoothed DEM | Topographic focusing: concave glacial troughs ($C > 0$) vs. convex ridges ($C < 0$). |
+| **`"mass_balance"`** | $\dot{b}(\mathbf{x})$ | 2 | `inputs.mass_balance_path` | Co-registered to DEM grid; **kept unsmoothed** | Decadal-mean surface mass balance flux divergence; preserves local debris-cover, avalanche, and wind-drift anomalies. |
+| **`"velocity"`** | $u_{s,\text{smooth}, k_c}(\mathbf{x})$ | 2 | `inputs.velocity_path` | Zero-clamped outside `outline_mask`; 2D FFT low-pass filtered at $k_c$ and clamped $\ge 0$ | Decadal-mean surface flow speed (creep + basal sliding); longitudinal coupling scale matched to $k_c$. |
+| **`"velocity_sia"`** | $\frac{(\max(u_{s,\text{smooth}, k_c}(\mathbf{x}), 0))^{1/4}}{(\sin\alpha_{\text{opt}}(\mathbf{x}))^{3/4}}$ | 2 | `inputs.velocity_path` | Uses $k_c$-smoothed, zero-clamped velocity and $k_c$-smoothed, floored SIA slope | Coupled Glen's flow law ($n = 3$) internal ice creep scaling ($D \propto u_s^{1/4} / (\sin\alpha)^{3/4}$). |
+| **`"linear_xy"`** | $(X, Y)$ | 3 | DEM only | Zero-centered, aspect-ratio-scaled planar coordinates | 1st-order regional planar tilt across the glacier catchment. |
+| **`"quadratic_xy"`** | $(X, Y, X^2, Y^2, XY)$ | 6 | DEM only | Zero-centered, aspect-ratio-scaled 2nd-order polynomial | 2nd-order parabolic basin or dome curvature across the glacier domain. |
+
+#### Dynamic Default Candidate Suite Scaling
+
+Combining the 8 single drift primitives yields up to **111 non-redundant multi-drift combinations** (Section 1.8). When `drift_analyzer: true` and `drift_terms: null`, `PySole` dynamically scales the evaluated candidate suite based on the configured input rasters:
+
+| Configured Input Rasters | Active Primitives | Single Drift | Multi Drift | Ordinary | Total Suite Size |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **DEM only** *(default)* | `sia`, `z_dem`, `curvature_dem`, `linear_xy`, `quadratic_xy` (5) | 5 | 18 | 1 | **24 candidates** |
+| **DEM + `mass_balance_path`** | Core 5 + `mass_balance` (6) | 6 | 41 | 1 | **48 candidates** |
+| **DEM + `velocity_path`** | Core 5 + `velocity`, `velocity_sia` (7) | 7 | 52 | 1 | **60 candidates** |
+| **DEM + `mass_balance_path` + `velocity_path`** | All 8 primitives | **8** | **111** | **1** | **120 candidates** |
+
+> [!IMPORTANT]
+> Explicitly requesting `"mass_balance"` without configuring `inputs.mass_balance_path` (or `Solver(..., mass_balance=...)`), or requesting `"velocity"` / `"velocity_sia"` without configuring `inputs.velocity_path` (or `Solver(..., velocity=...)`), raises an immediate `ConfigError` before any data is processed.
 
 ---
 
 ### 1.2 Configuration: Which Models Are Evaluated and Applied
 
-`kriging_parameters.<stage>.drift_terms` is `null` (omitted) or a flat/nested list of the eight primitive terms `sia`, `z_dem`, `curvature_dem`, `mass_balance`, `velocity`, `velocity_sia`, `linear_xy`, `quadratic_xy`. Inside an analyzer suite, `[]` represents the stand-alone Ordinary Kriging candidate. A top-level `[]` is never accepted for `universal` and `regression` (use `null` to omit the terms). Together with `method` and `drift_analyzer` the list is interpreted as follows (one rule table for the configuration file, the CLI and the Python API):
+`kriging_parameters.<stage>.drift_terms` is `null` (omitted) or a flat/nested list of the eight primitive terms `sia`, `z_dem`, `curvature_dem`, `mass_balance`, `velocity`, `velocity_sia`, `linear_xy`, `quadratic_xy`. Inside an analyzer suite, `[]` represents the stand-alone Ordinary Kriging candidate. A top-level `[]` is never accepted for `universal` and `regression` (use `null` to omit the terms). Together with `method` and `drift_analyzer`, the configuration is interpreted as follows across JSON, CLI, and Python API:
 
-| `method` | `drift_analyzer` | Meaning of `drift_terms` |
-| :--- | :--- | :--- |
-| `ordinary` | any | **`ordinary` overrides `drift_analyzer` and `drift_terms`**: both are ignored (the terms are not even validated); one warning is logged if either is set. The analyzer never runs for `ordinary`. |
-| `universal` | `false` | A flat list is **ONE multi-drift model** (all terms together); a non-flat list of multiple models executes a non-interactive multi-model run. `null` or `[]` is an error ("specify drift_terms or use method ordinary"). If both `linear_xy` and `quadratic_xy` are specified in a single model, `linear_xy` is dropped with a warning. If `velocity_sia` is combined with `sia` or `velocity` in a single model, `sia` and/or `velocity` are dropped with a warning. |
-| `universal` | `true` | `null`: the **default suite** (**24** candidates with DEM only, **48** with `mass_balance_path`, **60** with `velocity_path`, or **120** with both). A flat list: the **combinatorial suite** of all valid combinations of the listed terms. A non-flat list: the **explicit suite** of listed models. The winner decides the final model: the Ordinary candidate gives `ordinary`, any drift model gives `universal` with its terms. |
-| `regression` | `false` | The terms are the **Random Forest covariates** (predictor features, e.g. `["sia", "z_dem", "mass_balance"]`) used to train a Random Forest model to predict the large-scale trend before Ordinary Kriging interpolates the residuals. **Default (`null`)**: trains on all non-redundant primitives (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]` plus `"mass_balance"` and `"velocity"` when configured); spatial coordinates only: `["linear_xy"]`; works for every primitive; executed via PyKrige. |
-| `regression` | `true` | The analyzer is skipped with a warning (the Drift Analyzer evaluates Universal Kriging linear drift models; Regression Kriging proceeds directly using the specified `drift_terms`). |
+| `method` | `drift_analyzer` | `drift_terms` syntax | Meaning & Executed Action |
+| :--- | :--- | :--- | :--- |
+| `ordinary` | any | any or `null` | **`ordinary` overrides `drift_analyzer` and `drift_terms`**: both are ignored (terms are not validated) and a single warning is logged if either was set. |
+| `universal` | `false` | flat list (e.g. `["sia", "z_dem"]`) or single nested list (`[["sia", "z_dem"]]`) | Applied directly as **ONE multi-drift model**. Redundant collinear terms (`linear_xy` with `quadratic_xy`; `sia` or `velocity` with `velocity_sia`) are automatically dropped with a warning. `null` or `[]` raises a `ConfigError`. |
+| `universal` | `false` | multi-model nested list (e.g. `[["sia", "z_dem"], ["sia"], []]`) | **Non-interactive multi-model suite**: evaluates all listed candidates via block leave-out CV using the default exclusion buffer radius ($r_{\text{buffer}} = a_0 / 2$) and exports all model rasters, subfolders, and comparison tables without terminal prompts. |
+| `universal` | `true` | `null` | Evaluates the **default suite** (**24** candidates with DEM only, **48** with `mass_balance_path`, **60** with `velocity_path`, or **120** with both). |
+| `universal` | `true` | flat list $\ge 2$ terms (e.g. `[[], "sia", "z_dem", "mass_balance"]`) | Evaluates the **combinatorial suite** of all valid non-redundant subsets of the listed primitives (plus Ordinary if `[]` is included). |
+| `universal` | `true` | explicit multi-model nested list (e.g. `[["velocity_sia", "z_dem"], ["sia"], []]`) | Evaluates the **explicit suite** of listed candidate models directly without combinatorial expansion. |
+| `universal` | `true` | single candidate (`["sia"]`, `[["sia", "z_dem"]]`, or `[[]]`) | **Single-model auto-disable**: logs an informational notice, sets `drift_analyzer: false`, and applies the single model directly without running cross-validation. |
+| `regression` | `false` or `true` | flat list or `null` | **Random Forest covariates**: trains a Random Forest trend model on the listed features before Ordinary Kriging of the residuals (executed via PyKrige; analyzer is skipped with a warning if `true`). **Default (`null`)**: uses all non-redundant primitives (`["sia", "z_dem", "curvature_dem", "quadratic_xy"]` plus `"mass_balance"` and `"velocity"` when configured); spatial coordinates only: `["linear_xy"]`. |
 
-If the method is omitted altogether, the target decides: the direct targets (`"T"` before, `"D"` after migration) use `universal` with `["sia"]` (with `drift_analyzer: true` and `null` terms: the default suite), the product target `"P"` uses `ordinary`.
+If `method` is omitted (`null`), the interpolation target decides: direct targets (`"T"` pre-migration, `"D"` post-migration) default to `universal` with `["sia"]` (or the default suite when `drift_analyzer: true` and `drift_terms: null`), whereas the BSS product target `"P"` defaults to `ordinary`.
 
 #### Suite expansion
 
-The combinatorial suite is every non-empty subset of the listed primitives **except**:
-1. subsets containing both `linear_xy` and `quadratic_xy` (the quadratic trend already contains the linear one), and
-2. subsets containing `velocity_sia` together with `sia` or `velocity` (`velocity_sia` already couples `velocity` and `sia`),
+When `drift_analyzer: true` and `drift_terms` is a flat list (or `null`), the combinatorial suite expands to every non-empty subset of the active primitives **except**:
+1. subsets containing both `linear_xy` and `quadratic_xy` (`quadratic_xy` already contains the linear $[X, Y]$ columns), and
+2. subsets containing `velocity_sia` together with `sia` or `velocity` (`velocity_sia` already couples `velocity` and `sia`).
 
-in canonical order and names (`sia + z_dem`), duplicates removed; a nested `[]` adds the Ordinary candidate (never combined with terms).
+Terms are ordered canonically (`sia + z_dem`), duplicates are removed, and a nested `[]` adds the Ordinary Kriging candidate at the front of the suite:
 
 | `drift_terms` (analyzer on) | Candidates |
 | :--- | :--- |
@@ -71,173 +92,111 @@ in canonical order and names (`sia + z_dem`), duplicates removed; a nested `[]` 
 | `["sia"]` | 1 (auto-disables analyzer) |
 | `[]` | error (use `null`) |
 
-#### Complete Model Suite & Drift Analyzer State Matrix
-
-The configuration interaction between Kriging `method`, `drift_analyzer`, and `drift_terms` is fully governed by the following state matrix:
-
-| Kriging `method` | `drift_analyzer` | `drift_terms` syntax | Interpreted Action | Effective `drift_analyzer` |
-| :--- | :--- | :--- | :--- | :--- |
-| `"ordinary"` | `false` or `true` | any or omitted | Ordinary Kriging (drift terms ignored) | `false` |
-| `"universal"` | `false` | flat list, e.g. `["sia", "z_dem"]` | Single multi-drift model applied directly | `false` |
-| `"universal"` | `false` | single non-flat, e.g. `[["sia", "z_dem"]]` | Unwrapped to single model `["sia", "z_dem"]` | `false` |
-| `"universal"` | `false` | multi-model suite, e.g. `[["sia", "z_dem"], ["sia"]]` | Non-interactive multi-model run with default CV exclusion buffer radius | `false` |
-| `"universal"` | `true` | flat single primitive, e.g. `["sia"]` | Single model applied directly; analyzer auto-disabled | `false` (auto-disabled) |
-| `"universal"` | `true` | flat list $\ge 2$ terms, e.g. `["sia", "z_dem"]` | Combinatorial candidate suite evaluated and ranked | `true` |
-| `"universal"` | `true` | flat list with `[]`, e.g. `[[], "sia", "z_dem"]` | Combinatorial candidate suite + Ordinary evaluated | `true` |
-| `"universal"` | `true` | explicit multi-model suite, e.g. `[["sia", "z_dem"], ["sia"], []]` | Explicit candidate suite evaluated (no combinatorial expansion) | `true` |
-| `"universal"` | `true` | explicit single-model suite, e.g. `[["sia", "z_dem"]]` | Single model applied directly; analyzer auto-disabled | `false` (auto-disabled) |
-| `"regression"` | `false` or `true` | flat list or omitted | Random Forest Regression Kriging (PyKrige) | `false` |
-
-> [!NOTE]
-> When `drift_analyzer: true` is configured with a single model definition (e.g. flat `["sia"]` or non-flat `[["sia", "z_dem"]]`), `PySole` logs an informational notice and automatically sets `drift_analyzer: false` across configuration dictionaries and solver states, directly executing Universal Kriging without interactive prompts or redundant candidate loops.
-
-
 #### Winner handling
 
-The best-ranked candidate is applied. In an interactive terminal the ranking table is shown and the model can be chosen by row number (`3`, `#3`), printed name, term list (`['sia', 'z_dem']`, `sia + z_dem`), `ordinary` or `[]`; Enter keeps #1. In batch mode (`--batch`, no terminal) #1 is applied. Penalized candidates (VIF above 10 or a numerical failure) are always ranked after all other candidates. If no candidate can be cross-validated, a warning is logged and Ordinary Kriging is applied. For the product target `"P"` a warning is logged for the finally applied model if it contains `sia` or `velocity_sia`.
+The best-ranked candidate is applied (or becomes the primary model when multiple models are selected). In an interactive terminal, the ranking table is printed and the user can select one or more models by row number (`3`, `#3`), row ranges (`1-5`, `1, 3, 5-8`), printed name (`sia + z_dem`), term list (`['sia', 'z_dem']`), `ordinary`, or `[]`; pressing `[Enter]` accepts `#1`. In batch mode (`--batch` or non-interactive multi-model suites), no prompt is shown. Penalized candidates ($\text{VIF} > 10$ or numerical CV failure) are always ranked after all non-penalized candidates. If no candidate can be cross-validated, a warning is logged and Ordinary Kriging is applied.
 
 #### Engine support
 
 | Engine | `ordinary` | `universal` (all 119 drift models) | `regression` | `drift_analyzer` |
 | :--- | :--- | :--- | :--- | :--- |
-| `"native"` (default) | yes | yes | PyKrige is used for the stage (logged) | yes |
-| `"pykrige"` | yes | yes, same prediction as native (max. difference below 1e-4 of the value range); **slow for many survey points** (warning, see below) | yes | candidates are ranked with the native engine, the winner is applied with PyKrige |
+| `"native"` (default) | yes | yes (fast Dual Kriging + exact variance) | PyKrige is used for the stage (logged) | yes |
+| `"pykrige"` | yes | yes, same prediction as native (max. difference $< 10^{-4}$ of value range); **slow for large $N$** | yes | candidates are ranked with the native engine; winner is applied with PyKrige |
 
-**Speed of `"pykrige"` with `"universal"`:** PyKrige's `UniversalKriging` computes a leave-one-out fit statistic every time it is created (the class has no option to switch it off, unlike `OrdinaryKriging`). Its run time grows roughly with N³ to N⁴ in the number of survey points, independent of the drift terms and of the grid size: about 2 s for 400 points, 19 s for 800 and several minutes for the 1098 points of the WUK example, while the kriging itself is fast. PySole logs a warning when `engine: "pykrige"` is combined with `method: "universal"`. Use the `"native"` engine (all drift terms, kriging variance) for Universal Kriging with more than a few hundred survey points; `"ordinary"` and `"regression"` with PyKrige are not affected.
-
-PyKrige uses the fitted variogram of `PySole` (so both engines interpolate with the same model) and accepts every drift term: raster terms as several `specified` drifts, `linear_xy` and `quadratic_xy` as scaled functional drifts. For `regression` the covariates are the standardised raster values and the polynomial columns of the listed terms. PyKrige's own estimation variance is about 1 % below the native one (the native variance equals a dense solve of the kriging system); `regression` provides no variance. Only PyKrige supports the 1-D `linear` variogram model; the native engine falls back to `spherical`.
+> [!WARNING]
+> **Speed of `"pykrige"` with `"universal"`:** PyKrige's `UniversalKriging` computes a leave-one-out fit statistic inside its constructor whose runtime scales as $O(N^3)$ to $O(N^4)$ in the number of survey points (several minutes for $N \gtrsim 1{,}000$), independent of the drift terms or grid size. Use `engine: "native"` for Universal Kriging on large datasets; `"ordinary"` and `"regression"` with PyKrige are unaffected.
 
 ---
 
 ### 1.3 Multi-Tier Diagnostic Evaluation Pipeline
 
-The `DriftAnalyzer` evaluates all candidates of the suite (by default 24: 23 single and multi-drift models and Ordinary Kriging) across three diagnostic tiers:
+The `DriftAnalyzer` evaluates all candidates in the active suite (dynamically **24**, **48**, **60**, or **120** candidates by default, or any custom suite) across three diagnostic tiers:
 
 ```
-[ Input Survey Data & Covariates ]
-               │
-               ▼
-┌──────────────────────────────┐
-│ Tier 1: Multicollinearity    │ ──► VIF audit of every candidate (VIF > 10 → penalized)
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│ Tier 2: Exact Spatial CV     │ ──► Leave-One-Profile-Out blocks (LOPO-CV) [if profile_col]
-│   (RMSE, MAE, R², AICc)      │ ──► Spatial buffer blocks (r_buffer = a_0 / 2) [fallback]
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│ Tier 3: Glaciological Rules  │ ──► Warning (sia drift on product P)
-└──────────────┬───────────────┘
-               │
-               ▼
-[ Ranked Candidates with ΔAICc / ΔRMSE %; the best one is applied ]
+[ Input Survey Data & Spatial Covariates (DEM + Optional Mass Balance / Velocity) ]
+                                        │
+                                        ▼
+               ┌────────────────────────────────────────────────┐
+               │ Tier 1: Multicollinearity Audit                │
+               │   • Computes max VIF across drift columns      │
+               │   • Flags VIF > 10 as PENALIZED                │
+               └────────────────────────┬───────────────────────┘
+                                        │
+                                        ▼
+               ┌────────────────────────────────────────────────┐
+               │ Tier 2: Exact Block Leave-Out Spatial CV       │
+               │   • LOPO-CV (if survey_profile_column ≥ 3)     │
+               │   • Spatial Buffer LOOCV (r_buffer = a_0 / 2)  │
+               │   • Computes RMSE, MAE, R², AICc, ΔAICc        │
+               └────────────────────────┬───────────────────────┘
+                                        │
+                                        ▼
+               ┌────────────────────────────────────────────────┐
+               │ Tier 3: Glaciological Target Check             │
+               │   • Warns on 'sia' or 'velocity_sia' with 'P'  │
+               └────────────────────────┬───────────────────────┘
+                                        │
+                                        ▼
+         [ Ranked Candidates by (is_penalized, AICc, RMSE); Winner Applied ]
 ```
 
 ---
 
 ### 1.4 Tier 1: Multicollinearity Auditing
 
-When multiple spatial drift terms $f_1, \dots, f_K$ are combined in a Universal Kriging model, high collinearity between covariates can cause severe numerical instability (ill-conditioning) in the Dual Kriging coefficient matrix $K$.
-
-To detect collinearity, the `DriftAnalyzer` computes the **Variance Inflation Factor (VIF)** for each covariate $f_j$ within a multi-drift set:
+When multiple spatial drift terms $f_1, \dots, f_K$ are combined in a Universal Kriging model, strong collinearity between covariates causes severe ill-conditioning in the Dual Kriging matrix. The `DriftAnalyzer` computes the **Variance Inflation Factor (VIF)** for each covariate $f_j$ in a candidate's standardized design matrix:
 
 $$\text{VIF}_j = \frac{1}{1 - R_j^2}$$
 
-where $R_j^2$ is the coefficient of determination obtained by regressing covariate $f_j$ against all remaining $K-1$ covariates in the drift set.
-- **$\text{VIF}_j = 1$**: Complete orthogonality (no collinearity).
-- **$\text{VIF}_j > 10$**: Severe multicollinearity. Multi-drift combinations containing any covariate with $\text{VIF}_j > 10$ are flagged as **penalized** (`is_penalized = True`) and ranked after all other models. A numerical failure of the cross-validation also penalizes a candidate.
+where $R_j^2$ is the coefficient of determination obtained by regressing covariate $f_j$ against the remaining $K-1$ covariates:
+- **$\text{VIF}_j = 1$**: Complete orthogonality (single-drift and Ordinary models always have $\text{VIF} = 1.0$).
+- **$\text{VIF}_j > 10$**: Severe multicollinearity. Any candidate with $\max_j \text{VIF}_j > 10$ (or a numerical CV failure) is flagged with `is_penalized = True` (`PENALIZED`) and sorted below all valid candidates to prevent runaway extrapolation spikes in unmeasured glacier sectors.
 
 ---
 
 ### 1.5 Tier 2: Geostatistical Spatial Cross-Validation & Ranking Metrics
 
-Standard Leave-One-Out Cross-Validation (LOOCV) can severely underestimate generalization errors on dense line-survey data (such as GPR profiles) due to strong along-track spatial autocorrelation. The `DriftAnalyzer` addresses this by removing whole spatial *blocks* of observations before predicting them:
+Standard point-wise Leave-One-Out Cross-Validation (LOOCV) severely underestimates generalization error on dense line-survey data (such as GPR profiles) due to along-track spatial autocorrelation. The `DriftAnalyzer` eliminates autocorrelation leakage by holding out entire spatial blocks:
 
 #### 1. Leave-One-Profile-Out Cross-Validation (LOPO-CV)
-Activated when `inputs.survey_profile_column` (e.g., `line_id`, `profile_id`) is specified and contains at least 3 distinct profile tracks ($M \ge 3$).
-- For each profile track $m \in \{1, \dots, M\}$, all observations belonging to profile $m$ are held out simultaneously as validation set $V_m$.
-- The kriging system is trained on the remaining profiles $T_m = \bigcup_{k \neq m} V_k$ and the predictions $\hat{y}_i$ are evaluated for all points $i \in V_m$.
-- Measures true inter-track interpolation performance across unmeasured glacier sectors.
+Activated automatically when `inputs.survey_profile_column` (or `--profile-col`) is provided and contains at least 3 distinct profile tracks ($M \ge 3$). Each profile track $m \in \{1, \dots, M\}$ is held out in full while the Kriging system is fitted on the remaining $M - 1$ profiles, directly measuring inter-profile interpolation accuracy across unmeasured glacier sectors.
 
 #### 2. Spatial Buffer LOOCV (Fallback)
-Used when no profile column is defined (or fewer than 3 profiles exist). For each validation node $\mathbf{x}_i$ all neighboring survey observations $\mathbf{x}_j$ located within a spatial exclusion buffer radius $r_{\text{buffer}}$ are excluded from training:
+Used when no profile column is configured (or fewer than 3 profiles exist). For each validation sounding $\mathbf{x}_i$, all neighboring observations within a spatial exclusion buffer radius $r_{\text{buffer}}$ are excluded from the training set:
 
-$$d(\mathbf{x}_i, \mathbf{x}_j) < r_{\text{buffer}} \implies \mathbf{x}_j \notin \text{Training Set}$$
+$$d(\mathbf{x}_i, \mathbf{x}_j) \le r_{\text{buffer}} \implies \mathbf{x}_j \notin \text{Training Set}, \qquad r_{\text{buffer}} = \frac{a_0}{2}$$
 
-The buffer radius is linked to the fitted variogram range $a_0$ (in an interactive terminal it can be changed at the prompt):
+where $a_0$ is the fitted variogram range (configurable interactively at the terminal prompt).
 
-$$r_{\text{buffer}} = \frac{a_0}{2}$$
-
-This eliminates along-track autocorrelation leakage during validation.
-
-#### 3. Exact Block Leave-Out Evaluation
-All candidates and all blocks are evaluated **exactly** from **one** factorization. The kriging matrix of the Ordinary system $A_0 = \begin{pmatrix} \Gamma & \mathbf{1} \\ \mathbf{1}^T & 0 \end{pmatrix}$ (variogram and regularization of the production run, the same for every candidate) is factorized once and inverted to $P = A_0^{-1}$. A candidate with drift columns $G$ is a low-rank update of $P$ (all primitives are columns of one matrix), which gives its dual weights $\mathbf{c}$. Removing a block $B$ gives the leave-block-out residuals (the leave-one-out identity of Dubrule, generalized to blocks)
+#### 3. Fast Exact Block Leave-Out Matrix Update
+All candidates (whether 24 or 120) and all blocks are evaluated **exact up to machine precision** from a **single** $O(N^3)$ factorization of the base Ordinary Kriging matrix $A_0 = \begin{pmatrix} \Gamma & \mathbf{1} \\ \mathbf{1}^T & 0 \end{pmatrix}$ into $P = A_0^{-1}$. Each candidate's drift columns $G$ are incorporated via a fast low-rank Schur-complement update of $P$ to obtain dual weights $\mathbf{c}$, and the exact leave-block-out residual vector for held-out block $B$ is evaluated via the block-generalized Dubrule identity:
 
 $$\mathbf{e}_B = \left(P_{BB}\right)^{-1} \mathbf{c}_B, \qquad \hat{\mathbf{y}}_B = \mathbf{y}_B - \mathbf{e}_B$$
 
-These residuals equal those of a freshly fitted kriging system per fold up to rounding error (about 1e-11 in the tests). Consequently:
-- **Every survey point is evaluated** ($n = N$, deterministic; there is no fold count, no random sub-sampling and no tuning knob). All candidates are scored on the same points: a block that leaves fewer than $n_{\text{drift}} + 3$ training points is skipped for the candidate.
-- The cost is one $O(N^3)$ factorization plus cheap low-rank updates. Measured on a 16-thread workstation for the complete default suite (24 candidates, all points): Wuk (N = 982) 3.1 s pre- and 3.3 s post-migration, Gok (N = 2033) 7.0 s.
-- The memory demand is about $3 N^2$ doubles (N = 5000: 0.6 GB, N = 10 000: 2.4 GB). If this exceeds `max_memory_fraction` of the available memory, the LU factors are kept instead of the inverse and only a deterministic farthest-point subset of the evaluation points (at least 100) is evaluated; a warning is logged and $n$ is then the size of the subset.
-- With `inputs.show_progress` (default `true`) the terminal shows an elapsed-time line while the base system is factorised (it appears only after about one second) and one progress bar over the blocks (points, or profiles for LOPO). The display only reports; it never changes or slows the calculation (results are bit-identical with it switched off).
+- **Deterministic full-sample evaluation ($n = N$)**: Every survey point is evaluated without random sub-sampling. Blocks leaving fewer than $n_{\text{drift}} + 3$ training points are skipped.
+- **Memory Guard**: Full inversion requires $\sim 3 N^2$ float64 words ($\sim 0.6\text{ GB}$ at $N = 5{,}000$). If this exceeds `max_memory_fraction` of available RAM, `PySole` retains the LU factors and evaluates a deterministic farthest-point subset ($n \ge 100$) with a logged warning.
 
 #### 4. Cross-Validation Performance Metrics
-For observed values $y_i$ and cross-validated predictions $\hat{y}_i$ of the $n$ evaluated points ($i = 1, \dots, n$):
+For observed values $y_i$ and cross-validated predictions $\hat{y}_i$ across the $n$ evaluated points ($i = 1, \dots, n$), with residual sum of squares $\text{SS}_{\text{res}} = \sum_{i=1}^n (y_i - \hat{y}_i)^2$ and parameter count $k = n_{\text{drift}}$ (constant + drift columns):
 
-- **Root Mean Squared Error (RMSE)**:
-  $$\text{RMSE} = \sqrt{\frac{1}{n} \sum_{i=1}^n (y_i - \hat{y}_i)^2}$$
+$$\text{RMSE} = \sqrt{\frac{\text{SS}_{\text{res}}}{n}}, \qquad \text{MAE} = \frac{1}{n} \sum_{i=1}^n |y_i - \hat{y}_i|, \qquad R^2 = 1 - \frac{\text{SS}_{\text{res}}}{\sum_{i=1}^n (y_i - \bar{y})^2}$$
 
-- **Mean Absolute Error (MAE)**:
-  $$\text{MAE} = \frac{1}{n} \sum_{i=1}^n |y_i - \hat{y}_i|$$
+$$\text{AICc} = n \ln\left(\frac{\text{SS}_{\text{res}}}{n}\right) + 2k + \frac{2k(k+1)}{n - k - 1}$$
 
-- **Coefficient of Determination ($R^2$)**:
-  $$R^2 = 1 - \frac{\sum_{i=1}^n (y_i - \hat{y}_i)^2}{\sum_{i=1}^n (y_i - \bar{y})^2}$$
+#### 5. Ranking Key, ΔAICc / ΔRMSE % & Diagnostic Case Study
+Candidates are sorted deterministically by the 3-tier tuple:
 
-- **Corrected Akaike Information Criterion (AICc)**:
-  Balancing the residual sum of squares against the number of model parameters $k = n_{\text{drift}}$ (the constant plus all drift columns, see Section 1.8):
+$$\text{Sort Key} = \left(\text{is\_penalized},\ \text{AICc ascending},\ \text{CV-RMSE ascending}\right)$$
 
-  $$\text{AICc} = n \ln\left(\frac{\text{SS}_{\text{res}}}{n}\right) + 2k + \frac{2k(k+1)}{n - k - 1}$$
+1. **Non-penalized first** (`is_penalized = False` before `True`),
+2. **AICc ascending** (balancing fit quality against parameter count $k = n_{\text{drift}}$),
+3. **CV-RMSE ascending** (tie-breaker).
 
-  where $\text{SS}_{\text{res}} = \sum_{i=1}^n (y_i - \hat{y}_i)^2$.
+Two relative columns quantify the distance to the top-ranked model (`#1`):
+- **$\Delta\text{AICc}$** $= \text{AICc} - \text{AICc}_{\text{best non-penalized}}$
+- **$\Delta\text{RMSE \%}$** $= 100 \cdot \left(\text{RMSE} / \text{RMSE}_{\text{top}} - 1\right)$
 
-#### 5. Ranking and the ΔAICc / ΔRMSE % Columns
-Candidates are ranked by (1) **not penalized first** (penalized: VIF above 10 or a numerical failure), (2) **AICc ascending** and (3) CV-RMSE as the tie-break. The primary ranking key is therefore the AICc, not the RMSE: models with almost identical RMSE can swap places because of their different number of parameters (rows 5 and 6 below). Two columns show the distance to the best model:
-
-- **ΔAICc** = AICc − AICc of the best non-penalized model.
-- **ΔRMSE %** = $`100 \cdot (\text{RMSE} / \text{RMSE}_{\#1} - 1)`$, relative to the best-ranked model.
-
-Example (Wuk, pre-migration, product target `"P"`, N = 982, default suite of 24 candidates, as printed by the Drift Analyzer; rows 9-15 and 17-24 are omitted here):
-
-```
-================================================================================================================
-       DRIFT ANALYZER CANDIDATE MODEL RECOMMENDATIONS (PASS 1)
-================================================================================================================
-#   Drift Model                                  RMSE (m)   dRMSE %   AICc       dAICc     VIF      Status
-----------------------------------------------------------------------------------------------------------------
-1   z_dem + curvature_dem                        13.77      0.00      5156.0     0.0       1.1      VALID
-2   z_dem                                        14.93      8.43      5312.9     156.9     1.0      VALID
-3   sia + z_dem                                  15.33      11.37     5367.6     211.6     2.4      WARNING
-4   curvature_dem + linear_xy                    15.99      16.18     5452.5     296.5     1.2      VALID
-5   ordinary                                     16.91      22.84     5555.9     399.9     1.0      VALID
-6   sia + curvature_dem + linear_xy              16.88      22.62     5560.5     404.5     2.9      WARNING
-7   quadratic_xy                                 17.18      24.78     5596.9     440.9     2.9      VALID
-8   curvature_dem + quadratic_xy                 17.18      24.77     5598.8     442.8     4.8      VALID
-...
-16  z_dem + curvature_dem + linear_xy            16.19      17.60     5478.4     322.4     93.5     PENALIZED
-----------------------------------------------------------------------------------------------------------------
-WARNING: SIA slope drift on Product P target causes 1/sin^2(alpha) double-scaling margin artifacts.
-```
-
-`WARNING` marks a candidate with a note (here the `sia` drift on a product target, Section 1.9); `PENALIZED` models (VIF > 10) are listed last even though several of them (for example row 16) have a lower RMSE than the Ordinary model (row 5).
-
----
-
-#### 6. Detailed 24-Candidate Case Study: Understanding Multicollinearity & `PENALIZED` Models (APO Dataset)
-
-The following complete 24-candidate ranking table was generated for the **APO** glacier dataset during post-migration (Pass 2, target $P = D \cdot \sin(\alpha_{\text{opt}})$, $N = 8{,}939$ soundings, spatial exclusion buffer $r_{\text{buffer}} = 1{,}700\text{ m}$):
+The complete 24-candidate ranking table below (APO glacier dataset, Pass 2, product target $P = D \cdot \sin\alpha_{\text{opt}}$, $N = 8{,}939$, $r_{\text{buffer}} = 1{,}700\text{ m}$) illustrates how `VALID`, `WARNING`, and `PENALIZED` models interact:
 
 ```
 ================================================================================================================
@@ -272,108 +231,58 @@ The following complete 24-candidate ranking table was generated for the **APO** 
 ----------------------------------------------------------------------------------------------------------------
 ```
 
-#### Detailed Breakdown of the Ranking Dynamics
-
-1. **Hierarchical 3-Tier Sort Key**:
-   Candidates are evaluated and sorted by:
-   $$\text{Sort Key} = \left(\text{penalized},\ \text{AICc},\ \text{RMSE}\right)$$
-   Any candidate that is **not penalized** (`is_penalized = False`, equivalent to 0) strictly outranks **every penalized model** (`is_penalized = True`, equivalent to 1). Within each group, models are ranked by ascending AICc (favoring parsimonious models that balance residual variance against parameter count $k$), using RMSE as the final tie-breaker.
-
-2. **Why Model #1 (`ordinary`) Wins**:
-   In Pass 2, the interpolation target is the BSS-derived product $P(x,y) = D \cdot \sin(\alpha_{\text{opt}})$. Under the Shallow Ice Approximation, basal shear stress is assumed to be roughly uniform across the glacier sole, meaning $P(x,y)$ has a constant spatial mean. Ordinary Kriging captures this stationary mean directly with zero external drift parameters ($n_{\text{drift}} = 1$), achieving the best parsimony score ($\text{AICc} = 33129.6$). Adding external drift functions increases parameter complexity without providing genuine physical signal, leading to higher AICc penalties.
-
-3. **Why Models with `WARNING` Appear (Rows 2, 8–14, 19–20)**:
-   All candidates displaying `WARNING` contain the `sia` drift ($1/\sin\alpha$). Applying an SIA slope drift to a target that is *already* scaled by $\sin\alpha$ introduces an unphysical $1/\sin^2(\alpha)$ double-scaling artifact at low-gradient glacier margins. The Drift Analyzer evaluates and ranks them objectively, but alerts the user to this physical risk.
-
-4. **The `PENALIZED` Models (Rows 21–24) and the Multicollinearity Gate**:
-   - **The Apparent Paradox**: Model #21 (`sia + z_dem + curvature_dem + quadratic_xy`) actually achieves the **lowest cross-validation RMSE ($6.35\text{ m}$ vs $6.38\text{ m}$)** and **lowest raw AICc ($33053.1$ vs $33129.6$)** of all 24 candidates ($\text{dRMSE} = -0.52\%$, $\text{dAICc} = -76.5$). Despite this seemingly superior fit, it is relegated to the bottom of the table.
-   - **The Common Denominator**: All four penalized models (#21, #22, #23, #24) combine **glacier surface elevation (`z_dem`)** with the **2D quadratic spatial polynomial (`quadratic_xy`: $X, Y, X^2, Y^2, XY$)**. In typical mountain glaciers and ice caps, valley elevation correlates strongly with a second-order polynomial surface ($R^2 > 0.90$), yielding $\text{VIF} > 10$.
-   - **Why VIF $> 10$ is Dangerous in Universal Kriging**:
-     When drift columns are highly collinear, the Universal Kriging matrix $F^T \Gamma^{-1} F$ becomes severely ill-conditioned. To minimize fitting residuals, the solver assigns enormous opposing coefficients to the redundant terms (e.g. $+50{,}000 \cdot Z_{\text{dem}}$ vs $-50{,}000 \cdot \text{quadratic}$). Near dense survey soundings, these opposing weights cancel out (giving deceptively low RMSE). However, in unmeasured sectors or near glacier margins, the terms diverge, creating unphysical runaway elevation spikes, deep craters, or numerical breakdown.
-   - **The Quality Gate**: Flagging models with $\text{VIF} > 10$ as `PENALIZED` acts as an automated protective barrier that ensures ill-conditioned drift combinations are never recommended or applied in production runs.
+- **Why `#1 ordinary` Wins on Target `"P"`**: Because $P(x,y) = D \cdot \sin\alpha_{\text{opt}}$ already incorporates the first-order SIA slope scaling, its spatial mean is nearly stationary ($n_{\text{drift}} = 1$, $\text{AICc} = 33129.6$).
+- **Why Rows 21–24 Are `PENALIZED` Despite Lower Raw RMSE**: Row 21 achieves a slightly lower raw RMSE ($6.35\text{ m}$, $\Delta\text{RMSE} = -0.52\%$) by combining `z_dem` with `quadratic_xy` ($\text{VIF} = 11.4 > 10$). Because valley elevation correlates strongly with a 2nd-order spatial polynomial, the solver assigns large opposing weights to `z_dem` and `quadratic_xy` that cancel along survey tracks but diverge in unprobed areas. The $\text{VIF} > 10$ gate automatically relegates rows 21–24 to the bottom of the ranking.
 
 ---
 
 ### 1.6 Reading the AICc: ΔAICc, ΔRMSE % and the Role of $n$
 
-The cross-validation residuals are already out-of-sample, but the AICc still weighs them against the number of parameters. Because $\text{SS}_{\text{res}}$ is summed over $n$ points, the likelihood term of the AICc **grows with $n$** whereas the penalty $2k + 2k(k+1)/(n-k-1)$ does not. For two candidates, a complex one (more parameters, $\Delta k = k_1 - k_2$) and a simple one,
+For two candidates differing by $\Delta k = k_{\text{complex}} - k_{\text{simple}}$ parameters, the AICc difference is approximately:
 
-$$\text{AICc}_{\text{simple}} - \text{AICc}_{\text{complex}} \approx n \ln\frac{\text{SS}_{\text{simple}}}{\text{SS}_{\text{complex}}} - 2\,\Delta k = 2n \ln\frac{\text{RMSE}_{\text{simple}}}{\text{RMSE}_{\text{complex}}} - 2\,\Delta k ,$$
+$$\text{AICc}_{\text{simple}} - \text{AICc}_{\text{complex}} \approx 2n \ln\left(\frac{\text{RMSE}_{\text{simple}}}{\text{RMSE}_{\text{complex}}}\right) - 2\,\Delta k$$
 
-so the complex model wins as soon as $n \ln(1 + g) > \Delta k$ for the relative RMSE gain $g$. The more survey points exist, the smaller the RMSE gain that suffices.
+Because the log-likelihood term scales linearly with sample count $n = N$ while the parameter penalty $2\,\Delta k$ is constant, large surveys ($N > 1{,}000$) can produce a large $\Delta\text{AICc}$ ($> 10$) from a very small relative RMSE reduction ($< 0.5\%$).
 
-**Worked example.** A relative RMSE gain of only $g = 0.14\,\%$ with $\Delta k = 1$ gives $2n \ln(1.0014) \approx 0.0028\,n$:
-- $n = 400$: 1.1 < $2\Delta k$ = 2, the simpler model wins.
-- $n = 982$: 2.7 > 2, the more complex model wins (break-even at $n \approx 700$).
-
-The same data set can therefore select different models if $n$ changes (for example by sub-sampling the survey points), although the physical benefit of the extra term is identical. The analyzer evaluates **all** survey points, so $n = N$ is a property of the data set and not a policy choice; AICc values of PySole 0.4.4 (which used 100 random points) are not comparable with the present ones.
-
-A real example from the Gok data set (post-migration, N = 2033) shows a statistically clear but practically small difference:
-
-```
-#   Drift Model                                  RMSE (m)   dRMSE %   AICc       dAICc     VIF      Status
-----------------------------------------------------------------------------------------------------------------
-1   sia + linear_xy                              4.11       0.00      5756.3     0.0       1.5      WARNING
-2   linear_xy                                    4.13       0.52      5775.4     19.1      1.1      VALID
-```
-
-Adding `sia` to `linear_xy` reduces the RMSE by only 0.52 %, but the ΔAICc of 19.1 is large because $n$ is large.
-
-**Best practice**
-- Read **ΔAICc together with ΔRMSE %**: ΔAICc tells whether a difference is detectable with $n$ points, ΔRMSE % whether it matters. A rule of thumb for ΔAICc: below 2 the models are practically indistinguishable, 4-7 clearly less supported, above 10 essentially unsupported.
-- If the best models are within ΔRMSE % of about 1 % (or ΔAICc below about 2), prefer the **simpler and physically better justified** model; statistical rankings do not replace physical judgment.
-- Use `inputs.survey_profile_column` (LOPO blocks) whenever profile IDs exist. Without profiles check that the top models are stable when the buffer radius (default $a_0/2$, asked for in the interactive prompt) is changed.
-- Treat `WARNING` (for example `sia` on a product target) and `PENALIZED` (VIF) models with care even if they rank high.
+**Best-Practice Guidelines:**
+- **Inspect $\Delta\text{AICc}$ and $\Delta\text{RMSE \%}$ together**: $\Delta\text{AICc} < 2$ indicates statistically indistinguishable models; $\Delta\text{AICc} > 10$ indicates strong statistical support. However, if the top candidates differ by $\Delta\text{RMSE \%} \lesssim 1\%$, prefer the **simpler, physically best-justified** model.
+- **Prefer LOPO-CV (`survey_profile_column`)**: Whenever profile line IDs exist, LOPO-CV provides the most realistic test of cross-glacier interpolation skill.
+- **Heed `WARNING` and `PENALIZED` flags**: Avoid selecting `WARNING` models on product target `"P"` (Section 1.9) or `PENALIZED` models ($\text{VIF} > 10$) even if their raw RMSE is slightly lower.
 
 ---
 
-### 1.7 Covariates and Variogram Used by the Analyzer
+### 1.7 Variogram, Standardization & Shared Kriging System
 
-The analyzer uses exactly the covariates and the variogram of the production run:
+The `DriftAnalyzer` and the production Kriging pass share the exact same mathematical objects (`KrigingSystem` and `DriftBasis`), ensuring that cross-validation rankings reflect production behavior without approximation:
 
-- **Variogram:** one variogram model is fitted once per stage and shared by every candidate and by the production Kriging (`PySole` fits a spherical model to the BSS product $P$ for all targets; with direct targets `"T"` / `"D"` this fit is used as it is). Candidates differ only in their drift columns; the regularization (relative Tikhonov offset of $10^{-6}$ times the sill) is the same.
-- **Raster covariates** are built once per stage:
-  - `sia` is $1/\sin(\alpha_{\text{opt}})$ with the slope floor `slope_floor_deg` applied.
-  - `z_dem` is the surface DEM $Z_{\text{dem}}(x, y)$.
-  - `curvature_dem` is the Laplacian of the DEM smoothed with the optimized corner wavenumber $k_c$: $\nabla^2 Z_{\text{smooth}, k_c}(x, y)$.
-  - `mass_balance` (when `inputs.mass_balance_path` is provided) is the decadal-mean surface mass balance $\dot{b}(x, y)$, co-registered to `GridGeometry` and kept **unsmoothed** so localized debris-cover insulation, avalanche cones, wind-drift bowls, and cirque shading patterns are preserved.
-  - `velocity` (when `inputs.velocity_path` is provided) is the decadal-mean surface flow velocity magnitude $u_{s,\text{smooth}, k_c}(x, y)$, zero-clamped outside `outline_mask` and low-pass filtered with the same 2D FFT Gaussian filter at the optimal cutoff wavenumber $k_c$ to remove speckle and match the longitudinal stress-coupling scale.
-  - `velocity_sia` (when `inputs.velocity_path` is provided) is the coupled Glen's flow law ($n = 3$) SIA creep power-law covariate $\left(\max(u_{s,\text{smooth}, k_c}(x, y), 0)\right)^{1/4} / \left(\sin\alpha_{\text{opt}}(x, y)\right)^{3/4}$.
-  All `PySole` grids are bottom-up (row 0 is the southernmost row); the covariates are sampled at the survey points by bilinear interpolation on the grid coordinates with the same code as in the production run, so analyzer and production see identical values. Every raster covariate is standardized with the mean and standard deviation of its full grid (cells without data are set to 0 after standardization); the coordinate trends use centered and scaled coordinates.
-- **Analyzer and production** share one Kriging system (`KrigingSystem`) and one drift construction, so a ranking is not an approximation of the production run.
+1. **Single Shared Variogram & Regularization**: One theoretical variogram model (`range`, `sill`, `nugget`) is fitted once per stage on the BSS product $P$ and shared across all candidates and the production solve, with identical Tikhonov diagonal regularization ($10^{-6} \times \text{sill}$).
+2. **Grid Standardization & Bilinear Sampling**: All active raster covariates (`sia`, `z_dem`, `curvature_dem`, `mass_balance`, `velocity`, `velocity_sia`; see table in Section 1.1) are constructed once per stage on the bottom-up `GridGeometry`, standardized by their full-grid mean and standard deviation (with NaNs filled as `0.0` post-standardization), and sampled at survey coordinates via bilinear interpolation. Coordinate drifts (`linear_xy`, `quadratic_xy`) use zero-centered, aspect-ratio-scaled coordinates in $[-1, 1]$.
 
 ---
 
 ### 1.8 Systematic Multi-Drift Model Suite
 
-Universal Kriging in `PySole` natively supports combining external raster drifts (`["sia"]`, `["z_dem"]`, `["curvature_dem"]`, `["mass_balance"]`, `["velocity"]`, `["velocity_sia"]`) with polynomial spatial coordinates (`["linear_xy"]`, `["quadratic_xy"]`) into an augmented trend model $U(x,y) = \sum_{k=0}^K \beta_k f_k(x,y)$. The complete suite comprises **111 systematic multi-drift combinations** (**18 core DEM combinations** always available + **93 auxiliary glaciological combinations** enabled when `mass_balance_path` and/or `velocity_path` are configured), categorized into three structural groups. Notice that `velocity_sia` already couples `velocity` and `sia` and is never combined with `sia` or `velocity` in the same model. $n_{\text{drift}}$ in the headings counts all columns of the augmented system **including the constant** (Ordinary baseline); the number of drift columns without the constant is `CandidateDriftResult.n_terms = n_drift - 1`, and the AICc uses $k = n_{\text{drift}}$:
+Universal Kriging in `PySole` combines the 6 physical raster primitives (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`) with the 2 polynomial coordinate trends (`"linear_xy"`, `"quadratic_xy"`) into an augmented linear drift basis:
+
+$$U(x,y) = \beta_0 + \sum_{r \in \mathcal{R}} \beta_r f_r(x,y) + p_{\text{coord}}(x,y)$$
+
+After pruning collinear combinations (`linear_xy` + `quadratic_xy` and `velocity_sia` + `sia`/`velocity`), the complete suite comprises **111 systematic multi-drift combinations** (**18 core DEM combinations** always available + **93 auxiliary glaciological combinations** enabled when `mass_balance_path` and/or `velocity_path` are configured), organized into three structural groups. Below, $n_{\text{drift}}$ counts all columns of the augmented system **including the constant** $\beta_0$ (`CandidateDriftResult.n_terms = n_drift - 1`, and AICc uses $k = n_{\text{drift}}$).
 
 #### 1. 33 Multi-Raster Physical Combinations (No Coordinate Trend)
 
-These models couple multiple terrain and glaciological raster covariates without assuming a regional spatial coordinate tilt:
+These models combine 2 to 5 physical raster covariates ($p_{\text{coord}}(x,y) = 0$) without imposing a planar or parabolic coordinate tilt:
 
-##### Core DEM Multi-Raster Combinations (4 models)
+$$U(x,y) = \beta_0 + \sum_{r \in \mathcal{R}} \beta_r f_r(x,y), \qquad n_{\text{drift}} = 1 + |\mathcal{R}|$$
 
-- **`["sia", "z_dem"]` ($n_{\text{drift}} = 3$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 Z_{\text{dem}}(x,y)$$
-  *Glaciological Rationale*: Couples local slope-driven ice flux dynamics (Shallow Ice Approximation) with macroscopic valley hypsometry (elevation lapse rate and accumulation gradients). Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
+##### Core DEM Multi-Raster Combinations (4 models — always available)
+Couple SIA slope scaling $\sin(\alpha_{\text{opt}})^{-1}$, surface elevation $Z_{\text{dem}}$, and $k_c$-smoothed Laplacian curvature $\nabla^2 Z_{\text{smooth}, k_c}$:
+- **`["sia", "z_dem"]` ($n_{\text{drift}} = 3$)**: SIA ice-flux slope dynamics coupled with macroscopic valley hypsometry.
+- **`["sia", "curvature_dem"]` ($n_{\text{drift}} = 3$)**: SIA slope dynamics coupled with concave trough focusing ($\nabla^2 Z > 0$) and convex ridge thinning ($\nabla^2 Z < 0$).
+- **`["z_dem", "curvature_dem"]` ($n_{\text{drift}} = 3$)**: Slope-independent terrain morphometry (safe on both direct targets `"T"`/`"D"` and product target `"P"`).
+- **`["sia", "z_dem", "curvature_dem"]` ($n_{\text{drift}} = 4$)**: Complete core DEM physical trio uniting SIA slope, elevation hypsometry, and valley curvature.
 
-- **`["sia", "curvature_dem"]` ($n_{\text{drift}} = 3$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 \nabla^2 Z_{\text{smooth}}(x,y)$$
-  *Glaciological Rationale*: Couples SIA slope dynamics with 2D terrain curvature, capturing enhanced overdeepenings in concave bowls ($\nabla^2 Z > 0$) and reduced thickness across divergent convex ridges ($\nabla^2 Z < 0$). Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
-
-- **`["z_dem", "curvature_dem"]` ($n_{\text{drift}} = 3$)**:
-  $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 \nabla^2 Z_{\text{smooth}}(x,y)$$
-  *Glaciological Rationale*: Terrain morphometry model independent of slope singularity; combines regional elevation gradients with local concave/convex topographic focusing. Contains no `sia` term, hence no double scaling on product targets $P$.
-
-- **`["sia", "z_dem", "curvature_dem"]` ($n_{\text{drift}} = 4$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 Z_{\text{dem}}(x,y) + a_3 \nabla^2 Z_{\text{smooth}}(x,y)$$
-  *Glaciological Rationale*: Full physical multi-raster model uniting viscous ice flow physics (SIA), valley hypsometry ($Z_{\text{dem}}$), and cross-sectional bowl concavity ($\nabla^2 Z_{\text{smooth}}$). Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
-
-##### Surface Mass Balance (`mass_balance`) Combinations (7 models)
-
-Couple unsmoothed decadal-mean surface mass balance $\dot{b}(x, y)$ (preserving debris-cover, avalanche, and wind-drift anomalies) with SIA slope and DEM morphometry:
-
+##### Surface Mass Balance (`mass_balance`) Combinations (7 models — requires `mass_balance_path`)
+Couple unsmoothed decadal-mean surface mass balance $\dot{b}(x, y)$ (capturing localized debris-cover insulation, avalanche accumulation cones, and wind-drift bowls) with SIA slope and DEM morphometry:
 - **`["sia", "mass_balance"]` ($n_{\text{drift}} = 3$)**
 - **`["z_dem", "mass_balance"]` ($n_{\text{drift}} = 3$)**
 - **`["curvature_dem", "mass_balance"]` ($n_{\text{drift}} = 3$)**
@@ -382,10 +291,8 @@ Couple unsmoothed decadal-mean surface mass balance $\dot{b}(x, y)$ (preserving 
 - **`["z_dem", "curvature_dem", "mass_balance"]` ($n_{\text{drift}} = 4$)**
 - **`["sia", "z_dem", "curvature_dem", "mass_balance"]` ($n_{\text{drift}} = 5$)**
 
-##### Surface Flow Velocity (`velocity`) Combinations (15 models)
-
-Couple $k_c$-smoothed decadal-mean surface flow speed $u_{s,\text{smooth}, k_c}(x, y)$ independently with SIA slope, DEM morphometry, and surface mass balance (allowing the solver to weight creep/sliding velocity and slope separately):
-
+##### Surface Flow Velocity (`velocity`) Combinations (15 models — requires `velocity_path`; 8 also require `mass_balance_path`)
+Couple $k_c$-smoothed, off-glacier zero-clamped surface velocity $u_{s,\text{smooth}, k_c}(x, y)$ as an independent additive covariate alongside SIA slope, DEM morphometry, and mass balance (allowing the solver to weight basal sliding/creep speed and surface slope independently):
 - **`["sia", "velocity"]` ($n_{\text{drift}} = 3$)**
 - **`["z_dem", "velocity"]` ($n_{\text{drift}} = 3$)**
 - **`["curvature_dem", "velocity"]` ($n_{\text{drift}} = 3$)**
@@ -402,10 +309,8 @@ Couple $k_c$-smoothed decadal-mean surface flow speed $u_{s,\text{smooth}, k_c}(
 - **`["z_dem", "curvature_dem", "mass_balance", "velocity"]` ($n_{\text{drift}} = 5$)**
 - **`["sia", "z_dem", "curvature_dem", "mass_balance", "velocity"]` ($n_{\text{drift}} = 6$)**
 
-##### Coupled SIA Creep Velocity (`velocity_sia`) Combinations (7 models)
-
-Couple the Glen's flow law ($n = 3$) creep thickness driver $u_{s,\text{smooth}, k_c}^{1/4} / (\sin\alpha_{\text{opt}})^{3/4}$ with DEM morphometry and surface mass balance:
-
+##### Coupled SIA Creep Velocity (`velocity_sia`) Combinations (7 models — requires `velocity_path`; 4 also require `mass_balance_path`)
+Couple Glen's flow law ($n = 3$) internal deformation thickness proxy $u_{s,\text{smooth}, k_c}^{1/4} / (\sin\alpha_{\text{opt}})^{3/4}$ with DEM morphometry and surface mass balance:
 - **`["z_dem", "velocity_sia"]` ($n_{\text{drift}} = 3$)**
 - **`["curvature_dem", "velocity_sia"]` ($n_{\text{drift}} = 3$)**
 - **`["mass_balance", "velocity_sia"]` ($n_{\text{drift}} = 3$)**
@@ -414,42 +319,24 @@ Couple the Glen's flow law ($n = 3$) creep thickness driver $u_{s,\text{smooth},
 - **`["curvature_dem", "mass_balance", "velocity_sia"]` ($n_{\text{drift}} = 4$)**
 - **`["z_dem", "curvature_dem", "mass_balance", "velocity_sia"]` ($n_{\text{drift}} = 5$)**
 
+---
+
 #### 2. 39 Multi-Raster + 1st-Order Linear Spatial Trend (`linear_xy`)
 
-These models overlay physical raster covariates onto a flat, planar regional spatial gradient ($a_X X + a_Y Y$):
+These models superimpose any non-empty combination of the physical raster covariates ($\mathcal{R}$) onto a 1st-order planar regional coordinate gradient ($p_{\text{coord}}(x,y) = a_X X + a_Y Y$, adding 2 coordinate columns):
 
-##### Core DEM + `linear_xy` Combinations (7 models)
+$$U(x,y) = \beta_0 + \sum_{r \in \mathcal{R}} \beta_r f_r(x,y) + a_X X + a_Y Y, \qquad n_{\text{drift}} = 3 + |\mathcal{R}|$$
 
-- **`["sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y$$
-  *Glaciological Rationale*: Viscous flow physics modulated by a constant regional geographic planar gradient across the catchment. Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
+##### Core DEM + `linear_xy` Combinations (7 models — always available)
+- **`["sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**
+- **`["z_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**
+- **`["curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**
+- **`["z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**
+- **`["sia", "z_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**
+- **`["sia", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**
+- **`["sia", "z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 6$)**
 
-- **`["z_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
-  $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y$$
-  *Glaciological Rationale*: Elevation-dependent valley thickening superimposed on an asymmetric regional tectonic or climatic tilt. Contains no `sia` term, hence no double scaling on product targets $P$.
-
-- **`["curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 4$)**:
-  $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y$$
-  *Glaciological Rationale*: Morphometric terrain concavity/convexity combined with a planar spatial gradient across the glacier domain. Contains no `sia` term, hence no double scaling on product targets $P$.
-
-- **`["z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
-  $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 \nabla^2 Z_{\text{smooth}}(x,y) + a_3 X + a_4 Y$$
-  *Glaciological Rationale*: Joint elevation and curvature morphometry overlaid on a 1st-order regional geographic trend. Contains no `sia` term, hence no double scaling on product targets $P$.
-
-- **`["sia", "z_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 Z_{\text{dem}}(x,y) + a_3 X + a_4 Y$$
-  *Glaciological Rationale*: SIA slope dynamics and elevation hypsometry augmented with a linear geographic planar tilt. Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
-
-- **`["sia", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 5$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 \nabla^2 Z_{\text{smooth}}(x,y) + a_3 X + a_4 Y$$
-  *Glaciological Rationale*: SIA slope dynamics and terrain Laplacian concavity augmented with a linear geographic planar tilt. Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
-
-- **`["sia", "z_dem", "curvature_dem", "linear_xy"]` ($n_{\text{drift}} = 6$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 Z_{\text{dem}}(x,y) + a_3 \nabla^2 Z_{\text{smooth}}(x,y) + a_4 X + a_5 Y$$
-  *Glaciological Rationale*: Complete physical raster trio (SIA, elevation, curvature) combined with a regional linear planar gradient. Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
-
-##### Surface Mass Balance (`mass_balance`) + `linear_xy` Combinations (8 models)
-
+##### Surface Mass Balance (`mass_balance`) + `linear_xy` Combinations (8 models — requires `mass_balance_path`)
 - **`["mass_balance", "linear_xy"]` ($n_{\text{drift}} = 4$)**
 - **`["sia", "mass_balance", "linear_xy"]` ($n_{\text{drift}} = 5$)**
 - **`["z_dem", "mass_balance", "linear_xy"]` ($n_{\text{drift}} = 5$)**
@@ -459,8 +346,7 @@ These models overlay physical raster covariates onto a flat, planar regional spa
 - **`["z_dem", "curvature_dem", "mass_balance", "linear_xy"]` ($n_{\text{drift}} = 6$)**
 - **`["sia", "z_dem", "curvature_dem", "mass_balance", "linear_xy"]` ($n_{\text{drift}} = 7$)**
 
-##### Surface Flow Velocity (`velocity`) + `linear_xy` Combinations (16 models)
-
+##### Surface Flow Velocity (`velocity`) + `linear_xy` Combinations (16 models — requires `velocity_path`; 8 also require `mass_balance_path`)
 - **`["velocity", "linear_xy"]` ($n_{\text{drift}} = 4$)**
 - **`["sia", "velocity", "linear_xy"]` ($n_{\text{drift}} = 5$)**
 - **`["z_dem", "velocity", "linear_xy"]` ($n_{\text{drift}} = 5$)**
@@ -478,8 +364,7 @@ These models overlay physical raster covariates onto a flat, planar regional spa
 - **`["z_dem", "curvature_dem", "mass_balance", "velocity", "linear_xy"]` ($n_{\text{drift}} = 7$)**
 - **`["sia", "z_dem", "curvature_dem", "mass_balance", "velocity", "linear_xy"]` ($n_{\text{drift}} = 8$)**
 
-##### Coupled SIA Creep Velocity (`velocity_sia`) + `linear_xy` Combinations (8 models)
-
+##### Coupled SIA Creep Velocity (`velocity_sia`) + `linear_xy` Combinations (8 models — requires `velocity_path`; 4 also require `mass_balance_path`)
 - **`["velocity_sia", "linear_xy"]` ($n_{\text{drift}} = 4$)**
 - **`["z_dem", "velocity_sia", "linear_xy"]` ($n_{\text{drift}} = 5$)**
 - **`["curvature_dem", "velocity_sia", "linear_xy"]` ($n_{\text{drift}} = 5$)**
@@ -489,42 +374,24 @@ These models overlay physical raster covariates onto a flat, planar regional spa
 - **`["curvature_dem", "mass_balance", "velocity_sia", "linear_xy"]` ($n_{\text{drift}} = 6$)**
 - **`["z_dem", "curvature_dem", "mass_balance", "velocity_sia", "linear_xy"]` ($n_{\text{drift}} = 7$)**
 
+---
+
 #### 3. 39 Multi-Raster + 2nd-Order Quadratic Spatial Trend (`quadratic_xy`)
 
-These models overlay physical raster covariates onto a 2nd-order parabolic spatial surface ($a_X X + a_Y Y + a_{XX} X^2 + a_{YY} Y^2 + a_{XY} XY$):
+These models superimpose any non-empty combination of the physical raster covariates ($\mathcal{R}$) onto a 2nd-order parabolic regional surface ($p_{\text{coord}}(x,y) = a_X X + a_Y Y + a_{XX} X^2 + a_{YY} Y^2 + a_{XY} XY$, adding 5 coordinate columns):
 
-##### Core DEM + `quadratic_xy` Combinations (7 models)
+$$U(x,y) = \beta_0 + \sum_{r \in \mathcal{R}} \beta_r f_r(x,y) + a_X X + a_Y Y + a_{XX} X^2 + a_{YY} Y^2 + a_{XY} XY, \qquad n_{\text{drift}} = 6 + |\mathcal{R}|$$
 
-- **`["sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 XY$$
-  *Glaciological Rationale*: SIA slope physics combined with a 2nd-order parabolic spatial surface capturing large-scale ice-cap dome or basin curvature. Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
+##### Core DEM + `quadratic_xy` Combinations (7 models — always available)
+- **`["sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**
+- **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**
+- **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**
+- **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**
+- **`["sia", "z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**
+- **`["sia", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**
+- **`["sia", "z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 9$)**
 
-- **`["z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
-  $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 XY$$
-  *Glaciological Rationale*: Elevation hypsometry combined with a 2D quadratic spatial surface, ideal for radial ice caps or complex branched catchments. Contains no `sia` term, hence no double scaling on product targets $P$.
-
-- **`["curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**:
-  $$U(x,y) = a_1 \nabla^2 Z_{\text{smooth}}(x,y) + a_2 X + a_3 Y + a_4 X^2 + a_5 Y^2 + a_6 XY$$
-  *Glaciological Rationale*: Morphometric terrain concavity/convexity combined with a quadratic regional surface. Contains no `sia` term, hence no double scaling on product targets $P$.
-
-- **`["z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
-  $$U(x,y) = a_1 Z_{\text{dem}}(x,y) + a_2 \nabla^2 Z_{\text{smooth}}(x,y) + a_3 X + a_4 Y + a_5 X^2 + a_6 Y^2 + a_7 XY$$
-  *Glaciological Rationale*: Dual elevation-curvature morphometry combined with a 2nd-order spatial polynomial. Recommended for alpine valley glaciers and ice caps. Contains no `sia` term, hence no double scaling on product targets $P$.
-
-- **`["sia", "z_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 Z_{\text{dem}}(x,y) + a_3 X + a_4 Y + a_5 X^2 + a_6 Y^2 + a_7 XY$$
-  *Glaciological Rationale*: SIA slope physics and elevation hypsometry combined with 2D quadratic spatial coordinates. Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
-
-- **`["sia", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 \nabla^2 Z_{\text{smooth}}(x,y) + a_3 X + a_4 Y + a_5 X^2 + a_6 Y^2 + a_7 XY$$
-  *Glaciological Rationale*: SIA slope physics and Laplacian concavity combined with 2D quadratic spatial coordinates. Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
-
-- **`["sia", "z_dem", "curvature_dem", "quadratic_xy"]` ($n_{\text{drift}} = 9$)**:
-  $$U(x,y) = a_1 \sin(\alpha_{\text{opt}}(x,y))^{-1} + a_2 Z_{\text{dem}}(x,y) + a_3 \nabla^2 Z_{\text{smooth}}(x,y) + a_4 X + a_5 Y + a_6 X^2 + a_7 Y^2 + a_8 XY$$
-  *Glaciological Rationale*: Comprehensive physical and spatial representation combining all three raster drivers with a full 2nd-order spatial polynomial. Intended for direct targets (`"T"` or `"D"`); on product targets $P$ it is flagged with a warning.
-
-##### Surface Mass Balance (`mass_balance`) + `quadratic_xy` Combinations (8 models)
-
+##### Surface Mass Balance (`mass_balance`) + `quadratic_xy` Combinations (8 models — requires `mass_balance_path`)
 - **`["mass_balance", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**
 - **`["sia", "mass_balance", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**
 - **`["z_dem", "mass_balance", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**
@@ -534,8 +401,7 @@ These models overlay physical raster covariates onto a 2nd-order parabolic spati
 - **`["z_dem", "curvature_dem", "mass_balance", "quadratic_xy"]` ($n_{\text{drift}} = 9$)**
 - **`["sia", "z_dem", "curvature_dem", "mass_balance", "quadratic_xy"]` ($n_{\text{drift}} = 10$)**
 
-##### Surface Flow Velocity (`velocity`) + `quadratic_xy` Combinations (16 models)
-
+##### Surface Flow Velocity (`velocity`) + `quadratic_xy` Combinations (16 models — requires `velocity_path`; 8 also require `mass_balance_path`)
 - **`["velocity", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**
 - **`["sia", "velocity", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**
 - **`["z_dem", "velocity", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**
@@ -553,8 +419,7 @@ These models overlay physical raster covariates onto a 2nd-order parabolic spati
 - **`["z_dem", "curvature_dem", "mass_balance", "velocity", "quadratic_xy"]` ($n_{\text{drift}} = 10$)**
 - **`["sia", "z_dem", "curvature_dem", "mass_balance", "velocity", "quadratic_xy"]` ($n_{\text{drift}} = 11$)**
 
-##### Coupled SIA Creep Velocity (`velocity_sia`) + `quadratic_xy` Combinations (8 models)
-
+##### Coupled SIA Creep Velocity (`velocity_sia`) + `quadratic_xy` Combinations (8 models — requires `velocity_path`; 4 also require `mass_balance_path`)
 - **`["velocity_sia", "quadratic_xy"]` ($n_{\text{drift}} = 7$)**
 - **`["z_dem", "velocity_sia", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**
 - **`["curvature_dem", "velocity_sia", "quadratic_xy"]` ($n_{\text{drift}} = 8$)**
@@ -568,113 +433,51 @@ These models overlay physical raster covariates onto a 2nd-order parabolic spati
 
 ### 1.9 Tier 3: Glaciological Rules
 
-The `DriftAnalyzer` applies one domain-specific rule:
-- **Product Target Warning**: When interpolating BSS product targets $P(x,y) = D(x,y) \sin \alpha(x,y)$, applying inverse-slope-dependent drifts (`sia`, $\sin(\alpha)^{-1}$, or `velocity_sia`, $u_s^{1/4} \sin(\alpha)^{-3/4}$) causes double-scaling ratio artifacts at low-slope margins ($P / \sin \alpha \to D / \sin^2 \alpha$). Every tested candidate containing `sia` or `velocity_sia` on a product target $P$ logs **one warning** and is flagged in the table (`WARNING`), but all metrics are computed and the candidate is **ranked normally** (it is not penalized). The slope floor `slope_floor_deg` only keeps the drift finite in nearly flat cells; there is no further safeguard against the double scaling, so `ordinary` or non-slope-divided drifts (`z_dem`, `curvature_dem`, `mass_balance`, `velocity`) are recommended for product targets. The warning is logged again for the finally applied model if it contains `sia` or `velocity_sia`.
+When interpolating the BSS product target $P(x,y) = D(x,y) \cdot \sin\alpha_{\text{opt}}(x,y)$, dividing the recovered product by $\sin\alpha_{\text{opt}}(x,y)$ while also using an inverse-slope drift (`"sia"`, $\propto \sin(\alpha)^{-1}$, or `"velocity_sia"`, $\propto u_s^{1/4} \sin(\alpha)^{-3/4}$) introduces a $1/\sin^2\alpha$ or $1/\sin^{7/4}\alpha$ double-scaling artifact at low-slope glacier margins.
+- Every candidate containing `"sia"` or `"velocity_sia"` evaluated on target `"P"` logs a warning and is marked `WARNING` in the ranking table, but is **ranked normally** (not penalized).
+- For target `"P"`, `ordinary` or slope-free drifts (`z_dem`, `curvature_dem`, `mass_balance`, `velocity`, `linear_xy`, `quadratic_xy`) are recommended, whereas `"sia"` and `"velocity_sia"` are designed for direct targets (`"T"` or `"D"`).
 
 ---
 
 ### 1.10 Multi-Model Comparison Suite, Directory Architecture & Comparison Tables
 
-When evaluating drift models, glaciologists frequently need to systematically contrast how different theoretical assumptions (e.g. baseline Ordinary Kriging vs. SIA physical drift vs. elevation hypsometry) impact the spatial geometry of the interpolated bedrock surface, ice thickness distribution, and basal shear stress fields. `PySole` provides an automated multi-model comparison workflow:
+To systematically compare how competing drift hypotheses affect reconstructed bedrock topography, ice thickness, and basal shear stress, `PySole` supports evaluating and exporting multiple drift models in a single run:
 
-#### 1. Interactive Multi-Model Selection
-In interactive terminal sessions, when presented with the Drift Analyzer candidate recommendation table, the user can select one or multiple models simultaneously:
-- **Recommended Default**: Press `[Enter]` or type `#` to accept the top-ranked model (`#1`).
-- **Single Model**: Enter a row number (`3`, `#3`), canonical model name (`sia + z_dem`), or `ordinary`.
-- **Row Ranges**: Hyphenated intervals (e.g. `1-5` or `#1-#5`) select all candidates within the range.
-- **Comma-Separated Lists**: Discrete model numbers (e.g. `1, 3` or `1, 2, 5`).
-- **Mixed Combinations**: Arbitrary combinations of lists and ranges (e.g. `1-3, 5` or `3, 1-2`).
-- **Deduplication & Order of Precedence**: Inputs are automatically validated and deduplicated. The first model entered becomes the **primary production model** that determines downstream migration soundings and final returns, while all remaining models are queued for comparative multi-model evaluation.
+#### 1. Selecting Multiple Models (Interactive or JSON)
+- **Interactive Terminal Prompt**: Enter a single row (`3`), a hyphenated range (`1-5`), a comma-separated list (`1, 3, 5`), or mixed combinations (`1-3, 7`). The first model listed becomes the **primary production model** (driving Pass 1 migration soundings and return values), while all remaining models are queued for comparative evaluation.
+- **Pre-Defined JSON Suite**: Pass a nested list of candidate models in `kriging_parameters.<stage>.drift_terms` (e.g. `[["velocity_sia", "z_dem"], ["sia", "mass_balance"], ["sia"], []]`, with `drift_analyzer: true` or `false`; see Section 2.2). All listed models are evaluated and exported non-interactively without terminal prompts.
 
-#### 2. Configuration via JSON (`pysole.json`)
-Users can pre-define an explicit candidate suite in `pysole.json` under `kriging_parameters.<stage>.drift_terms` as a list of model candidate lists:
-```json
-{
-  "kriging_parameters": {
-    "pre_migration": {
-      "method": "universal",
-      "drift_analyzer": true,
-      "drift_terms": [
-        ["sia", "z_dem"],
-        ["sia"],
-        []
-      ]
-    },
-    "post_migration": {
-      "method": "universal",
-      "drift_analyzer": true,
-      "drift_terms": [
-        ["sia", "z_dem", "curvature_dem"],
-        ["sia", "z_dem"],
-        ["z_dem"],
-        []
-      ]
-    }
-  }
-}
-```
-When an explicit suite of candidate models is configured in JSON, the Drift Analyzer automatically evaluates all specified models and executes the multi-model comparison pipeline **non-interactively without prompt interruption**.
-
-#### 3. Data Storage & Output Directory Architecture
-To keep output repositories organized and avoid collision between competing models without deep directory nesting:
-
-- **Diagnostic Plots (`figures/`)**:
-  - Global pre-interpolation diagnostic plots (`01` through `05`: variograms, BSS optimization curves, 3D ray migration vectors) remain in root `figures/`.
-  - Post-interpolation diagnostic plots (`06` through `11`: bedrock elevation map, embedded bedrock map, ice thickness map and histogram, basal shear stress map and histogram) are routed into model subdirectories:
-    ```
-    figures/
-    ├── 01_pass1_variogram.png
-    ├── 02_pass1_kc_variogram_optimization.png
-    ├── 03_3d_migration.png
-    ├── 04_pass2_variogram.png
-    ├── 05_pass2_kc_variogram_optimization.png
-    ├── sia_z_dem/
-    │   ├── 06_bedrock_elevation_and_uncertainty_sia_z_dem.png
-    │   ├── 07_final_embedded_bedrock_sia_z_dem.png
-    │   ├── 08_final_thickness_and_uncertainty_sia_z_dem.png
-    │   ├── 09_final_thickness_histogram_sia_z_dem.png
-    │   ├── 10_final_basal_shear_stress_and_uncertainty_sia_z_dem.png
-    │   └── 11_final_basal_shear_stress_histogram_sia_z_dem.png
-    └── ordinary/
-        ├── 06_bedrock_elevation_and_uncertainty_ordinary.png
-        └── ...
-    ```
-- **Spatial Rasters & Tables (`results/` or configured `<output_dir>`)**:
-  - All GeoTIFF and raster outputs append the applied drift model slug at the end of the filename (e.g. `[<output_prefix>_]bedrock_<model_slug>.tif`, `[<output_prefix>_]thickness_<model_slug>.tif`, `[<output_prefix>_]traveltime_<model_slug>.tif`, `[<output_prefix>_]basal_shear_stress_<model_slug>.tif`, and uncertainty rasters `[<output_prefix>_]*_uncertainty_<model_slug>.tif`) and are saved **directly into the defined `<output_dir>`** (flat output directory structure; no model subdirectories are generated in `<output_dir>`).
-  - Cross-model comparison tables (`drift_model_comparison.txt`, `drift_model_comparison.csv`, and `drift_model_comparison.md`) are exported **directly into `<output_dir>`**.
-  - Global survey observation soundings and migration coordinate tables (`[<output_prefix>_]migrated_points.csv`) remain in the root `<output_dir>` without a drift model slug.
-
-#### 4. Cross-Model Comparison Tables
-When multiple drift models are evaluated or selected for production comparison, `PySole` formats and exports comprehensive comparison files in three synchronized formats directly under `<output_dir>`:
-1. `.txt`: ASCII console table (`drift_model_comparison.txt`) combining Pass 1 and Pass 2 interpolation results.
-2. `.csv`: Machine-readable tabular file (`drift_model_comparison.csv`) with a unified RFC 4180 schema and a `stage` column identifying "Pass 1" vs. "Pass 2".
-3. `.md`: GitHub-Flavored Markdown document (`drift_model_comparison.md`) with clean, perfectly-aligned tables and KaTeX math support.
-
-- **Pass 1 Section**:
-  Contrasts cross-validation rankings (Rank, Drift Model, CV RMSE, $\Delta$RMSE %, AICc, $\Delta$AICc, VIF, Status) with full domain traveltime distribution metrics $T(x,y)$ (Mean, Median, Std, Max in `ns` or `m`). If `pre_migration.calculate_uncertainty: true`, an additional column `Mean Uncertainty` is dynamically appended, reporting the spatial mean traveltime Kriging uncertainty $\sigma_T$ in traveltime units over all glaciated cells within the glacier outline (`outline_mask & (traveltime > 0)`).
-- **Pass 2 Section**:
-  Contrasts cross-validation rankings with both ice thickness distribution metrics $H(x,y)$ (Mean, Median, Std, Max in meters) and basal shear stress distribution metrics $\tau_b(x,y)$ (Mean, Median, Std, Max in kPa). If `post_migration.calculate_uncertainty: true`, an additional column `Mean Unc (m)` is dynamically appended under the Ice Thickness section, reporting the spatial mean ice thickness Kriging uncertainty $\sigma_D$ in meters over all glaciated cells within the glacier outline (`outline_mask & (thickness > 0)`).
-- **Uncertainty Toggle**: When `calculate_uncertainty: false` (the default setting to avoid unnecessary $O(N^2 \cdot m)$ operations), the uncertainty column is omitted, keeping comparison tables concise and performant.
-- **Graceful Error Handling**: If any candidate model fails numerical matrix inversion or regularized Cholesky decomposition, it is marked `FAILED` in the table with safe zeroed metrics, allowing the remaining candidates in the suite to complete cleanly.
+#### 2. Output Directory & Figure Subfolder Architecture
+- **Diagnostic Plots (`figures/` or `<plots_dir>`)**:
+  - Pre-interpolation plots (`01`–`05`: variograms, $k_c$ optimization curves, 3D migration vectors) are saved in root `figures/`.
+  - Post-interpolation plots (`06`–`11`: bedrock, embedded bedrock, thickness map & histogram, BSS map & histogram) are isolated into `figures/<model_slug>/` with `<model_slug>` appended to each filename (`06_<prefix>bedrock_elevation_and_uncertainty_<model_slug>.png`, ..., `11_...`).
+- **Spatial Rasters & Comparison Tables (`results/` or `<output_dir>`)**:
+  - All raster grids append `<model_slug>` (`[<output_prefix>_]bedrock_<model_slug>.tif`, `thickness_<model_slug>.tif`, `traveltime_<model_slug>.tif`, `basal_shear_stress_<model_slug>.tif`, and `*_uncertainty_<model_slug>.tif`) and are saved **flat inside `<output_dir>`**.
+  - Migrated sounding coordinates (`[<output_prefix>_]migrated_points.csv`) are exported once for the primary model in root `<output_dir>`.
+  - Unified cross-stage comparison tables (`drift_model_comparison.txt`, `drift_model_comparison.csv`, `drift_model_comparison.md`) are saved directly in `<output_dir>`, contrasting CV metrics (`RMSE`, `ΔRMSE %`, `AICc`, `ΔAICc`, `VIF`, `Status`) against full-domain traveltime $T(x,y)$ (Pass 1), ice thickness $H(x,y)$ (Pass 2), basal shear stress $\tau_b(x,y)$ (Pass 2), and optional mean Kriging uncertainty (`Mean Unc`, when `calculate_uncertainty: true`).
 
 ---
 
-## 2. Configuration & CLI Examples
+## 2. Configuration, CLI & Python API Examples
 
-### 2.1 JSON Configuration Schema
+### 2.1 Dynamic Default Suite with Glaciological Rasters (24 / 48 / 60 / 120 Candidates)
+
+When `drift_analyzer: true` and `drift_terms` is omitted (`null`), `PySole` automatically evaluates **24 candidates** (DEM only), **48 candidates** (with `mass_balance_path`), **60 candidates** (with `velocity_path`), or all **120 candidates** (when both `mass_balance_path` and `velocity_path` are provided, as shown below):
 
 ```json
 {
   "inputs": {
     "dem_path": "surface_dem.tif",
     "outline_path": "glacier_outline.shp",
+    "mass_balance_path": "decadal_smb.tif",
+    "velocity_path": "decadal_velocity.tif",
     "survey_data_path": "gpr_picks.csv",
     "survey_data_type": "one_way_traveltime",
     "survey_profile_column": "line_id"
   },
   "kriging_parameters": {
     "pre_migration": {
-      "interpolation_target": "P",
+      "interpolation_target": "T",
       "method": "universal",
       "drift_analyzer": true
     },
@@ -687,36 +490,105 @@ When multiple drift models are evaluated or selected for production comparison, 
 }
 ```
 
-With `drift_analyzer: true` and `drift_terms` omitted (`null`) the default suite of 24 candidates is evaluated; `drift_terms` select the suite or the model:
+### 2.2 Explicit Single-Model, Combinatorial Subset & Non-Interactive Multi-Model Suites
+
+- **Single Multi-Drift Model (`drift_analyzer: false` with a flat list)** in Pass 1 (`["velocity_sia", "mass_balance", "z_dem"]`) combined with a **Combinatorial Subset Suite (`drift_analyzer: true` with a flat list)** in Pass 2:
 
 ```json
 {
+  "inputs": {
+    "dem_path": "surface_dem.tif",
+    "outline_path": "glacier_outline.shp",
+    "mass_balance_path": "decadal_smb.tif",
+    "velocity_path": "decadal_velocity.tif",
+    "survey_data_path": "gpr_picks.csv"
+  },
   "kriging_parameters": {
     "pre_migration": {
       "interpolation_target": "T",
       "method": "universal",
       "drift_analyzer": false,
-      "drift_terms": ["sia", "z_dem"]
+      "drift_terms": ["z_dem", "mass_balance", "velocity_sia"]
     },
     "post_migration": {
       "interpolation_target": "D",
       "method": "universal",
       "drift_analyzer": true,
-      "drift_terms": [[], "sia", "z_dem"]
+      "drift_terms": [[], "sia", "z_dem", "mass_balance", "velocity_sia"]
     }
   }
 }
 ```
 
-The pre-migration stage applies ONE multi-drift model (`sia` + `z_dem`); the post-migration stage ranks the 4 candidates Ordinary, `sia`, `z_dem` and `sia + z_dem` and applies the best one.
+- **Non-Interactive Explicit Multi-Model Comparison Suite (`drift_analyzer: false` with nested candidate lists)**: Evaluates and exports only the specified candidate models using the default spatial exclusion buffer radius ($r_{\text{buffer}} = a_0 / 2$) without interactive prompts:
 
-### 2.2 CLI Commands
-
-```bash
-# Execute PySole with interactive Drift Analyzer and profile grouping
-pysole pysole.json --drift-analyzer --profile-col line_id
-
-# Force non-interactive batch mode
-pysole pysole.json --batch
+```json
+{
+  "inputs": {
+    "dem_path": "surface_dem.tif",
+    "outline_path": "glacier_outline.shp",
+    "mass_balance_path": "decadal_smb.tif",
+    "velocity_path": "decadal_velocity.tif",
+    "survey_data_path": "gpr_picks.csv"
+  },
+  "kriging_parameters": {
+    "pre_migration": {
+      "interpolation_target": "T",
+      "method": "universal",
+      "drift_analyzer": false,
+      "drift_terms": [
+        ["z_dem", "velocity_sia"],
+        ["sia", "z_dem"],
+        []
+      ]
+    },
+    "post_migration": {
+      "interpolation_target": "D",
+      "method": "universal",
+      "drift_analyzer": false,
+      "drift_terms": [
+        ["z_dem", "mass_balance", "velocity_sia"],
+        ["sia", "z_dem", "mass_balance"],
+        ["sia", "z_dem"],
+        []
+      ]
+    }
+  }
+}
 ```
 
+### 2.3 Command-Line Interface (CLI) Examples
+
+```bash
+# Run with the interactive Drift Analyzer enabled across both passes and LOPO-CV profile grouping
+pysole pysole.json --drift-analyzer --profile-col line_id
+
+# Run non-interactively in batch mode (automatically selects #1 ranked model or runs explicit suite)
+pysole pysole.json --drift-analyzer --batch
+```
+
+### 2.4 Python API Examples (`Solver` & `recommend_drift_model`)
+
+```python
+import pysole
+
+# Initialize Solver with optional decadal mass balance and surface flow velocity rasters
+solver = pysole.Solver(
+    dem="surface_dem.tif",
+    outline="glacier_outline.shp",
+    mass_balance="decadal_smb.tif",
+    velocity="decadal_velocity.tif",
+    survey_data_path="gpr_picks.csv",
+    survey_profile_column="line_id",
+    pre_interpolation_target="T",
+    pre_kriging_method="universal",
+    pre_drift_analyzer=True,
+    post_interpolation_target="D",
+    post_kriging_method="universal",
+    post_drift_analyzer=True,
+)
+
+# Inspect the full 120-candidate Drift Analyzer ranking programmatically
+rankings = solver.recommend_drift_model(stage="post_migration", interactive=False)
+print(f"Top model: {rankings[0].name} (AICc = {rankings[0].aicc:.1f}, RMSE = {rankings[0].cv_rmse:.2f} m)")
+```
