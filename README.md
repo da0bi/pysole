@@ -438,7 +438,7 @@ The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kri
    <i>Captures morphometric terrain curvature—predicting smaller depths over convex ridges (∇²<i>Z</i> &lt; 0) and larger depths in concave bowls and troughs (∇²<i>Z</i> &gt; 0).</i>
 
 - **Surface Mass Balance Drift Model (`["mass_balance"]`)**:
-   Uses a decadal-mean surface mass balance raster <i>ḃ</i>(<i>x</i>,<i>y</i>) (configured via `inputs.mass_balance_path` or `Solver(..., mass_balance=...)`), co-registered to the DEM grid and kept **unsmoothed** to preserve localized accumulation and ablation anomalies (supraglacial debris cover, avalanche cones, wind drift, topographic shading):
+   Uses a mean surface mass balance raster <i>ḃ</i>(<i>x</i>,<i>y</i>) (configured via `inputs.mass_balance_path` or `Solver(..., mass_balance=...)`), co-registered to the DEM grid and kept **unsmoothed** to preserve localized accumulation and ablation anomalies (supraglacial debris cover, avalanche cones, wind drift, topographic shading):
 
    <p align="center">
    $$U(x,y) = \dot{b}(x,y)$$
@@ -447,7 +447,7 @@ The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kri
    <i>Captures mass-conservation forcing where localized mass turnover anomalies drive ice thickness variations independent of elevation alone.</i>
 
 - **Surface Flow Velocity Magnitude Drift Model (`["velocity"]`)**:
-   Uses a decadal-mean surface flow velocity magnitude raster <i>u</i><sub>s,smooth,<i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = |<b>u</b><sub>s</sub>(<i>x</i>,<i>y</i>)|<sub><i>k</i><sub>c</sub></sub> (configured via `inputs.velocity_path` or `Solver(..., velocity=...)`), zero-clamped outside the glacier outline (`~outline_mask -> 0`) and spectrally low-pass filtered at the optimal cutoff wavenumber <i>k</i><sub>c</sub>:
+   Uses a mean surface flow velocity magnitude raster <i>u</i><sub>s,smooth,<i>k</i><sub>c</sub></sub>(<i>x</i>,<i>y</i>) = |<b>u</b><sub>s</sub>(<i>x</i>,<i>y</i>)|<sub><i>k</i><sub>c</sub></sub> (configured via `inputs.velocity_path` or `Solver(..., velocity=...)`), zero-clamped outside the glacier outline (`~outline_mask -> 0`) and spectrally low-pass filtered at the optimal cutoff wavenumber <i>k</i><sub>c</sub>:
 
    <p align="center">
    $$U(x,y) = u_{s,\text{smooth}, k_c}(x,y)$$
@@ -487,38 +487,36 @@ The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kri
 
 ---
 
-##### Multi-Drift Model Structure & Maximum Available Models: 120 (119 Drift Models + 1 Ordinary Kriging)
+##### Multi-Drift Model Structure & Maximum Available Models: 120 (119 Drift Models + Ordinary Kriging)
 
 `PySole` combines the physical raster drifts (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`) with each other and with the spatial polynomial coordinate trends (`"linear_xy"`, `"quadratic_xy"`) into an augmented multi-drift Universal Kriging system.
 
 With all 8 primitives active, the combinatorial space is governed by **three independent groups** after applying the two collinearity pruning rules:
 
 1. **SIA & Velocity group** (`"sia"`, `"velocity"`, `"velocity_sia"` — **5 valid states**):
-   - ∅ (none)
+   - `[]` (no SIA or velocity term)
    - `["sia"]`
    - `["velocity"]`
    - `["sia", "velocity"]`
    - `["velocity_sia"]` (never combined with `"sia"` or `"velocity"` in the same model because it already couples both)
 2. **Independent scalar rasters** (`"z_dem"`, `"curvature_dem"`, `"mass_balance"` — **2³ = 8 valid states**):
-   - Each of the 3 rasters can be independently included or excluded.
+   - From `[]` (no scalar raster term) up to `["z_dem", "curvature_dem", "mass_balance"]` (each of the 3 rasters independently included or excluded).
 3. **Polynomial coordinate trends** (`"linear_xy"`, `"quadratic_xy"` — **3 valid states**):
-   - ∅ (none), `["linear_xy"]`, or `["quadratic_xy"]` (never combined together because `"quadratic_xy"` already contains the linear [<i>x</i>, <i>y</i>] columns).
+   - `[]` (no polynomial term), `["linear_xy"]`, or `["quadratic_xy"]` (never combined together because `"quadratic_xy"` already contains the linear [<i>x</i>, <i>y</i>] columns).
 
-<p align="center">
-$$\text{Total Candidates} = 5 \times 8 \times 3 = 120$$
-</p>
+In total, **5 × 8 × 3 = 120 candidate models**: selecting `[]` across all three groups yields **Ordinary Kriging** (`[]`), while the remaining **119** combinations are **Universal Kriging drift models** (8 single-drift + 111 multi-drift).
 
 ###### Breakdown of the 120 Candidates
 
 | Category | Count | Details |
 | :--- | :---: | :--- |
-| **Ordinary Kriging baseline** | **1** | `[]` (no drift terms) |
-| **Single Drift Models** | **8** | `["sia"]`, `["z_dem"]`, `["curvature_dem"]`, `["mass_balance"]`, `["velocity"]`, `["velocity_sia"]`, `["linear_xy"]`, `["quadratic_xy"]` |
-| **Multi-Raster Drift Models (no polynomial)** | **33** | All 5 × 8 − 1 (empty) − 6 (single rasters) = 33 combinations of 2 to 5 raster terms |
-| **Multi-Drift Models with `"linear_xy"`** | **39** | All 5 × 8 − 1 = 39 non-empty raster combinations paired with `"linear_xy"` |
-| **Multi-Drift Models with `"quadratic_xy"`** | **39** | All 5 × 8 − 1 = 39 non-empty raster combinations paired with `"quadratic_xy"` |
-| **Total Universal Kriging Drift Models** | **119** | **8 Single + 111 Multi Drift Models** |
-| **Total Evaluated by `DriftAnalyzer`** | **120** | **119 Universal Kriging Drift Models + 1 Ordinary Kriging** |
+| **Ordinary Kriging** | **1** | `[]` (no drift terms: Group 1 = `[]`, Group 2 = `[]`, Group 3 = `[]`) |
+| **Single Drift Models** | **8** | 6 single-raster (`["sia"]`, `["z_dem"]`, `["curvature_dem"]`, `["mass_balance"]`, `["velocity"]`, `["velocity_sia"]` + 2 single-polynomial (`["linear_xy"]`, `["quadratic_xy"]`) |
+| **Multi-Raster Drift Models (no polynomial)** | **33** | 5 × 8 − 1 − 6 = 33 combinations of 2 to 5 raster terms: 5 × 8 = 40 raster states (Group 1 × Group 2, with Group 3 = `[]`), minus 1 empty state (`[]`, Ordinary Kriging) and minus the 6 single-raster models above) |
+| **Multi-Drift Models with `"linear_xy"`** | **39** | 5 × 8 − 1 = 39 models (6 single-raster + 33 multi-raster paired with `"linear_xy"`): 5 × 8 = 40 raster states paired with `"linear_xy"`, minus 1 where the raster state is `[]` (which is the single-drift model `["linear_xy"]` above) |
+| **Multi-Drift Models with `"quadratic_xy"`** | **39** | 5 × 8 − 1 = 39 models (6 single-raster + 33 multi-raster paired with `"quadratic_xy"`): 5 × 8 = 40 raster states paired with `"quadratic_xy"`, minus 1 where the raster state is `[]` (which is the single-drift model `["quadratic_xy"]` above) |
+| **Total Universal Kriging Drift Models** | **119** | **8 Single + 111 Multi Drift Models** (33 + 39 + 39 = 111) |
+| **Total Evaluated by `DriftAnalyzer`** | **120** | **119 Universal Kriging Drift Models + Ordinary Kriging** |
 
 ###### Dynamic Suite Size by Configured Input Rasters (`drift_terms: null`, `drift_analyzer: true`)
 
