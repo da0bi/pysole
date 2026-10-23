@@ -343,20 +343,20 @@ For rock outcrop holes to be detected from a Shapefile (`.shp`):
 
 <a id="parsing-survey-data-csv"></a>
 ### 3. Parsing of Survey Data CSV Files
-`PySole` ingests point survey datasets (`inputs.survey_data_path`) containing scattered soundings of two-way traveltime [ns], one-way traveltime [ns], or direct ice thickness [m]. Internally, soundings are mapped into a standardized array:
+`PySole` ingests point survey datasets (`inputs.survey_data_path`) containing scattered soundings of two-way traveltime, one-way traveltime, or direct ice thickness. Internally, soundings are mapped into a standardized array:
 
 <p align="center">
 $$\begin{bmatrix} X & Y & Z_{\text{surface}} & \text{value} & [\text{profile\_id}] \end{bmatrix}$$
 </p>
 
 - **Missing Surface Elevation <i>Z</i><sub>surface</sub> (3- vs. 4-Column Inputs)**: For 3-column inputs [<i>X</i>, <i>Y</i>, value], `PySole` automatically samples <i>Z</i><sub>surface</sub> from the surface DEM (`inputs.dem_path`) using 2D bilinear interpolation. For 4-column inputs [<i>X</i>, <i>Y</i>, <i>Z</i>, value], the explicit surface elevation <i>Z</i> is preserved directly.
-- **With Header Row** (e.g. `profile_id,x,y,z,twt` or `x,y,twt,profile_id`): `PySole` extracts the profile column matching `inputs.survey_profile_column` (default: `"profile_id"`) by name, enabling arbitrary column ordering and Leave-One-Profile-Out cross-validation (LOPO-CV). If <i>Z</i><sub>surface</sub> is omitted (e.g. `x,y,twt,profile_id`), `PySole` samples <i>Z</i><sub>surface</sub> from the DEM automatically.
+- **With Header Row** (e.g. `profile_id,x,y,z,twt` or `x,y,twt,profile_id`): `PySole` extracts the profile column matching `inputs.survey_profile_column` (default: `"profile_id"`) by name, allowing the profile column to be placed anywhere while the remaining columns follow the standard [X,Y,(Z),value] sequence, and enabling Leave-One-Profile-Out cross-validation in the [Drift Analyzer](docs/drift_analyzer.md). If <i>Z</i><sub>surface</sub> is omitted (e.g. `x,y,twt,profile_id`), `PySole` samples <i>Z</i><sub>surface</sub> from the DEM automatically.
 - **Without Header Row (Headerless Numeric CSV)**: Read positionally via `np.loadtxt`. Columns must strictly follow standard positional ordering: [<i>X</i>, <i>Y</i>, value], [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value], or [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value, profile_id]. Setting `"survey_profile_column": null` bypasses header searching and suppresses warnings. Non-standard ordering (e.g. placing profile IDs in Column 0, or omitting <i>Z</i> in a 4-column headerless file) causes positional misinterpretation or spatial DEM bounds errors.
 
 > [!TIP]
 > **Rule of Thumb for Survey CSVs:**
 > - **Headerless CSV:** Follow strict positional ordering `[X, Y, value]`, `[X, Y, Z_surface, value]`, or `[X, Y, Z_surface, value, profile_id]`. Set `"survey_profile_column": null`.
-> - **Header Present:** Column order is flexible. If <i>Z</i><sub>surface</sub> is omitted or `profile_id` is in a non-standard position, always include a header row and set `"survey_profile_column"` to match the header name.
+> - **Header Present:** The profile column can appear in any position. If <i>Z</i><sub>surface</sub> is omitted or `profile_id` is in a non-standard position, always include a header row and set `"survey_profile_column"` to match the header name.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
 ### 4. Wavenumbers and Wavelengths
