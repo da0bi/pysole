@@ -454,7 +454,8 @@ def plot_migration_displacement_vectors(
                 linewidths=0.5,
                 alpha=0.7,
             )
-            ax1.clabel(cnt1, inline=True, fmt="%d ns", fontsize=6.0, inline_spacing=3)
+            if horizontal_displacement_visualization != "grad_traveltime_grid":
+                ax1.clabel(cnt1, inline=True, fmt="%d ns", fontsize=6.0, inline_spacing=3)
 
         divider1 = make_axes_locatable(ax1)
         cax1 = divider1.append_axes("right", size="5%", pad=0.1)
@@ -625,7 +626,15 @@ def plot_migration_horizontal_displacements(
         plot_extent = _get_cell_edge_extent(x_coords, y_coords)
 
         cmap_gradient = LinearSegmentedColormap.from_list(
-            "white_ylorrd", ["#ffffff", "#ffeda0", "#feb24c", "#f03b20", "#800026"]
+            "white_ylorrd",
+            [
+                (0.0, "#ffffff"),
+                (0.06, "#fee08b"),
+                (0.18, "#fdae61"),
+                (0.40, "#f46d43"),
+                (0.70, "#d53e4f"),
+                (1.0, "#7a001e"),
+            ],
         ).copy()
         if hasattr(cmap_gradient, "with_extremes"):
             cmap_gradient = cmap_gradient.with_extremes(bad=(1.0, 1.0, 1.0, 0.0))
@@ -982,7 +991,7 @@ def plot_final_ice_thickness_and_uncertainty(
         ax1.set_xlabel("X [m]")
         ax1.set_ylabel("Y [m]")
 
-        cmap2 = _get_transparent_cmap("magma")
+        cmap2 = _get_transparent_cmap("plasma")
         if _uncertainty_unavailable(kriged_std):
             _draw_uncertainty_placeholder(ax2, plot_extent, "Mean Kriging Uncertainty: n/a")
         else:

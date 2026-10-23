@@ -159,10 +159,10 @@ where $R_j^2$ is the coefficient of determination obtained by regressing covaria
 Standard point-wise Leave-One-Out Cross-Validation (LOOCV) severely underestimates generalization error on dense line-survey data (such as GPR profiles) due to along-track spatial autocorrelation. The `DriftAnalyzer` eliminates autocorrelation leakage by holding out entire spatial blocks:
 
 #### 1. Leave-One-Profile-Out Cross-Validation (LOPO-CV)
-Activated automatically when `inputs.survey_profile_column` (or `--profile-col`) is provided and contains at least 3 distinct profile tracks ($M \ge 3$). Each profile track $m \in \{1, \dots, M\}$ is held out in full while the Kriging system is fitted on the remaining $M - 1$ profiles, directly measuring inter-profile interpolation accuracy across unmeasured glacier sectors.
+Activated automatically when `inputs.survey_profile_column` (default: `"profile_id"`) or `--profile-col` matches a column in the survey dataset with at least 3 distinct profile tracks ($M \ge 3$). Each profile track $m \in \{1, \dots, M\}$ is held out in full while the Kriging system is fitted on the remaining $M - 1$ profiles, directly measuring inter-profile interpolation accuracy across unmeasured glacier sectors.
 
 #### 2. Spatial Buffer LOOCV (Fallback)
-Used when no profile column is configured (or fewer than 3 profiles exist). For each validation sounding $\mathbf{x}_i$, all neighboring observations within a spatial exclusion buffer radius $r_{\text{buffer}}$ are excluded from the training set:
+Used when no profile column is found or configured (or fewer than 3 profiles exist). For each validation sounding $\mathbf{x}_i$, all neighboring observations within a spatial exclusion buffer radius $r_{\text{buffer}}$ are excluded from the training set:
 
 $$d(\mathbf{x}_i, \mathbf{x}_j) \le r_{\text{buffer}} \implies \mathbf{x}_j \notin \text{Training Set}, \qquad r_{\text{buffer}} = \frac{a_0}{2}$$
 
@@ -246,7 +246,7 @@ Because the log-likelihood term scales linearly with sample count $n = N$ while 
 
 **Best-Practice Guidelines:**
 - **Inspect $\Delta\text{AICc}$ and $\Delta\text{RMSE \%}$ together**: $\Delta\text{AICc} < 2$ indicates statistically indistinguishable models; $\Delta\text{AICc} > 10$ indicates strong statistical support. However, if the top candidates differ by $\Delta\text{RMSE \%} \lesssim 1\%$, prefer the **simpler, physically best-justified** model.
-- **Prefer LOPO-CV (`survey_profile_column`)**: Whenever profile line IDs exist, LOPO-CV provides the most realistic test of cross-glacier interpolation skill.
+- **Prefer LOPO-CV (`survey_profile_column`)**: Whenever profile line IDs exist (by default matching column `"profile_id"`, or a custom name passed via `survey_profile_column` / `--profile-col`), LOPO-CV provides the most realistic test of cross-glacier interpolation skill.
 - **Heed `WARNING` and `PENALIZED` flags**: Avoid selecting `WARNING` models on product target `"P"` (Section 1.9) or `PENALIZED` models ($\text{VIF} > 10$) even if their raw RMSE is slightly lower.
 
 ---
@@ -473,7 +473,7 @@ When `drift_analyzer: true` and `drift_terms` is omitted (`null`), `PySole` auto
     "velocity_path": "decadal_velocity.tif",
     "survey_data_path": "gpr_picks.csv",
     "survey_data_type": "one_way_traveltime",
-    "survey_profile_column": "line_id"
+    "survey_profile_column": "profile_id"
   },
   "kriging_parameters": {
     "pre_migration": {
@@ -560,7 +560,10 @@ When `drift_analyzer: true` and `drift_terms` is omitted (`null`), `PySole` auto
 ### 2.3 Command-Line Interface (CLI) Examples
 
 ```bash
-# Run with the interactive Drift Analyzer enabled across both passes and LOPO-CV profile grouping
+# Run with the interactive Drift Analyzer enabled across both passes (uses default profile_id for LOPO-CV)
+pysole pysole.json --drift-analyzer
+
+# Override the profile column name when the CSV uses a custom header (e.g. line_id)
 pysole pysole.json --drift-analyzer --profile-col line_id
 
 # Run non-interactively in batch mode (automatically selects #1 ranked model or runs explicit suite)
@@ -579,7 +582,7 @@ solver = pysole.Solver(
     mass_balance="decadal_smb.tif",
     velocity="decadal_velocity.tif",
     survey_data_path="gpr_picks.csv",
-    survey_profile_column="line_id",
+    survey_profile_column="profile_id",
     pre_interpolation_target="T",
     pre_kriging_method="universal",
     pre_drift_analyzer=True,

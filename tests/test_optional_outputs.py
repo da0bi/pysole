@@ -461,6 +461,62 @@ class TestOptionalOutputs(unittest.TestCase):
         self.assertIn("03_apo_3d_migration_hor_displacements.png", created_grad)
         self.assertEqual(len(created_grad), 12)
 
+    def test_figure_03_contour_labels_suppressed_for_grad_traveltime_grid(self):
+        """Verifies that clabels are omitted in Figure 03 for grad_traveltime_grid, but shown for arrows."""
+        from unittest.mock import patch
+        from pysole.plotting import plot_migration_displacement_vectors
+
+        tt = np.arange(100, dtype=float).reshape(10, 10)
+        pts = np.array([[10.0, 10.0], [20.0, 20.0]])
+        mig_pts = np.array([[10.0, 10.0, 100.0, 10.0], [20.0, 20.0, 100.0, 10.0]])
+        dxi = np.zeros(2)
+        dyi = np.zeros(2)
+        x_coords = np.linspace(0, 100, 10)
+        y_coords = np.linspace(0, 100, 10)
+
+        captured_axes = []
+
+        def mock_save(plt_mod, p_dir, fname):
+            captured_axes.append((fname, list(plt_mod.gcf().axes)))
+
+        with patch("pysole.plotting._save_figure", side_effect=mock_save):
+            plot_migration_displacement_vectors(
+                tt, pts, mig_pts, dxi, dyi, x_coords, y_coords,
+                plots_dir=self.temp_dir, horizontal_displacement_visualization="grad_traveltime_grid"
+            )
+            ax1_grad = captured_axes[-1][1][0]
+            self.assertEqual(len(ax1_grad.texts), 0)
+
+            plot_migration_displacement_vectors(
+                tt, pts, mig_pts, dxi, dyi, x_coords, y_coords,
+                plots_dir=self.temp_dir, horizontal_displacement_visualization="arrows"
+            )
+            ax1_arrows = captured_axes[-1][1][0]
+            self.assertGreater(len(ax1_arrows.texts), 0)
+
+    def test_figure_08_uncertainty_uses_plasma_colormap(self):
+        """Verifies that Figure 08 final thickness uncertainty uses the transparent plasma colormap."""
+        from unittest.mock import patch
+        from pysole.plotting import plot_final_ice_thickness_and_uncertainty
+
+        thick = np.ones((10, 10)) * 50.0
+        unc = np.ones((10, 10)) * 5.0
+        captured_axes = []
+
+        with patch("pysole.plotting._save_figure", side_effect=lambda plt_mod, p, f: captured_axes.append(list(plt_mod.gcf().axes))):
+            plot_final_ice_thickness_and_uncertainty(
+                final_thickness=thick,
+                kriged_std=unc,
+                outline_mask=None,
+                plot_extent=[0, 100, 0, 100],
+                mean_thick=50.0,
+                mean_unc=5.0,
+                plots_dir=self.temp_dir,
+            )
+        ax2 = captured_axes[-1][1]
+        im2 = ax2.images[0]
+        self.assertTrue(im2.cmap.name.startswith("plasma"))
+
 
 if __name__ == "__main__":
     unittest.main()

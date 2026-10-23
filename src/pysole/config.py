@@ -246,7 +246,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "velocity_path": None,
         "survey_data_path": None,
         "survey_data_type": "one_way_traveltime",
-        "survey_profile_column": None,
+        "survey_profile_column": "profile_id",
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,

@@ -290,7 +290,7 @@ class Solver:
         g: float = 9.81,
         output_dir: str | Path | None = None,
         survey_data_path: str | Path | None = None,
-        survey_profile_column: str | None = None,
+        survey_profile_column: str | None = "profile_id",
         config_path: str | Path | None = None,
         show_progress: bool = True,
         max_memory_fraction: float | None = None,
@@ -373,7 +373,7 @@ class Solver:
             General workspace directory for all output raster and vector files.
         survey_data_path : str or Path, optional
             Path to survey points file; used to resolve default output paths if output_dir is unspecified.
-        survey_profile_column : str, optional
+        survey_profile_column : str, default 'profile_id'
             Column name identifying individual survey profiles in CSV data for LOPO spatial cross-validation.
         config_path : str or Path, optional
             Path to configuration file used for resolving relative paths.
@@ -1531,7 +1531,7 @@ class Solver:
             g=g_val,
             output_dir=configured_output_dir(cfg),
             survey_data_path=inputs.get("survey_data_path"),
-            survey_profile_column=inputs.get("survey_profile_column"),
+            survey_profile_column=inputs.get("survey_profile_column", "profile_id"),
             config_path=cfg_path_str,
             show_progress=show_progress_val,
             config=cfg,

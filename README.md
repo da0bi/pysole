@@ -16,14 +16,15 @@
 [JSON Configuration Parameter Reference](#json-configuration-parameter-reference)<br><br>
 [Technical & Methodological Notes](#technical-and-methodological-notes)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;[1. Supported DEM Formats](#supported-dem-formats)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Rock Outcrop Input Files](#parsing-rock-outcrops)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[3. Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[4. Variogram Binning with Minimum Pair Threshold](#variogram-binning)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[5. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[6. Universal Kriging Drift Models](#universal-kriging-drift-models)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[7. Kriging Uncertainty Derivation](#kriging-uncertainty-derivation)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[8. Memory Guard and Kriging Uncertainty](#memory-guard-and-uncertainty)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;[9. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;[2. Parsing of Survey Data CSV Files](#parsing-survey-data-csv)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[3. Parsing of Rock Outcrop Input Files](#parsing-rock-outcrops)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[4. Wavenumbers and Wavelengths](#wavenumber-to-wavelength-conversion)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[5. Variogram Binning with Minimum Pair Threshold](#variogram-binning)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[6. High-Performance Dual Kriging Vector Engine](#dual-kriging-vector-engine)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[7. Universal Kriging Drift Models](#universal-kriging-drift-models)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[8. Kriging Uncertainty Derivation](#kriging-uncertainty-derivation)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[9. Memory Guard and Kriging Uncertainty](#memory-guard-and-uncertainty)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[10. Spatial Smoothing of the Calculated DEMs](#dem-spatial-smoothing)<br><br>
 [Package Architecture](#package-architecture)<br><br>
 [Command Line Interface](#cli)<br><br>
 [Application Programming Interface](#api)<br><br>
@@ -156,7 +157,7 @@ All execution options can be fully defined in a single JSON configuration file, 
         "outline_path": null,
         "survey_data_path": null,
         "survey_data_type": "one_way_traveltime",
-        "survey_profile_column": null,
+        "survey_profile_column": "profile_id",
         "mass_balance_path": null,
         "velocity_path": null,
         "ice_density": 900.0,
@@ -248,9 +249,9 @@ All execution options can be fully defined in a single JSON configuration file, 
 | :--- | :--- | :--- | :--- | :--- |
 | **`inputs`** | `dem_path` | `str` | `null` | **(Required)** File path to the surface Digital Elevation Model (`.asc`, `.tif`, `.csv`, `.npy`). |
 | | `outline_path` | `str` | `null` | File path to creeping body / glacier boundary polygon (`.shp`, `.geojson`, `.gpkg`, `.csv`). If `null`, domain is derived from non-NaN DEM pixels. |
-| | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[(profile_id), X, Y, value]`. If `null`, `PySole` automatically starts the interactive `Survey Planner` and saves the results to the file paths defined in the `outputs` section.  See [`here`](docs/survey_planner.md) for full details. |
+| | `survey_data_path` | `str` | `null` | File path to signal traveltime or thickness observations CSV `[ X, Y, (Z), survey_value, (profile_id)]`. Columns in brackets are optional - see [here](#parsing-survey-data-csv) for CSV formatting details. Column `profile_id` (default `inputs.survey_profile_column`) is considered for the Drift Analyzer's <i>Leave-One-Profile-Out</i> (LOPO) cross-validation. See [Drift Analyzer Guide](docs/drift_analyzer.md) for full details. If `null`, `PySole` automatically starts the interactive `Survey Planner` and saves the results to the file paths defined in the `outputs` section.  See [`here`](docs/survey_planner.md) for full details. |
 | | `survey_data_type` | `str` | `"one_way_traveltime"` | Observation data type: `"one_way_traveltime"`, `"two_way_traveltime"`, or `"depth"` (skips 3D migration). |
-| | `survey_profile_column` | `str` | `null` | Optional column name in the imported survey dataset CSV (`inputs.survey_data_path`) specifying survey line / profile IDs for the Drift Analyzer's <i>Leave-One-Profile-Out</i> (LOPO) cross-validation. |
+| | `survey_profile_column` | `str` | `"profile_id"` | Column name in the imported survey dataset CSV (`inputs.survey_data_path`) specifying survey line / profile IDs for the Drift Analyzer's <i>Leave-One-Profile-Out</i> (LOPO) cross-validation (default: `"profile_id"`). Set to `null` to disable profile extraction when using headerless CSVs. |
 | | `mass_balance_path` | `str` | `null` | Optional file path to a mean surface mass balance raster (`.tif`, `.asc`, `.csv`, `.npy`). Automatically co-registered to the DEM grid (kept unsmoothed to preserve local debris/avalanche features). Enables the `"mass_balance"` drift term and serves as an additional feature in Random Forest gap filling. |
 | | `velocity_path` | `str` | `null` | Optional file path to a mean surface flow velocity magnitude raster (`.tif`, `.asc`, `.csv`, `.npy`). Automatically co-registered to the DEM grid, zero-clamped outside the glacier outline, and spectrally low-pass filtered at optimal <i>k</i><sub>c</sub>. Enables the `"velocity"` and `"velocity_sia"` drift terms and serves as an additional feature in Random Forest gap filling. |
 | | `ice_density` | `float` | `900.0` | Density of the creeping medium in kg/m³ (`900.0` kg/m³ for temperate glacier ice by default). Used to calculate basal shear stress <i>τ</i><sub>b</sub>. |
@@ -331,8 +332,41 @@ All execution options can be fully defined in a single JSON configuration file, 
 - **NumPy Binary Array (`.npy`)**: Fast 2D binary array format; spatial metadata (`origin`, `crs`, `dx`, `dy`) defined via `spatial_parameters`.
 - **NumPy 2D Array (`np.ndarray`)**: In-memory array passed directly into the `Solver` constructor (`dem=dem_grid`); spatial metadata defined via `spatial_parameters`.
 
+<a id="parsing-survey-data-csv"></a>
+#### 2. Parsing of Survey Data CSV Files
+`PySole` ingests point survey datasets (`inputs.survey_data_path`) containing scattered soundings of two-way traveltime [ns], one-way traveltime [ns], or direct ice thickness [m]. Internally, survey soundings are mapped into a standardized array:
+
+<p align="center">
+$$\begin{bmatrix} X & Y & Z_{\text{surface}} & \text{value} & [\text{profile\_id}] \end{bmatrix}$$
+</p>
+
+##### Missing Surface Elevation <i>Z</i><sub>surface</sub> (3- vs. 4-Column Inputs)
+- **3-Column Points [<i>X</i>, <i>Y</i>, value]**: If surface elevation is omitted, `PySole` detects `pts.shape[1] == 3`, interpolates <i>Z</i><sub>surface</sub> from the glacier surface DEM grid (`inputs.dem_path`) at each point coordinate using 2D bilinear interpolation (`scipy.interpolate.RegularGridInterpolator`), and inserts it into Column 2.
+- **4-Column Points [<i>X</i>, <i>Y</i>, <i>Z</i>, value]**: The explicit surface elevation <i>Z</i> provided in the file is preserved directly without modification from the DEM.
+
+##### Header vs. Headerless CSV Parsing
+- **Files WITH a Header Row** (e.g. `profile_id,x,y,z,twt` or `x,y,twt,profile_id`):
+  `PySole` uses [`pandas`](https://pandas.pydata.org) to locate the profile column matching `inputs.survey_profile_column` (default: `"profile_id"`). The profile column is extracted into an auxiliary array and dropped by name, allowing arbitrary column ordering in the source CSV. The remaining columns are parsed into numeric coordinates and values, and the profile IDs are appended at Column 4 (index 4). If <i>Z</i><sub>surface</sub> was omitted (e.g. `x,y,twt,profile_id`), dropping the profile column leaves 3 columns, triggering automatic DEM sampling of <i>Z</i><sub>surface</sub> before appending `profile_id`. Discrete profiles with at least 3 unique tracks enable Leave-One-Profile-Out cross-validation (LOPO-CV) in the `Drift Analyzer`.
+- **Files WITHOUT a Header Row (Pure Numeric CSV)**:
+  `PySole` falls back to direct positional reading via [`numpy`](https://numpy.org)'s `loadtxt`. The columns must strictly match standard positional ordering:
+  - 3 columns: [<i>X</i>, <i>Y</i>, value] &rarr; <i>Z</i><sub>surface</sub> interpolated from DEM.
+  - 4 columns: [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value] &rarr; used directly.
+  - 5 columns: [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value, profile_id] &rarr; profile ID placed in the last column.
+
+  Setting `"survey_profile_column": null` in `pysole.json` bypasses searching for column headers and prevents spurious "header not found" warnings on headerless files.
+
+> [!WARNING]
+> **Positional Pitfalls in Headerless Files:**
+> - Placing profile IDs in Column 0 of a headerless file (e.g. `1, 601234.5, 5123456.7, ...`) causes `PySole` to mistake the profile IDs for projected <i>X</i> coordinates, raising a spatial DEM bounds error.
+> - Providing a headerless 4-column file without surface elevation (e.g. `x, y, twt, profile_id`) causes `PySole` to interpret traveltime as surface elevation <i>Z</i><sub>surface</sub> and profile ID as measured traveltime.
+
+> [!TIP]
+> **Rule of Thumb for Survey CSVs:**
+> - **Headerless CSV:** Follow strict positional ordering: `[X, Y, value]`, `[X, Y, Z_surface, value]`, or `[X, Y, Z_surface, value, profile_id]`. Set `"survey_profile_column": null`.
+> - **Header Present:** Column order is flexible. If <i>Z</i><sub>surface</sub> is omitted or `profile_id` is in a non-standard position, always include a header row and set `"survey_profile_column"` to match the header name.
+
 <a id="parsing-rock-outcrops"></a>
-#### 2. Parsing of Rock Outcrop Input Files
+#### 3. Parsing of Rock Outcrop Input Files
 Vector polygon files (`.shp`, `.geojson`, `.gpkg`) or CSV outline files containing interior rings (separated by `NaN` rows) are automatically parsed as polygon holes. `PySole` treats pixels inside rock outcrop holes as exposed bedrock (<i>Z</i> = <i>Z</i><sub>Surface</sub>). When boundary conditions are enabled, the perimeters of interior rings are included with <i>T</i> = 0 s or <i>D</i> = 0 m.
 
 For rock outcrop holes to be detected from a Shapefile (`.shp`):
@@ -341,7 +375,7 @@ For rock outcrop holes to be detected from a Shapefile (`.shp`):
 - **CRS Alignment**: Must match the DEM raster projection.
 
 <a id="wavenumber-to-wavelength-conversion"></a>
-#### 3. Wavenumbers and Wavelengths
+#### 4. Wavenumbers and Wavelengths
 In `PySole`, 2D spatial Gaussian low-pass smoothing operates in the physical 2D spatial frequency domain with wavenumber components <i>k</i><sub>x</sub>, <i>k</i><sub>y</sub> [rad/m] and magnitude <i>k</i> = √(<i>k</i><sub>x</sub>² + <i>k</i><sub>y</sub>²):
 
 <p align="center">
@@ -373,7 +407,7 @@ When `kc_max`, `kc_min`, `lambda_min`, `lambda_max`, or `n_steps` are left as `n
 After each surface slope optimization pass, both <i>k</i><sub>c,opt</sub> [rad/m] and <i>λ</i><sub>c,opt</sub> [m] are logged to the console and `pysole.log`.
 
 <a id="variogram-binning"></a>
-#### 4. Variogram Binning with Minimum Pair Threshold
+#### 5. Variogram Binning with Minimum Pair Threshold
 Experimental variogram lag distance bins are calculated from pairwise Euclidean distances across <i>N</i> survey points. When `nrbins` is `null` (default), `PySole` sets the bin count from the number of point pairs within the variogram range <i>h</i> ≤ <i>h</i><sub>max</sub> (half of the maximum pairwise distance) to ensure at least **30 point pairs per bin** (Webster & Oliver, 2007), bounded to [3, 30]:
 
 $$
@@ -383,7 +417,7 @@ $$
 If a user-specified `nrbins` yields fewer than 30 average pairs per bin, a warning is logged while honoring the explicit choice (enforcing a floor of 3 bins). For large surveys (<i>N</i> &gt; 5000), lag statistics are accumulated in chunks using <i>N</i><sub>pairs</sub> = <i>N</i>(<i>N</i> − 1)/2.
 
 <a id="dual-kriging-vector-engine"></a>
-#### 5. High-Performance Dual Kriging Vector Engine
+#### 6. High-Performance Dual Kriging Vector Engine
 `PySole` features a native geostatistical engine based on **Dual Kriging** (Matheron, 1981). Unlike Primal Kriging (which solves a separate linear system at every target grid node), Dual Kriging solves the global (<i>N</i> + <i>L</i>) × (<i>N</i> + <i>L</i>) linear system **once** via LU decomposition (`scipy.linalg.lu_factor`):
 
 <p align="center">
@@ -405,7 +439,7 @@ $$\lambda_{\text{reg}} = \epsilon_{\text{reg}} \cdot S = 10^{-6} \cdot S$$
 Because both <b>Γ</b> and <i>λ</i><sub>reg</sub><b>I</b> scale proportionally with <i>S</i> while the drift Lagrange blocks remain unperturbed (<b>F</b><sup>T</sup> <b>w</b><sub>sample</sub> = <b>0</b>), predictions are strictly invariant to linear rescaling of the input data.
 
 <a id="universal-kriging-drift-models"></a>
-#### 6. Universal Kriging Drift Models
+#### 7. Universal Kriging Drift Models
 The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kriging (`drift_analyzer: true`) to automatically evaluate, rank, and compare candidate drift models using spatial cross-validation metrics — see the [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer.md) for full details. Because statistical rankings should always be paired with glaciological judgment, the governing assumptions of all primitive and multi-drift models are summarized below.
 
 ##### Single Drift Models (8 Primitives + Ordinary Kriging)
@@ -556,7 +590,7 @@ The Kriging parameters `method` and `drift_analyzer` determine how `drift_terms`
 - **`engine: "pykrige"` performance note**: `PyKrige`'s `UniversalKriging` computes an internal leave-one-out statistic on instantiation that scales as <i>O</i>(<i>N</i>³–<i>N</i>⁴) in the number of survey points. Use `engine: "native"` for Universal Kriging on datasets with more than a few hundred points.
 
 <a id="kriging-uncertainty-derivation"></a>
-#### 7. Kriging Uncertainty Derivation
+#### 8. Kriging Uncertainty Derivation
 When `calculate_uncertainty: true` is enabled, `PySole` evaluates the 2D Kriging estimation variance field <i>σ</i>²(<i>x</i>,<i>y</i>) and converts it into the **Kriging Standard Error <i>σ</i>(<i>x</i>,<i>y</i>)** (±1.00 <i>σ</i> corresponds to the 68.3% Gaussian confidence interval; ±1.96 <i>σ</i> to 95%):
 
 - **Direct Target Interpolation (`interpolation_target`: `"D"` or `"T"`)**:
@@ -581,7 +615,7 @@ When `calculate_uncertainty: true` is enabled, `PySole` evaluates the 2D Kriging
   </p>
 
 <a id="memory-guard-and-uncertainty"></a>
-#### 8. Memory Guard and Kriging Uncertainty
+#### 9. Memory Guard and Kriging Uncertainty
 When `calculate_uncertainty: true`, post-migration standard error (<i>σ</i><sub>D</sub>) is plotted in diagnostic figures and exported when `save_*_uncertainty: true` (`save_traveltime_uncertainty` exports <i>σ</i><sub>T</sub> when pre-migration uncertainty is enabled). Because Kriging standard error depends only on sample geometry and the variogram, it represents a lower bound on total uncertainty.
 
 Before allocating the (<i>N</i> + <i>n</i><sub>drift</sub>)² inverse matrix and per-thread grid chunks, `PySole`'s memory guard compares estimated peak RAM against `kriging_parameters.max_memory_fraction` (default `0.5`, maximum `0.9`) of available RAM (respecting Linux *cgroup* container quotas in Docker/Kubernetes/HPC):
@@ -590,7 +624,7 @@ Before allocating the (<i>N</i> + <i>n</i><sub>drift</sub>)² inverse matrix and
 3. If available RAM cannot be determined, the guard is disabled.
 
 <a id="dem-spatial-smoothing"></a>
-#### 9. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
+#### 10. Spatial Smoothing of the Calculated Depth and Bedrock DEMs
 When `smooth_bedrock: true`, `PySole` applies the spatial smoothing operator <i>S</i> (`"gaussian"`, `"median"`, or `"fft_lowpass"`) **directly to the ice depth field <i>D</i>(<i>x</i>,<i>y</i>)** before subtracting from the surface DEM:
 
 <p align="center">
@@ -676,9 +710,9 @@ When you install `PySole` (`pip install .` or `pip install -e .`), `pip` automat
   *Runs the Drift Analyzer helper before each Universal Kriging pass as an on-the-fly override across all passes (equivalent to enabling `drift_analyzer: true` on both Kriging passes). Omitting the flag preserves the per-pass `drift_analyzer` settings configured in `pysole.json`. Ignored (with a warning) for Ordinary Kriging.*
 
   ```bash
-  pysole pysole.json --drift-analyzer --profile-col profile_name
+  pysole pysole.json --drift-analyzer --profile-col line_id
   ```
-  *Specifies the column header name in the imported survey data CSV file (`inputs.survey_data_path`) that identifies individual survey profiles or lines. It enables Leave-One-Profile-Out (LOPO) cross-validation in the Drift Analyzer and overrides `inputs.survey_profile_column`.*
+  *Specifies a custom column header name in the imported survey data CSV file (`inputs.survey_data_path`) that identifies individual survey profiles or lines. It enables Leave-One-Profile-Out (LOPO) cross-validation in the Drift Analyzer and overrides the default `inputs.survey_profile_column` (`"profile_id"`).*
 
   *See [here](docs/drift_analyzer.md) for full details and CLI options.*
 

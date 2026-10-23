@@ -4,7 +4,7 @@
         "outline_path": null,
         "survey_data_path": null,
         "survey_data_type": "one_way_traveltime",
-        "survey_profile_column": null,
+        "survey_profile_column": "profile_id",
         "ice_density": 900.0,
         "g": 9.81,
         "n_cores": -1,

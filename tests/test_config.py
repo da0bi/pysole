@@ -87,6 +87,27 @@ class TestConfigWorkflowWuk(unittest.TestCase):
         self.assertFalse(cfg_krig["pre_migration"]["calculate_uncertainty"])
         self.assertFalse(cfg_krig["post_migration"]["calculate_uncertainty"])
 
+    def test_survey_profile_column_default(self):
+        # 1. DEFAULT_CONFIG specifies "profile_id"
+        self.assertEqual(pysole.config.DEFAULT_CONFIG["inputs"]["survey_profile_column"], "profile_id")
+
+        # 2. Loading an empty config populates "profile_id"
+        cfg = pysole.config.load_config({})
+        self.assertEqual(cfg["inputs"]["survey_profile_column"], "profile_id")
+
+        # 3. Explicitly setting null preserves None
+        cfg_null = pysole.config.load_config({"inputs": {"survey_profile_column": None}})
+        self.assertIsNone(cfg_null["inputs"]["survey_profile_column"])
+
+        # 4. Solver defaults to "profile_id"
+        dem = np.ones((10, 10))
+        solver = pysole.Solver(dem=dem)
+        self.assertEqual(solver.survey_profile_column, "profile_id")
+
+        # 5. Solver accepts explicit None override
+        solver_none = pysole.Solver(dem=dem, survey_profile_column=None)
+        self.assertIsNone(solver_none.survey_profile_column)
+
     def test_output_dir_resolution(self):
         dem = np.ones((10, 10))
         # 1. Fallback to survey_data_path directory when output_dir is None (plots_dir defaults to figures)
