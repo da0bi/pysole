@@ -350,7 +350,7 @@ $$\begin{bmatrix} X & Y & Z_{\text{surface}} & \text{value} & [\text{profile\_id
 </p>
 
 - **Missing Surface Elevation <i>Z</i><sub>surface</sub> (3- vs. 4-Column Inputs)**: For 3-column inputs [<i>X</i>, <i>Y</i>, value], `PySole` automatically samples <i>Z</i><sub>surface</sub> from the surface DEM (`inputs.dem_path`) using 2D bilinear interpolation. For 4-column inputs [<i>X</i>, <i>Y</i>, <i>Z</i>, value], the explicit surface elevation <i>Z</i> is preserved directly.
-- **With Header Row** (e.g. `profile_id,x,y,z,twt` or `x,y,twt,profile_id`): `PySole` extracts the profile column matching `inputs.survey_profile_column` (default: `"profile_id"`) by name, allowing the profile column to be placed anywhere while the remaining columns follow the standard [X,Y,(Z),value] sequence, and enabling Leave-One-Profile-Out cross-validation in the [Drift Analyzer](docs/drift_analyzer.md). If <i>Z</i><sub>surface</sub> is omitted (e.g. `x,y,twt,profile_id`), `PySole` samples <i>Z</i><sub>surface</sub> from the DEM automatically.
+- **With Header Row** (e.g. `profile_id,x,y,z,twt` or `x,y,twt,profile_id`): `PySole` extracts the profile column matching `inputs.survey_profile_column` (default: `"profile_id"`) by name while the remaining columns have to follow the standard [X,Y,(Z),value] sequence. This allows the profile column to be placed anywhere. This enables the Leave-One-Profile-Out cross-validation in the [Drift Analyzer](docs/drift_analyzer.md). If <i>Z</i><sub>surface</sub> is omitted (e.g. `x,y,twt,profile_id`), `PySole` samples <i>Z</i><sub>surface</sub> from the DEM automatically.
 - **Without Header Row (Headerless Numeric CSV)**: Read positionally via `np.loadtxt`. Columns must strictly follow standard positional ordering: [<i>X</i>, <i>Y</i>, value], [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value], or [<i>X</i>, <i>Y</i>, <i>Z</i><sub>surface</sub>, value, profile_id]. Setting `"survey_profile_column": null` bypasses header searching and suppresses warnings. Non-standard ordering (e.g. placing profile IDs in Column 0, or omitting <i>Z</i> in a 4-column headerless file) causes positional misinterpretation or spatial DEM bounds errors.
 
 > [!TIP]
@@ -424,7 +424,7 @@ Because both <b>Γ</b> and <i>λ</i><sub>reg</sub><b>I</b> scale proportionally 
 
 <a id="universal-kriging-drift-models"></a>
 ### 7. Universal Kriging Drift Models
-The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kriging (`drift_analyzer: true`) to automatically evaluate, rank, and compare candidate drift models using spatial cross-validation metrics — see the [Drift Analyzer & Multi-Drift Guide](docs/drift_analyzer.md) for full details. Because statistical rankings should always be paired with glaciological judgment, the governing assumptions of all primitive and multi-drift models are summarized below.
+The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kriging (`drift_analyzer: true`) to automatically evaluate, rank, and compare candidate drift models using spatial cross-validation metrics — see the [Drift Analyzer Guide](docs/drift_analyzer.md) for full details. Because statistical rankings should always be paired with glaciological judgment, the governing assumptions of all primitive and multi-drift models are summarized below.
 
 #### Single Drift Models (8 Primitives + Ordinary Kriging)
 
@@ -505,7 +505,7 @@ The `Drift Analyzer` can be enabled for pre- and/or post-migration Universal Kri
 
 ---
 
-#### Multi-Drift Model Structure & Maximum Available Models: 120 (119 Drift Models + Ordinary Kriging)
+#### Multi-Drift Model Structure
 
 `PySole` combines the physical raster drifts (`"sia"`, `"z_dem"`, `"curvature_dem"`, `"mass_balance"`, `"velocity"`, `"velocity_sia"`) with each other and with the spatial polynomial coordinate trends (`"linear_xy"`, `"quadratic_xy"`) into an augmented multi-drift Universal Kriging system.
 
@@ -524,7 +524,7 @@ With all 8 primitives active, the combinatorial space is governed by **three ind
 **Group 3 - Polynomial coordinate trends** (`"linear_xy"`, `"quadratic_xy"` — **3 valid states**):
    - `[]` (no polynomial term), `["linear_xy"]`, or `["quadratic_xy"]` (never combined together because `"quadratic_xy"` already contains the linear [<i>x</i>, <i>y</i>] columns).
 
-In total, **5 × 8 × 3 = 120 candidate models**: selecting `[]` across all three groups yields **Ordinary Kriging** (`[]`), while the remaining **119** combinations are **Universal Kriging drift models** (8 single-drift + 111 multi-drift).
+In total, **5 × 8 × 3 = 120 candidate models** are available: selecting `[]` across all three groups yields **Ordinary Kriging** (`[]`), while the remaining **119** combinations are **Universal Kriging drift models** (8 single-drift + 111 multi-drift).
 
 ##### Breakdown of the 120 Candidates
 
