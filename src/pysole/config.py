@@ -812,6 +812,11 @@ def main_cli() -> None:
         help="Specifies the survey profile column name in the survey dataset CSV.",
     )
 
+    # Redirected output on Windows uses the ANSI code page: never crash on λ, ⁶ etc. in messages
+    from .logging import make_console_streams_safe
+
+    make_console_streams_safe()
+
     # ``plan-survey`` is dispatched manually: an optional positional ``config`` combined with an argparse
     # sub-parser makes argparse treat ``pysole <config.json>`` as an invalid sub-command.
     argv = sys.argv[1:]

@@ -5,6 +5,17 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **[Windows: log file kept open] (`src/pysole/logging.py`, `tests/test_logging.py`)**:
+  - `pysole.log` is now written by `AppendFileHandler`, which opens the file only while writing a record. A plain `FileHandler` kept it open for the lifetime of the Python process, and Windows cannot delete or move open files: output folders stayed locked (notebooks) and test temp directories could not be cleaned up (`WinError 32`, 26 failing tests on Windows).
+- **[Windows: crash on non-UTF-8 console] (`src/pysole/logging.py`, `src/pysole/config.py`, `tests/test_logging.py`)**:
+  - With redirected output (subprocess, `> run.log`) Windows encodes stdout with the ANSI code page, which cannot encode `λ` or `⁶`. The CLI now makes stdout/stderr replace such characters instead of raising (`UnicodeEncodeError` in the final summary card made successful runs exit with code 1).
+- **[Windows: path test] (`tests/test_config.py`)**: `test_output_dir_resolution` compares resolved paths instead of POSIX strings.
+
+---
+
 ## [0.6.1] - 2026-11-25
 
 3D Eikonal normal ray migration parameter `max_ray_angle_deg` to reject steep ray artifacts from downstream depth grid interpolation and bedrock finalization; diagnostic visualization of discarded picks with black `×` markers on Figure 03; extended `<output_prefix>_migrated_points.csv` export retaining all survey picks and logging horizontal displacement, azimuth, and ray angle; automatic diagnostic column stripping during migrated point re-import; and standalone Python 3 shebang execution for example workflows.
