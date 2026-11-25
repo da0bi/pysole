@@ -21,6 +21,7 @@
     "migration_parameters": {
         "perform_migration": true,
         "velocity": 0.16,
+        "max_ray_angle_deg": 60.0,
         "interactive_migration": false,
         "horizontal_displacement_visualization": "arrows"
     },

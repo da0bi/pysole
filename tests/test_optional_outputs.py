@@ -39,14 +39,29 @@ class TestOptionalOutputs(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
 
     def test_save_points_csv_helper(self):
-        pts = np.array([[10, 20, 100, 45.5], [30, 40, 105, 52.1]])
-        out_csv = os.path.join(self.temp_dir, "test_points.csv")
-        saved = save_points_csv(pts, out_csv)
-        self.assertTrue(os.path.exists(saved))
+        pts7 = np.array([
+            [10.0, 20.0, 100.0, 45.5, 3.2, 90.0, 15.0],
+            [30.0, 40.0, 105.0, 52.1, 4.1, 180.0, 22.5],
+        ])
+        out_csv7 = os.path.join(self.temp_dir, "test_points7.csv")
+        saved7 = save_points_csv(pts7, out_csv7)
+        self.assertTrue(os.path.exists(saved7))
+        with open(saved7, "r", encoding="utf-8") as f:
+            header7 = f.readline().strip()
+        self.assertEqual(header7, "x,y,z_surface,depth_migrated,horizontal_ds,azimuth,ray_angle")
+        data7 = np.loadtxt(saved7, delimiter=",", skiprows=1)
+        self.assertEqual(data7.shape, (2, 7))
+        self.assertAlmostEqual(data7[0, 3], 45.5)
+        self.assertAlmostEqual(data7[1, 6], 22.5)
 
-        data = np.loadtxt(saved, delimiter=",", skiprows=1)
-        self.assertEqual(data.shape, (2, 4))
-        self.assertAlmostEqual(data[0, 3], 45.5)
+        pts8 = np.column_stack((pts7, [1.0, 2.0]))
+        out_csv8 = os.path.join(self.temp_dir, "test_points8.csv")
+        saved8 = save_points_csv(pts8, out_csv8)
+        with open(saved8, "r", encoding="utf-8") as f:
+            lines8 = [line.strip() for line in f.readlines()]
+        self.assertEqual(lines8[0], "x,y,z_surface,depth_migrated,horizontal_ds,azimuth,ray_angle,profile_id")
+        self.assertTrue(lines8[1].endswith(",1"))
+        self.assertTrue(lines8[2].endswith(",2"))
 
     def test_optional_exports_enabled(self):
         output_stem = os.path.join(self.temp_dir, "output_test")
@@ -60,6 +75,7 @@ class TestOptionalOutputs(unittest.TestCase):
             "migration_parameters": {
                 "perform_migration": True,
                 "velocity": 0.16,
+                "max_ray_angle_deg": 60.0,
             },
             "kriging_parameters": {
                 "pre_migration": {
@@ -88,7 +104,14 @@ class TestOptionalOutputs(unittest.TestCase):
         self.assertTrue(os.path.exists(f"{output_stem}_bedrock_ordinary.tif"))
         self.assertTrue(os.path.exists(f"{output_stem}_traveltime_ordinary.tif"))
         self.assertTrue(os.path.exists(f"{output_stem}_traveltime_uncertainty_ordinary.tif"))
-        self.assertTrue(os.path.exists(f"{output_stem}_migrated_points.csv"))
+        mig_csv_path = f"{output_stem}_migrated_points.csv"
+        self.assertTrue(os.path.exists(mig_csv_path))
+        with open(mig_csv_path, "r", encoding="utf-8") as f:
+            mig_header = f.readline().strip()
+        self.assertEqual(mig_header, "x,y,z_surface,depth_migrated,horizontal_ds,azimuth,ray_angle")
+        mig_csv_data = np.loadtxt(mig_csv_path, delimiter=",", skiprows=1)
+        self.assertEqual(mig_csv_data.shape, (len(solver.survey_points), 7))
+
         self.assertTrue(os.path.exists(f"{output_stem}_thickness_ordinary.tif"))
         self.assertTrue(os.path.exists(f"{output_stem}_thickness_uncertainty_ordinary.tif"))
         self.assertTrue(os.path.exists(f"{output_stem}_basal_shear_stress_ordinary.tif"))

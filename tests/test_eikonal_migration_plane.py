@@ -107,6 +107,85 @@ class TestEikonalMigrationPlane(unittest.TestCase):
 
         np.testing.assert_allclose(dx_mig, expected_dx, atol=0.1)
 
+    def test_ray_metrics_horizontal_ds_azimuth_and_ray_angle(self):
+        """Verifies horizontal_ds, cardinal azimuth bearings (0° N, 90° E, 180° S, 270° W), and ray_angle."""
+        dem = np.full_like(self.xx, 2000.0)
+        h_0 = 80.0
+        dip_deg = 20.0
+        b = np.tan(np.radians(dip_deg))
+
+        # Test all 4 cardinal shift directions by tilting the bed along -Y (North shift, 0°),
+        # -X (East shift, 90°), +Y (South shift, 180°), and +X (West shift, 270°)
+        cases = [
+            (0.0, -b, 0.0),    # dT/dy < 0 -> shift +Y (North = 0°)
+            (-b, 0.0, 90.0),   # dT/dx < 0 -> shift +X (East = 90°)
+            (0.0, b, 180.0),   # dT/dy > 0 -> shift -Y (South = 180°)
+            (b, 0.0, 270.0),   # dT/dx > 0 -> shift -X (West = 270°)
+        ]
+        migrator = EikonalMigrator(dem, geometry=self.geometry)
+        sample_x, sample_y = 150.0, 150.0
+
+        for bx, by, expected_az in cases:
+            H_grid = (h_0 + bx * (self.xx - sample_x) + by * (self.yy - sample_y)) / np.sqrt(1.0 + bx**2 + by**2)
+            T_grid = H_grid / self.v
+            t_0 = (h_0 / np.sqrt(1.0 + bx**2 + by**2)) / self.v
+            sample_pts = np.array([[sample_x, sample_y, 2000.0, t_0]])
+
+            res = migrator.migrate(travel_time_grid=T_grid, survey_points=sample_pts, velocity=self.v, show_progress=False)
+            self.assertEqual(res.all_migrated_points.shape, (1, 7))
+            expected_ds = (h_0 / np.sqrt(1.0 + bx**2 + by**2)) * np.sin(np.radians(dip_deg))
+            np.testing.assert_allclose(res.all_migrated_points[0, 4], expected_ds, atol=0.1)
+            np.testing.assert_allclose(res.all_migrated_points[0, 5], expected_az, atol=0.1)
+            np.testing.assert_allclose(res.all_migrated_points[0, 6], dip_deg, atol=0.1)
+
+    def test_max_ray_angle_discards_high_angle_picks_and_keeps_all_in_export_table(self):
+        """Verifies max_ray_angle_deg discards steep picks for Pass 2, logs discard count, and keeps all picks in all_migrated_points."""
+        import tempfile
+        import os
+
+        dem = np.full_like(self.xx, 2000.0)
+        # Left half of grid has gentle dip (10°), right half has steep dip (65°)
+        b_gentle = np.tan(np.radians(10.0))
+        b_steep = np.tan(np.radians(65.0))
+        H_gentle = (80.0 + b_gentle * (self.xx - 75.0)) / np.sqrt(1.0 + b_gentle**2)
+        H_steep = (80.0 + b_steep * (self.xx - 225.0)) / np.sqrt(1.0 + b_steep**2)
+        T_grid = np.where(self.xx < 150.0, H_gentle, H_steep) / self.v
+
+        # Two survey picks with profile IDs (column 4): pick 0 in gentle zone (10°), pick 1 in steep zone (65°)
+        t_gentle = (80.0 / np.sqrt(1.0 + b_gentle**2)) / self.v
+        t_steep = (80.0 / np.sqrt(1.0 + b_steep**2)) / self.v
+        sample_pts = np.array([
+            [75.0, 150.0, 2000.0, t_gentle, 1.0],
+            [225.0, 150.0, 2000.0, t_steep, 2.0],
+        ])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for viz_mode in ("arrows", "grad_traveltime_grid"):
+                with self.assertLogs("pysole", level="INFO") as cm:
+                    res = migrate_eikonal_points(
+                        dem=dem,
+                        travel_time_grid=T_grid,
+                        survey_points=sample_pts,
+                        geometry=self.geometry,
+                        velocity=self.v,
+                        max_ray_angle_deg=60.0,
+                        plots_dir=tmpdir,
+                        show_progress=False,
+                        horizontal_displacement_visualization=viz_mode,
+                    )
+                self.assertTrue(
+                    any("Discarded 1 of 2 survey picks exceeding max_ray_angle_deg = 60.0°" in msg for msg in cm.output),
+                    f"Expected discard log message not found in {cm.output}",
+                )
+                # Retained migrated_points has 1 pick and 5 columns (with profile_id at index 4)
+                self.assertEqual(res.migrated_points.shape, (1, 5))
+                self.assertEqual(res.migrated_points[0, 4], 1.0)
+                # Export table all_migrated_points retains ALL 2 picks and 8 columns (with profile_id at index 7)
+                self.assertEqual(res.all_migrated_points.shape, (2, 8))
+                self.assertEqual(res.all_migrated_points[0, 7], 1.0)
+                self.assertEqual(res.all_migrated_points[1, 7], 2.0)
+                self.assertTrue(os.path.exists(os.path.join(tmpdir, "03_3d_migration.png")))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -95,7 +95,7 @@ Across spatial wavenumber cutoffs <i>k</i><sub>c</sub>, the point products of tr
 > Avoid interpolating a BSS-derived product target (`"P"`) with Universal Kriging using `["sia"]` or `["velocity_sia"]`! Dividing <i>P</i> by sin(<i>α</i><sub>opt</sub>) after fitting an inverse-slope drift introduces an unphysical 1/sin²(<i>α</i>) double-scaling artifact at low slopes. Use `"sia"` and `"velocity_sia"` only with direct targets (`"T"` or `"D"`).
 
 #### 3. 3D Ray-Based Migration
-Solves the Eikonal equation to relocate subsurface reflection points along 3D ray paths, improving the imaging of steep valley flanks and basal overdeepenings. An optional interactive mode allows testing different signal propagation velocities and inspecting horizontal survey point displacements.
+Solves the Eikonal equation to relocate subsurface reflection points along 3D ray paths, improving the imaging of steep valley flanks and basal overdeepenings. Migrated picks whose 3D ray angle from vertical exceeds `max_ray_angle_deg` (default `60.0`°) are automatically discarded before post-migration interpolation and highlighted as black `×` markers in Figure `03_`. An optional interactive mode allows testing different signal propagation velocities and `max_ray_angle_deg` cutoffs while inspecting horizontal survey point displacements.
 
 #### 4. Post-Migration Surface Slope Optimization
 Re-evaluates the spectral optimization criterion on the migrated depths, <i>P</i><sub>D,i</sub> = <i>D</i><sub>i</sub> sin(<i>α</i><sub>smoothed,i</sub>), across wavenumber cutoffs <i>k</i><sub>c</sub> to determine the post-migration optimal surface slope field sin(<i>α</i><sub>opt</sub>(<i>x</i>,<i>y</i>)).
@@ -176,6 +176,7 @@ All execution options can be fully defined in a single JSON configuration file, 
     "migration_parameters": {
         "perform_migration": true,
         "velocity": 0.16,
+        "max_ray_angle_deg": 60.0,
         "interactive_migration": false,
         "horizontal_displacement_visualization": "arrows"
     },
@@ -266,7 +267,8 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `crs` | `str` / `int` | `null` | Coordinate Reference System (optional, e.g. `"EPSG:32633"`, `32633`, or PROJ string). When provided, validates metric projection, checks spatial alignment with vector outlines, and embeds EPSG metadata into output GeoTIFFs. |
 | **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal traveltimes. If `false`, migration is skipped. |
 | | `velocity` | `float` | `0.16` | Signal propagation velocity (default value of `0.16` m/ns is characteristic for radar wave propagation in temperate ice). |
-| | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity testing with visual migrated depths and horizontal displacement vector plots. |
+| | `max_ray_angle_deg` | `float` / `null` | `60.0` | Maximum allowed 3D ray path angle from vertical/nadir in degrees `(0, 90]` (0° = vertical, 90° = horizontal). Migrated picks with `ray_angle > max_ray_angle_deg` are excluded from depth interpolation and marked as black `×` symbols in Figure `03_`. *Note*: Migrated picks with `ray_angle > max_ray_angle_deg` are still included in `<output_prefix>_migrated_points.csv` when exported (`save_migrated_points`: `true` under `outputs`). Set to `null` to disable filtering. |
+| | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity and `max_ray_angle_deg` testing with visual migrated depths and horizontal displacement vector plots. |
 | | `horizontal_displacement_visualization` | `str` | `"arrows"` | Horizontal displacement visualization mode: `"arrows"` (default, quiver displacement vectors overlaid on traveltime grid) or `"grad_traveltime_grid"` (displays traveltime field without arrows, and creates a companion figure `##_<output_prefix>_3d_migration_hor_displacements.png` showing traveltime gradient grid and original and migrated survey points). |
 | **`optimization_parameters`** | `fft_filter_metric` | `str` | `"wavenumber"` | Frequency spectrum filter metric: `"wavenumber"` [rad/m] or `"wavelength"` [m]. |
 | | `kc_max` | `float` | `null` | Maximum corner frequency cutoff <i>k</i><sub>c,max</sub> in [rad/m]. If `null`, defaults to grid Nyquist wavenumber <i>k</i><sub>Nyquist</sub>. For full details, see [here](#wavenumber-to-wavelength-conversion). |
@@ -311,7 +313,7 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `save_bedrock_grid` | `bool` | `true` | If `true` (default), exports the predicted bedrock elevation raster grid <i>Z</i><sub>bed</sub>(<i>x</i>,<i>y</i>) to `<output_prefix>_bedrock_<model_slug>.<ext>`. |
 | | `save_traveltime_grid` | `bool` | `false` | If `true`, exports the pre-migration interpolated traveltime raster grid, <i>T</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_traveltime_<model_slug>.<ext>`. |
 | | `save_traveltime_uncertainty` | `bool` | `false` | If `true`, exports the Kriging traveltime uncertainty raster grid, <i>σ<sub>T</sub></i>(<i>x</i>,<i>y</i>), in traveltime units and masked by the creeping body outline to `<output_prefix>_traveltime_uncertainty_<model_slug>.<ext>`. Requires `pre_migration.calculate_uncertainty: true`. Unavailable (with a warning) if migration is skipped or the survey data are depths. |
-| | `save_migrated_points` | `bool` | `false` | If `true`, exports the 3D ray-migrated survey points to `<output_prefix>_migrated_points.csv` (`x, y, z_surface, depth_migrated`). If migration is skipped, it is automatically set to `false` and a log message is printed. |
+| | `save_migrated_points` | `bool` | `false` | If `true`, exports all 3D ray-migrated survey points (including picks exceeding `max_ray_angle_deg`) to `<output_prefix>_migrated_points.csv` (`x, y, z_surface, depth_migrated, horizontal_ds, azimuth, ray_angle[, profile_id]`). If migration is skipped, it is automatically set to `false` and a log message is printed. |
 | | `save_thickness_grid` | `bool` | `false` | If `true`, exports the final thickness raster grid, <i>D</i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness_<model_slug>.<ext>`. |
 | | `save_thickness_uncertainty` | `bool` | `false` | If `true`, exports the Kriging thickness uncertainty raster grid, <i>σ<sub>D</sub></i>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_thickness_uncertainty_<model_slug>.<ext>`. Requires `post_migration.calculate_uncertainty: true`. Skipped with a warning if `calculate_uncertainty` is `false` or if the [memory guard](#memory-guard-and-uncertainty) had to skip the variance. |
 | | `save_basal_shear_stress` | `bool` | `false` | If `true`, exports the final basal shear stress raster grid, <i>τ</i><sub>b</sub>(<i>x</i>,<i>y</i>), masked by the creeping body outline to `<output_prefix>_basal_shear_stress_<model_slug>.<ext>`. |

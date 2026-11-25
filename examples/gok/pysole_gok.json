@@ -23,8 +23,9 @@
     "migration_parameters": {
         "perform_migration": true,
         "velocity": 0.16,
+        "max_ray_angle_deg": 60.0,
         "interactive_migration": false,
-        "horizontal_displacement_visualization": "arrows"
+        "horizontal_displacement_visualization": "grad_traveltime_grid"
     },
     "optimization_parameters": {
         "fft_filter_metric": "wavenumber",
@@ -47,7 +48,7 @@
             "drift_terms": null,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true,
-            "calculate_uncertainty": false
+            "calculate_uncertainty": true
         },
         "post_migration": {
             "interpolation_target": "P",
@@ -56,11 +57,11 @@
             "drift_terms": null,
             "variogram_model": "spherical",
             "include_zero_boundary_condition": true,
-            "calculate_uncertainty": false
+            "calculate_uncertainty": true
         }
     },
     "finalization_parameters": {
-        "interactive_finalization": true,
+        "interactive_finalization": false,
         "random_forest_gap_filling": false,
         "apply_margin_blend": false,
         "min_gap_dist": 50.0,

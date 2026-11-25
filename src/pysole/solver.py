@@ -37,7 +37,18 @@ from .drift import (
     validate_required_drift_rasters,
 )
 from .smoothing import compute_gradients, precompute_fft_grid, fft_gaussian_smooth_precomputed, compute_surface_curvature
-from .config import OutputsConfig, resolve_path as resolve_config_path, resolve_input_path as resolve_input_config_path, resolve_output_dir, resolve_plots_dir, configured_output_dir, sanitize_config, warn_unknown_config_keys, validate_memory_fraction
+from .config import (
+    OutputsConfig,
+    resolve_path as resolve_config_path,
+    resolve_input_path as resolve_input_config_path,
+    resolve_output_dir,
+    resolve_plots_dir,
+    configured_output_dir,
+    sanitize_config,
+    warn_unknown_config_keys,
+    validate_memory_fraction,
+    validate_max_ray_angle,
+)
 from .logging import logger, log_section_header, end_terminal_block
 from .drift_analyzer import (
     FAILED_AICC,
@@ -280,6 +291,7 @@ class Solver:
         post_drift_analyzer: bool = False,
         post_calculate_uncertainty: bool = False,
         perform_migration: bool = True,
+        max_ray_angle_deg: float | None = 60.0,
         survey_data_type: str = "one_way_traveltime",
         horizontal_displacement_visualization: str = "arrows",
         plots_dir: str | Path | None = None,
@@ -513,6 +525,10 @@ class Solver:
         self.post_calculate_uncertainty = bool(post_calculate_uncertainty)
 
         self.perform_migration = perform_migration
+        mig_cfg = self.config.get("migration_parameters", {}) if isinstance(self.config.get("migration_parameters"), dict) else {}
+        if max_ray_angle_deg == 60.0 and "max_ray_angle_deg" in mig_cfg:
+            max_ray_angle_deg = mig_cfg.get("max_ray_angle_deg")
+        self.max_ray_angle_deg = validate_max_ray_angle(max_ray_angle_deg)
         self.survey_data_type = survey_data_type
         self.horizontal_displacement_visualization = horizontal_displacement_visualization
         self.n_cores = n_cores
@@ -552,6 +568,7 @@ class Solver:
         self.survey_points: np.ndarray | None = None
         self.pre_kriging_points: np.ndarray | None = None
         self.migrated_points: np.ndarray | None = None
+        self._migrated_points_export: np.ndarray | None = None
         self._traveltime_grid: np.ndarray | None = None
         self._traveltime_std: np.ndarray | None = None
         self.opt_kc: float | None = None
@@ -1099,8 +1116,13 @@ class Solver:
                     if res:
                         saved.extend([res] if isinstance(res, str) else res)
             if export_points and cfg_out.save_migrated_points and self.migrated_points is not None:
-                # Migrated points are always saved to root results/ without model slug
-                res = self._export_optional_points_csv(self.migrated_points, suffix="migrated_points")
+                # Migrated points CSV always exports all migrated points (including picks exceeding max_ray_angle_deg)
+                pts_to_export = (
+                    self._migrated_points_export
+                    if self._migrated_points_export is not None
+                    else self.migrated_points
+                )
+                res = self._export_optional_points_csv(pts_to_export, suffix="migrated_points")
                 if res:
                     saved.append(res)
 
@@ -1521,6 +1543,7 @@ class Solver:
             post_drift_analyzer=post_drift_analyzer,
             post_calculate_uncertainty=post_calculate_uncertainty,
             perform_migration=migration_cfg.get("perform_migration", True),
+            max_ray_angle_deg=migration_cfg.get("max_ray_angle_deg", 60.0),
             survey_data_type=survey_dtype,
             horizontal_displacement_visualization=migration_cfg.get("horizontal_displacement_visualization", "arrows"),
             plots_dir=outputs.get("plots_dir", None),
@@ -1987,6 +2010,7 @@ class Solver:
         self,
         travel_times: str | Path | os.PathLike | np.ndarray | None = None,
         velocity: float | None = None,
+        max_ray_angle_deg: Any = ...,
         interactive: bool = False,
         interactive_optimization: bool | None = None,
         plotit: bool = False,
@@ -2006,8 +2030,11 @@ class Solver:
             If None, uses survey_data_path attribute.
         velocity : float, optional
             Effective electromagnetic wave propagation velocity [m/ns] (default 0.16 m/ns in cold ice).
+        max_ray_angle_deg : float or None, optional
+            Maximum allowed 3D ray angle from vertical [deg] in ``(0, 90]``. Picks exceeding this
+            angle are discarded from ``self.migrated_points``. If omitted, uses ``self.max_ray_angle_deg``.
         interactive : bool, default False
-            If True, enables interactive command-line prompts to inspect and adjust velocity.
+            If True, enables interactive command-line prompts to inspect and adjust velocity and max_ray_angle_deg.
         interactive_optimization : bool or None, optional
             If True, enables interactive prompts during Stage 1 BSS variogram optimization if required
             for pre-migration slope filtering. If None, uses configuration setting.
@@ -2017,8 +2044,8 @@ class Solver:
         Returns
         -------
         migrated_points : np.ndarray
-            (N, 4+) NumPy array of migrated sounding coordinates [X_mig, Y_mig, Z_mig, Depth_mig]
-            in projected metric coordinates [m].
+            (N_valid, 4+) NumPy array of retained migrated sounding coordinates
+            ``[X_mig, Y_mig, Z_mig, Depth_mig, (profile_id)]`` in projected metric coordinates [m].
         """
         if travel_times is not None:
             if isinstance(travel_times, np.ndarray):
@@ -2039,12 +2066,18 @@ class Solver:
 
         if dtype_str == "depth":
             self.migrated_points = pts.copy()
+            self._migrated_points_export = None
             if self.outputs_config.get("save_migrated_points", False):
                 logger.info("   [3D Ray Migration] Migration is disabled. Skipping 'save_migrated_points' output.")
             self._warn_traveltime_exports_unavailable("survey_data_type is 'depth'")
             return self.migrated_points
 
-        v_eff = float(velocity) if velocity is not None else 0.16
+        v_eff = float(velocity) if velocity is not None else float(self._cfg_get("migration_parameters", "velocity", default=0.16) or 0.16)
+        max_angle_eff = (
+            self.max_ray_angle_deg
+            if max_ray_angle_deg is ...
+            else validate_max_ray_angle(max_ray_angle_deg, "max_ray_angle_deg")
+        )
         if velocity is None and interactive:
             try:
                 val = input("Signal Propagation Velocity [m/ns]? (e.g. 0.16): ").strip()
@@ -2058,6 +2091,7 @@ class Solver:
             unmig_depths = pts[:, 3] * v_eff if pts[:, 3].max() > 15.0 else pts[:, 3]
             # Preserve optional profile-ID column (index 4) so LOPO / drift CV stays available
             self.migrated_points = np.column_stack((pts[:, 0], pts[:, 1], pts[:, 2], unmig_depths, pts[:, 4:]))
+            self._migrated_points_export = None
             if self.outputs_config.get("save_migrated_points", False):
                 logger.info("   [3D Ray Migration] Migration is disabled. Skipping 'save_migrated_points' output.")
             self._warn_traveltime_exports_unavailable("'perform_migration' is False")
@@ -2092,48 +2126,57 @@ class Solver:
 
         cached_dem_grads = self._get_dem_gradients()
 
+        def _execute_migration(v_val: float, angle_val: float | None) -> None:
+            res = migrate_eikonal_points(
+                dem=self.dem_grid,
+                travel_time_grid=tt_grid,
+                survey_points=pts,
+                geometry=self.geometry,
+                velocity=v_val,
+                max_ray_angle_deg=angle_val,
+                outline_mask=self.outline_mask,
+                plots_dir=self.plots_dir,
+                interactive=interactive,
+                dem_grads=cached_dem_grads,
+                show_progress=self.show_progress,
+                output_prefix=self.figure_prefix,
+                horizontal_displacement_visualization=self.horizontal_displacement_visualization,
+            )
+            self.migrated_points = res.migrated_points
+            self._migrated_points_export = res.all_migrated_points
+            self.max_ray_angle_deg = angle_val
+            self._sample_pts_cache.clear()
+
         logger.info(f"   [3D Ray Migration] Executing 3D Eikonal Ray Displacement (velocity v = {v_eff:.4f} m/ns)...")
-        mig_res = migrate_eikonal_points(
-            dem=self.dem_grid,
-            travel_time_grid=tt_grid,
-            survey_points=pts,
-            geometry=self.geometry,
-            velocity=v_eff,
-            outline_mask=self.outline_mask,
-            plots_dir=self.plots_dir,
-            interactive=interactive,
-            dem_grads=cached_dem_grads,
-            show_progress=self.show_progress,
-            output_prefix=self.figure_prefix,
-            horizontal_displacement_visualization=self.horizontal_displacement_visualization,
-        )
-        self.migrated_points = mig_res.migrated_points
+        _execute_migration(v_eff, max_angle_eff)
 
         if interactive:
             log_section_header("INTERACTIVE 3D EIKONAL RAY MIGRATION")
             while True:
                 try:
-                    ans = input(f"Current migration velocity v = {v_eff:.4f} m/ns. Test another migration velocity? [y/N]: ").strip().lower()
+                    ang_str = f"{max_angle_eff:.1f}\u00b0" if max_angle_eff is not None else "None"
+                    ans = input(
+                        f"Current migration: v = {v_eff:.4f} m/ns, max_ray_angle_deg = {ang_str}. "
+                        f"Test other migration parameters? [y/N]: "
+                    ).strip().lower()
                     if ans in ["y", "yes"]:
-                        val = input("Enter new signal propagation velocity [m/ns] (e.g. 0.15): ").strip()
-                        if val:
-                            v_eff = float(val)
-                            logger.info(f"   [3D Ray Migration] Re-running with custom velocity v = {v_eff:.4f} m/ns...")
-                            mig_res2 = migrate_eikonal_points(
-                                dem=self.dem_grid,
-                                travel_time_grid=tt_grid,
-                                survey_points=pts,
-                                geometry=self.geometry,
-                                velocity=v_eff,
-                                outline_mask=self.outline_mask,
-                                plots_dir=self.plots_dir,
-                                interactive=interactive,
-                                dem_grads=cached_dem_grads,
-                                show_progress=self.show_progress,
-                                output_prefix=self.figure_prefix,
-                                horizontal_displacement_visualization=self.horizontal_displacement_visualization,
+                        val_v = input(f"Enter signal propagation velocity [m/ns] (default {v_eff:.4f}): ").strip()
+                        if val_v:
+                            v_eff = float(val_v)
+                        val_ang = input(
+                            f"Enter max_ray_angle_deg (0, 90] or 'none' (default {ang_str}): "
+                        ).strip().lower()
+                        if val_ang:
+                            max_angle_eff = (
+                                None
+                                if val_ang in ("none", "null")
+                                else validate_max_ray_angle(float(val_ang), "max_ray_angle_deg")
                             )
-                            self.migrated_points = mig_res2.migrated_points
+                        logger.info(
+                            f"   [3D Ray Migration] Re-running with velocity v = {v_eff:.4f} m/ns, "
+                            f"max_ray_angle_deg = {max_angle_eff}..."
+                        )
+                        _execute_migration(v_eff, max_angle_eff)
                     else:
                         break
                 except Exception:

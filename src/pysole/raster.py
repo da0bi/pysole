@@ -1219,6 +1219,7 @@ def load_survey_points(
     """
     prof_arr: np.ndarray | None = None
     pts: np.ndarray | None = None
+    diag_cols = {"horizontal_ds", "azimuth", "ray_angle"}
     if isinstance(survey_input, (str, Path, os.PathLike)):
         filepath = str(survey_input)
         is_csv = filepath.lower().endswith(".csv")
@@ -1227,6 +1228,7 @@ def load_survey_points(
                 import pandas as pd
 
                 df_csv = pd.read_csv(filepath)
+                drop_diag = [c for c in df_csv.columns if c in diag_cols]
                 if profile_column in df_csv.columns:
                     s_prof = df_csv[profile_column]
                     if pd.api.types.is_numeric_dtype(s_prof):
@@ -1235,13 +1237,15 @@ def load_survey_points(
                         codes = pd.factorize(s_prof)[0].astype(np.float64)
                         codes[codes < 0] = np.nan  # factorize flags missing labels with -1
                         prof_arr = codes
-                    # Drop the profile column by NAME before building the numeric [X, Y, (Z), value] matrix
-                    pts = df_csv.drop(columns=[profile_column]).select_dtypes(include=[np.number]).to_numpy(dtype=np.float64)
+                    # Drop the profile column and any migration diagnostic columns by NAME before building [X, Y, (Z), value]
+                    pts = df_csv.drop(columns=[profile_column, *drop_diag]).select_dtypes(include=[np.number]).to_numpy(dtype=np.float64)
                 else:
                     logger.warning(
                         f"   [Survey Points] Survey profile column '{profile_column}' not found in CSV header {list(df_csv.columns)}. "
                         "Profile-based cross-validation is disabled for this dataset."
                     )
+                    if drop_diag:
+                        pts = df_csv.drop(columns=drop_diag).select_dtypes(include=[np.number]).to_numpy(dtype=np.float64)
             except Exception as e:
                 logger.warning(f"   [Survey Points] Could not parse survey profile column '{profile_column}': {e}")
                 prof_arr = None
@@ -1252,6 +1256,9 @@ def load_survey_points(
             except ValueError:
                 import pandas as pd
                 df_tmp = pd.read_csv(filepath)
+                drop_diag = [c for c in df_tmp.columns if c in diag_cols]
+                if drop_diag:
+                    df_tmp = df_tmp.drop(columns=drop_diag)
                 pts = df_tmp.select_dtypes(include=[np.number]).to_numpy()
     else:
         pts = np.array(survey_input, dtype=np.float64)
@@ -1325,16 +1332,18 @@ def save_points_csv(
     headers: list[str] | None = None,
 ) -> str:
     """
-    Exports a 2D point array (e.g. migrated survey points) to a CSV text file.
+    Exports a 2D migrated survey point array to a CSV text file.
 
     Parameters
     ----------
     points : np.ndarray
-        2D array of point coordinates and values (e.g. shape (N, 4) for [x, y, z_surf, depth]).
+        2D array of migrated point coordinates, depth, and ray metrics with shape ``(N, 7)``
+        for ``[x, y, z_surface, depth_migrated, horizontal_ds, azimuth, ray_angle]`` or
+        ``(N, 8)`` when ``profile_id`` is appended.
     filepath : str or Path
         Target file path (e.g. 'output_migrated_points.csv').
     headers : list of str, optional
-        Header column names. If None, defaults to ['x', 'y', 'z_surface', 'depth_migrated'].
+        Header column names. If None, inferred from the 7- or 8-column migrated points schema.
 
     Returns
     -------
@@ -1346,19 +1355,20 @@ def save_points_csv(
         path_obj = path_obj.with_suffix(".csv")
 
     abs_target_path = str(path_obj.resolve())
-    abs_parent = Path(abs_target_path).parent
-    abs_parent.mkdir(parents=True, exist_ok=True)
+    Path(abs_target_path).parent.mkdir(parents=True, exist_ok=True)
 
+    base_headers = ["x", "y", "z_surface", "depth_migrated", "horizontal_ds", "azimuth", "ray_angle"]
+    n_cols = points.shape[1] if points.ndim > 1 else 1
     if headers is None:
-        if points.ndim > 1 and points.shape[1] == 4:
-            headers = ["x", "y", "z_surface", "depth_migrated"]
-        elif points.ndim > 1 and points.shape[1] == 3:
-            headers = ["x", "y", "value"]
+        if n_cols == 8:
+            headers = [*base_headers, "profile_id"]
+        elif n_cols == 7:
+            headers = base_headers
         else:
-            headers = [f"col_{i+1}" for i in range(points.shape[1] if points.ndim > 1 else 1)]
+            headers = base_headers[:n_cols]
 
-    header_str = ",".join(headers)
-    np.savetxt(abs_target_path, points, delimiter=",", header=header_str, comments="", fmt="%.6f")
+    fmt: str | list[str] = ["%.6f"] * 7 + ["%.0f"] if n_cols == 8 else "%.6f"
+    np.savetxt(abs_target_path, points, delimiter=",", header=",".join(headers), comments="", fmt=fmt)
     return abs_target_path
 
 

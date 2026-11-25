@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Goldbergkees Glacier (GOK) Example: Running PySole Workflow from Configuration
 """

@@ -108,6 +108,32 @@ class TestConfigWorkflowWuk(unittest.TestCase):
         solver_none = pysole.Solver(dem=dem, survey_profile_column=None)
         self.assertIsNone(solver_none.survey_profile_column)
 
+    def test_max_ray_angle_deg_default_and_validation(self):
+        from pysole.config import ConfigError, load_config
+
+        self.assertEqual(pysole.config.DEFAULT_CONFIG["migration_parameters"]["max_ray_angle_deg"], 60.0)
+        cfg = load_config({})
+        self.assertEqual(cfg["migration_parameters"]["max_ray_angle_deg"], 60.0)
+
+        cfg_null = load_config({"migration_parameters": {"max_ray_angle_deg": None}})
+        self.assertIsNone(cfg_null["migration_parameters"]["max_ray_angle_deg"])
+
+        dem = np.ones((10, 10))
+        solver = pysole.Solver(dem=dem)
+        self.assertEqual(solver.max_ray_angle_deg, 60.0)
+
+        solver_custom = pysole.Solver(dem=dem, max_ray_angle_deg=45.0)
+        self.assertEqual(solver_custom.max_ray_angle_deg, 45.0)
+
+        solver_none = pysole.Solver(dem=dem, max_ray_angle_deg=None)
+        self.assertIsNone(solver_none.max_ray_angle_deg)
+
+        for invalid in (0.0, -10.0, 90.5, True, False, "invalid"):
+            with self.assertRaises(ConfigError):
+                load_config({"migration_parameters": {"max_ray_angle_deg": invalid}})
+            with self.assertRaises(ConfigError):
+                pysole.Solver(dem=dem, max_ray_angle_deg=invalid)
+
     def test_output_dir_resolution(self):
         dem = np.ones((10, 10))
         # 1. Fallback to survey_data_path directory when output_dir is None (plots_dir defaults to figures)

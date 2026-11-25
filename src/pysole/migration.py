@@ -8,6 +8,7 @@ computing non-orthogonal slowness vector components (sx, sy, sz) and horizontal/
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
+from .config import validate_max_ray_angle
 from .smoothing import compute_gradients
 from .raster import GridGeometry
 from .logging import logger, get_progress_bar
@@ -16,28 +17,41 @@ from .logging import logger, get_progress_bar
 @dataclass
 class MigrationResult:
     """
-    Data container storing 3D Eikonal ray migration results and displacement fields.
+    Data container storing 3D Eikonal ray migration results, ray metrics, and displacement fields.
 
     Attributes
     ----------
     migrated_points : np.ndarray
-        2D array of relocated survey points with shape ``(N, >=4)``. Columns correspond to:
-        - Column 0: Relocated X coordinate (easting) [m].
-        - Column 1: Relocated Y coordinate (northing) [m].
-        - Column 2: Surface DEM elevation Z_surface at the relocated position [m].
-        - Column 3: Migrated true perpendicular ice thickness / depth [m].
-        - Additional columns (e.g., survey profile ID) are preserved if present.
+        2D array of retained relocated survey points (``ray_angle <= max_ray_angle_deg``) with shape
+        ``(N_valid, 4)`` or ``(N_valid, 5)``: ``[X_mig, Y_mig, Z_surface, Depth_mig, (profile_id)]``.
+    all_migrated_points : np.ndarray
+        2D array of all ``N`` relocated survey points (including picks exceeding ``max_ray_angle_deg``)
+        with shape ``(N, 7)`` or ``(N, 8)``:
+        ``[X_mig, Y_mig, Z_surface, Depth_mig, horizontal_ds, azimuth, ray_angle, (profile_id)]``.
     dx_grid : np.ndarray
         2D raster grid of horizontal ray displacements along the X dimension [m].
     dy_grid : np.ndarray
         2D raster grid of horizontal ray displacements along the Y dimension [m].
     dz_grid : np.ndarray
         2D raster grid of vertical ray displacements along the Z dimension [m].
+    horizontal_ds : np.ndarray
+        1D array of horizontal shift distances [m] for all ``N`` survey picks.
+    azimuth : np.ndarray
+        1D array of horizontal shift compass bearings [deg] in ``[0, 360)`` (0° = North, 90° = East).
+    ray_angle : np.ndarray
+        1D array of 3D ray path angles from vertical/nadir [deg] in ``[0, 90]`` (0° = vertical, 90° = horizontal).
+    valid_ray_mask : np.ndarray
+        1D boolean mask indicating which survey picks satisfied ``ray_angle <= max_ray_angle_deg``.
     """
     migrated_points: np.ndarray
+    all_migrated_points: np.ndarray
     dx_grid: np.ndarray
     dy_grid: np.ndarray
     dz_grid: np.ndarray
+    horizontal_ds: np.ndarray
+    azimuth: np.ndarray
+    ray_angle: np.ndarray
+    valid_ray_mask: np.ndarray
 
 
 class EikonalMigrator:
@@ -73,17 +87,14 @@ class EikonalMigrator:
         self.dem = dem
         self.geometry = geometry
         self.outline_mask = outline_mask
-        self.dem_grads = (
-            dem_grads
-            if dem_grads is not None
-            else compute_gradients(dem, dx=self.geometry.dx, dy=self.geometry.dy)
-        )
+        self.dem_grads = dem_grads
 
     def migrate(
         self,
         travel_time_grid: np.ndarray,
         survey_points: np.ndarray,
         velocity: float = 0.16,
+        max_ray_angle_deg: float | None = 60.0,
         plots_dir: str | Path | None = None,
         interactive: bool = False,
         show_progress: bool = True,
@@ -102,6 +113,9 @@ class EikonalMigrator:
         velocity : float, default 0.16
             Electromagnetic radar signal propagation velocity in ice [m/ns]
             (typically ~0.160 m/ns in temperate ice/firn, up to ~0.168 m/ns in cold ice).
+        max_ray_angle_deg : float or None, default 60.0
+            Maximum allowed 3D ray angle from vertical [deg] in ``(0, 90]``. Picks exceeding
+            this angle are discarded from ``result.migrated_points``. Set to ``None`` to disable.
         plots_dir : str or Path, optional
             Output folder for diagnostic migration displacement vector figures.
         interactive : bool, default False
@@ -116,14 +130,17 @@ class EikonalMigrator:
         Returns
         -------
         result : MigrationResult
-            Migration result container storing relocated picks and displacement grids.
+            Migration result container storing retained picks, full export table, and displacement grids.
         """
+        if self.dem_grads is None:
+            self.dem_grads = compute_gradients(self.dem, dx=self.geometry.dx, dy=self.geometry.dy)
         return migrate_eikonal_points(
             dem=self.dem,
             travel_time_grid=travel_time_grid,
             survey_points=survey_points,
             geometry=self.geometry,
             velocity=velocity,
+            max_ray_angle_deg=max_ray_angle_deg,
             outline_mask=self.outline_mask,
             plots_dir=plots_dir,
             interactive=interactive,
@@ -133,7 +150,12 @@ class EikonalMigrator:
             horizontal_displacement_visualization=horizontal_displacement_visualization,
         )
 
-    def migrate_points(self, points: np.ndarray, velocity: float = 0.16) -> np.ndarray:
+    def migrate_points(
+        self,
+        points: np.ndarray,
+        velocity: float = 0.16,
+        max_ray_angle_deg: float | None = 60.0,
+    ) -> np.ndarray:
         """
         Convenience method to migrate a survey point set using a homogeneous traveltime field.
 
@@ -143,6 +165,8 @@ class EikonalMigrator:
             Input sounding points array ``[X, Y, Z, travel_time, ...]``.
         velocity : float, default 0.16
             Radar wave velocity in glacier ice [m/ns].
+        max_ray_angle_deg : float or None, default 60.0
+            Maximum allowed 3D ray angle from vertical [deg].
 
         Returns
         -------
@@ -154,7 +178,13 @@ class EikonalMigrator:
             tt_grid = np.full_like(self.dem, mean_tt)
         else:
             tt_grid = np.zeros_like(self.dem)
-        res = self.migrate(travel_time_grid=tt_grid, survey_points=points, velocity=velocity, show_progress=False)
+        res = self.migrate(
+            travel_time_grid=tt_grid,
+            survey_points=points,
+            velocity=velocity,
+            max_ray_angle_deg=max_ray_angle_deg,
+            show_progress=False,
+        )
         return res.migrated_points
 
 
@@ -164,6 +194,7 @@ def migrate_eikonal_points(
     survey_points: np.ndarray,
     geometry: GridGeometry,
     velocity: float = 0.16,
+    max_ray_angle_deg: float | None = 60.0,
     outline_mask: np.ndarray | None = None,
     plots_dir: str | Path | None = None,
     interactive: bool = False,
@@ -191,8 +222,9 @@ def migrate_eikonal_points(
     4. Evaluates 3D ray displacement vectors:
        :math:`(\\Delta x, \\Delta y, \\Delta z) = T \\cdot v^2 \\cdot (p_x, p_y, p_z)`.
     5. Interpolates displacement vectors at scattered sounding coordinates to yield
-       relocated positions :math:`(X_{\\text{mig}}, Y_{\\text{mig}})` and true
-       perpendicular ice thickness.
+       relocated positions :math:`(X_{\\text{mig}}, Y_{\\text{mig}})`, true perpendicular ice
+       thickness, horizontal shift distance ``horizontal_ds``, compass ``azimuth``, and
+       ``ray_angle`` from vertical, filtering picks that exceed ``max_ray_angle_deg``.
 
     Parameters
     ----------
@@ -207,6 +239,10 @@ def migrate_eikonal_points(
     velocity : float, default 0.16
         Electromagnetic signal propagation velocity [m/ns]
         (~0.160 m/ns in temperate ice/firn, ~0.168 m/ns in cold pure ice).
+    max_ray_angle_deg : float or None, default 60.0
+        Maximum allowed 3D ray path angle from vertical [deg] in ``(0, 90]``.
+        Migrated picks with ``ray_angle > max_ray_angle_deg`` are discarded from
+        ``result.migrated_points`` while preserved in ``result.all_migrated_points``.
     outline_mask : np.ndarray, optional
         Boolean glacier outline mask.
     plots_dir : str or Path, optional
@@ -217,12 +253,18 @@ def migrate_eikonal_points(
         Pre-computed surface DEM gradients dictionary.
     show_progress : bool, default True
         Whether to show terminal progress bar during ray relocation.
+    output_prefix : str, default ""
+        Output prefix for diagnostic figures.
+    horizontal_displacement_visualization : str, default "arrows"
+        Visualization style for horizontal displacements: 'arrows' or 'grad_traveltime_grid'.
 
     Returns
     -------
     result : MigrationResult
-        Container holding migrated points array and 2D displacement vector grids.
+        Container holding retained migrated points, full export table, ray metrics, and 2D displacement grids.
     """
+    eff_max_angle = validate_max_ray_angle(max_ray_angle_deg, "max_ray_angle_deg")
+
     dx = geometry.dx
     dy = geometry.dy
     x_coords = geometry.x_coords
@@ -230,10 +272,10 @@ def migrate_eikonal_points(
 
     # 1. Calculate horizontal slownesses s1 = -\partial T / \partial x and s2 = -\partial T / \partial y
     tt_grads = compute_gradients(travel_time_grid, dx=dx, dy=dy)
-    s1_grid = -tt_grads["slope_x"]  # -\partial T / \partial x
-    s2_grid = -tt_grads["slope_y"]  # -\partial T / \partial y
+    s1_grid = -tt_grads["slope_x"]
+    s2_grid = -tt_grads["slope_y"]
 
-    # 2. Retrieve pre-computed surface DEM directional slope components zx = \partial Z / \partial x, zy = \partial Z / \partial y
+    # 2. Retrieve surface DEM directional slope components zx = \partial Z / \partial x, zy = \partial Z / \partial y
     if dem_grads is None:
         dem_grads = compute_gradients(dem, dx=dx, dy=dy)
 
@@ -250,8 +292,7 @@ def migrate_eikonal_points(
     C_grid = s1_grid**2 + s2_grid**2 - v_inv_sq
 
     disc_grid = B_grid**2 - A_grid * C_grid
-    evanescent_mask = disc_grid < 0.0
-    evanescent_count = int(np.sum(evanescent_mask))
+    evanescent_count = int(np.sum(disc_grid < 0.0))
     if evanescent_count > 0:
         logger.info(
             f"   [3D Ray Migration] {evanescent_count} grid cells triggered evanescent wave condition "
@@ -284,26 +325,28 @@ def migrate_eikonal_points(
 
         pbar.update(len(survey_points))
 
-    dxi = np.nan_to_num(interpolated_disp[:, 0], nan=0.0)
-    dyi = np.nan_to_num(interpolated_disp[:, 1], nan=0.0)
     dzi = interpolated_disp[:, 2]
+    nan_disp = np.isnan(dzi)
+    dxi = np.where(nan_disp, 0.0, np.nan_to_num(interpolated_disp[:, 0], nan=0.0))
+    dyi = np.where(nan_disp, 0.0, np.nan_to_num(interpolated_disp[:, 1], nan=0.0))
 
-    interp_dem = geometry.create_interpolator(dem, fill_value=np.nan)
-
-    # Migrated coordinates & thickness adjustment for surface elevation delta between source and relocated point
+    # Relocated horizontal coordinates
     x_mig = survey_points[:, 0] + dxi
     y_mig = survey_points[:, 1] + dyi
 
+    # Single surface DEM evaluation at source and relocated coordinates
+    interp_dem = geometry.create_interpolator(dem, fill_value=np.nan)
     z_s0 = interp_dem(pts_xy)
-    pts_mig_xy = np.column_stack((y_mig, x_mig))
-    z_smig = interp_dem(pts_mig_xy)
+    z_surf_mig = interp_dem(np.column_stack((y_mig, x_mig)))
+    nan_z = np.isnan(z_surf_mig)
+    z_surf_mig[nan_z] = survey_points[nan_z, 2]
 
-    delta_zs = np.where(np.isnan(z_smig - z_s0), 0.0, z_smig - z_s0)
-    d_mig = np.maximum(-dzi + delta_zs, 0.0)
-
-    # Fallback to unmigrated depth if dzi interpolation is zero or invalid
+    delta_zs = np.where(np.isnan(z_surf_mig - z_s0), 0.0, z_surf_mig - z_s0)
     unmig_d = survey_points[:, 3] * velocity
-    valid_d = (~np.isnan(dzi)) & (d_mig > 0)
+    d_mig = np.where(nan_disp, unmig_d, np.maximum(-dzi + delta_zs, 0.0))
+
+    # Fallback to unmigrated coordinates if dzi interpolation hit boundary NaNs or non-positive depth
+    valid_d = (~nan_disp) & (d_mig > 0)
     fallback_count = int(np.sum(~valid_d))
     if fallback_count > 0:
         logger.info(
@@ -311,19 +354,48 @@ def migrate_eikonal_points(
             f"due to boundary NaN gradients."
         )
     d_mig[~valid_d] = unmig_d[~valid_d]
+    x_mig[nan_disp] = survey_points[nan_disp, 0]
+    y_mig[nan_disp] = survey_points[nan_disp, 1]
+    z_surf_mig[nan_disp] = np.where(np.isnan(z_s0[nan_disp]), survey_points[nan_disp, 2], z_s0[nan_disp])
 
-    # Sample surface DEM elevation at migrated (x_mig, y_mig)
-    mig_pts_xy = np.column_stack((y_mig, x_mig))
-    z_surf_mig = interp_dem(mig_pts_xy)
-
-    # Clean NaNs in z_surf_mig using original surface z
-    nan_z = np.isnan(z_surf_mig)
-    z_surf_mig[nan_z] = survey_points[nan_z, 2]
+    # Compute ray shift metrics: horizontal_ds [m], azimuth [0°, 360°) (0°=N, 90°=E), ray_angle [0°, 90°] (0°=nadir)
+    horizontal_ds = np.hypot(dxi, dyi)
+    azimuth = np.where(horizontal_ds > 0.0, np.mod(np.degrees(np.arctan2(dxi, dyi)), 360.0), 0.0)
+    azimuth = np.where(np.isclose(azimuth, 360.0, atol=1e-9), 0.0, azimuth)
+    dzi_eff = np.where(nan_disp, -unmig_d, dzi)
+    ray_angle = np.clip(np.degrees(np.arctan2(horizontal_ds, -dzi_eff)), 0.0, 90.0)
 
     if survey_points.shape[1] >= 5:
-        migrated_points = np.column_stack((x_mig, y_mig, z_surf_mig, d_mig, survey_points[:, 4]))
+        all_migrated_points = np.column_stack(
+            (x_mig, y_mig, z_surf_mig, d_mig, horizontal_ds, azimuth, ray_angle, survey_points[:, 4])
+        )
+        full_pass2_points = np.column_stack((x_mig, y_mig, z_surf_mig, d_mig, survey_points[:, 4]))
     else:
-        migrated_points = np.column_stack((x_mig, y_mig, z_surf_mig, d_mig))
+        all_migrated_points = np.column_stack(
+            (x_mig, y_mig, z_surf_mig, d_mig, horizontal_ds, azimuth, ray_angle)
+        )
+        full_pass2_points = np.column_stack((x_mig, y_mig, z_surf_mig, d_mig))
+
+    # Filter points exceeding max_ray_angle_deg for subsequent depth grid interpolation
+    if eff_max_angle is not None and len(survey_points) > 0:
+        valid_ray_mask = ray_angle <= eff_max_angle
+        discarded_count = int(np.sum(~valid_ray_mask))
+        max_obs_angle = float(np.nanmax(ray_angle))
+        logger.info(
+            f"   [3D Ray Migration] Discarded {discarded_count} of {len(survey_points)} survey picks "
+            f"exceeding max_ray_angle_deg = {eff_max_angle:.1f}\u00b0 (max observed ray angle = {max_obs_angle:.1f}\u00b0)."
+        )
+        if np.sum(valid_ray_mask) == 0:
+            raise ValueError(
+                f"All {len(survey_points)} migrated survey picks exceeded max_ray_angle_deg = {eff_max_angle:.1f}\u00b0 "
+                f"(max observed ray angle = {max_obs_angle:.1f}\u00b0). Increase 'migration_parameters.max_ray_angle_deg'."
+            )
+        migrated_points = full_pass2_points[valid_ray_mask]
+        discarded_points = full_pass2_points[~valid_ray_mask]
+    else:
+        valid_ray_mask = np.ones(len(survey_points), dtype=bool)
+        migrated_points = full_pass2_points
+        discarded_points = full_pass2_points[:0]
 
     # 6. Generate 3D Migration Displacement Vector diagnostic figures
     should_plot = interactive or (plots_dir is not None)
@@ -333,8 +405,8 @@ def migrate_eikonal_points(
             travel_time_grid=travel_time_grid,
             survey_points=survey_points,
             migrated_points=migrated_points,
-            dxi=dxi,
-            dyi=dyi,
+            dxi=dxi[valid_ray_mask],
+            dyi=dyi[valid_ray_mask],
             x_coords=x_coords,
             y_coords=y_coords,
             outline_mask=outline_mask,
@@ -342,6 +414,9 @@ def migrate_eikonal_points(
             interactive=interactive,
             output_prefix=output_prefix,
             horizontal_displacement_visualization=horizontal_displacement_visualization,
+            discarded_points=discarded_points,
+            max_ray_angle_deg=eff_max_angle,
+            quiver_origins=survey_points[valid_ray_mask],
         )
         if horizontal_displacement_visualization == "grad_traveltime_grid":
             from .plotting import plot_migration_horizontal_displacements
@@ -361,7 +436,13 @@ def migrate_eikonal_points(
 
     return MigrationResult(
         migrated_points=migrated_points,
+        all_migrated_points=all_migrated_points,
         dx_grid=dx_grid,
         dy_grid=dy_grid,
         dz_grid=dz_grid,
+        horizontal_ds=horizontal_ds,
+        azimuth=azimuth,
+        ray_angle=ray_angle,
+        valid_ray_mask=valid_ray_mask,
     )
+

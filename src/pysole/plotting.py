@@ -395,6 +395,9 @@ def plot_migration_displacement_vectors(
     interactive: bool = False,
     output_prefix: str = "",
     horizontal_displacement_visualization: str = "arrows",
+    discarded_points: np.ndarray | None = None,
+    max_ray_angle_deg: float | None = None,
+    quiver_origins: np.ndarray | None = None,
 ) -> None:
     """
     Plot 3D ray-tracing migration displacement vectors and migrated sounding depths.
@@ -404,7 +407,8 @@ def plot_migration_displacement_vectors(
       horizontal displacement vectors (quiver arrows) illustrating the lateral shift
       from apex points to true basal reflection points driven by cross-profile slope.
     - Lower Panel: Spatial scatter plot comparing pre-migrated surface sounding locations
-      (black dots) with migrated bed reflection points colored by true bedrock depth (in meters).
+      (black dots) with migrated bed reflection points colored by true bedrock depth (in meters),
+      and discarded picks exceeding ``max_ray_angle_deg`` marked as black 'x' symbols.
 
     Parameters
     ----------
@@ -413,11 +417,11 @@ def plot_migration_displacement_vectors(
     survey_points : np.ndarray
         Pre-migration survey point coordinates of shape (N, >=2) in projected meters.
     migrated_points : np.ndarray
-        Migrated point array of shape (N, 4) containing [x_mig, y_mig, z_surf, depth_mig].
+        Retained migrated point array of shape (N_valid, >=4) containing [x_mig, y_mig, z_surf, depth_mig].
     dxi : np.ndarray
-        Horizontal displacement components along the easting/X axis in meters.
+        Horizontal displacement components along the easting/X axis in meters for quiver arrows.
     dyi : np.ndarray
-        Horizontal displacement components along the northing/Y axis in meters.
+        Horizontal displacement components along the northing/Y axis in meters for quiver arrows.
     x_coords : np.ndarray
         1D array of cell center X coordinates in meters.
     y_coords : np.ndarray
@@ -428,6 +432,16 @@ def plot_migration_displacement_vectors(
         Target directory to save the output figure PNG. If None, figure is not saved.
     interactive : bool, default=False
         If True and a GUI backend is active, displays the figure interactively.
+    output_prefix : str, default=""
+        Configured output prefix prepended to figure filename.
+    horizontal_displacement_visualization : str, default="arrows"
+        Visualization style for horizontal displacements: 'arrows' or 'grad_traveltime_grid'.
+    discarded_points : np.ndarray, optional
+        Migrated points discarded due to exceeding ``max_ray_angle_deg``, plotted as black 'x' markers.
+    max_ray_angle_deg : float, optional
+        Maximum allowed ray angle [deg] used for labeling discarded points in the legend.
+    quiver_origins : np.ndarray, optional
+        Origin coordinates for quiver arrows (defaults to ``survey_points``).
 
     Returns
     -------
@@ -475,12 +489,12 @@ def plot_migration_displacement_vectors(
         if horizontal_displacement_visualization == "grad_traveltime_grid":
             ax1.set_title("Calculated Traveltime Field", fontsize=9.5)
         else:
-            # Downsample arrows for clean plot and dynamically amplify for visibility
-            step = max(len(survey_points) // 80, 1)
+            q_pts = quiver_origins if quiver_origins is not None else survey_points
+            step = max(len(q_pts) // 80, 1)
             scale_factor = _compute_vector_scale_factor(dxi[::step], dyi[::step], x_coords, y_coords)
             ax1.quiver(
-                survey_points[::step, 0],
-                survey_points[::step, 1],
+                q_pts[::step, 0],
+                q_pts[::step, 1],
                 dxi[::step] * scale_factor,
                 dyi[::step] * scale_factor,
                 color="white",
@@ -500,7 +514,7 @@ def plot_migration_displacement_vectors(
         y_mig = migrated_points[:, 1]
         d_mig = migrated_points[:, 3]
 
-        n_pts = len(survey_points)
+        n_pts = max(len(survey_points), 1)
         s_mig = float(np.clip(180.0 / np.sqrt(n_pts), 1.5, 14.0))
         s_pre = float(np.clip(100.0 / np.sqrt(n_pts), 0.8, 8.0))
 
@@ -525,6 +539,26 @@ def plot_migration_displacement_vectors(
             zorder=3,
         )
 
+        has_discarded = discarded_points is not None and len(discarded_points) > 0
+        if has_discarded:
+            disc_label = (
+                f"Discarded (> {max_ray_angle_deg:g}\u00b0)"
+                if max_ray_angle_deg is not None
+                else "Discarded Points"
+            )
+            s_disc = float(np.clip(220.0 / np.sqrt(n_pts), 8.0, 28.0))
+            ax2.scatter(
+                discarded_points[:, 0],
+                discarded_points[:, 1],
+                c="black",
+                marker="x",
+                s=s_disc,
+                linewidths=1.0,
+                alpha=0.9,
+                label=disc_label,
+                zorder=4,
+            )
+
         divider2 = make_axes_locatable(ax2)
         cax2 = divider2.append_axes("right", size="5%", pad=0.1)
         fig.colorbar(sc, cax=cax2, label="Migrated Depth [m]")
@@ -546,7 +580,7 @@ def plot_migration_displacement_vectors(
         ax2.set_title("Migrated Survey Point Depths [m]", fontsize=9.5)
         ax2.set_xlabel("X [m]")
         ax2.set_ylabel("Y [m]")
-        if horizontal_displacement_visualization != "grad_traveltime_grid":
+        if horizontal_displacement_visualization != "grad_traveltime_grid" or has_discarded:
             ax2.legend(loc="upper right", fontsize=8)
 
         plt.tight_layout()

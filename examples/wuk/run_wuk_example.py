@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Wurtenkees Glacier Example: Running PySole Workflow from Configuration
 """

@@ -5,6 +5,43 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-11-25
+
+3D Eikonal normal ray migration parameter `max_ray_angle_deg` to reject steep ray artifacts from downstream depth grid interpolation and bedrock finalization; diagnostic visualization of discarded picks with black `×` markers on Figure 03; extended `<output_prefix>_migrated_points.csv` export retaining all survey picks and logging horizontal displacement, azimuth, and ray angle; automatic diagnostic column stripping during migrated point re-import; and standalone Python 3 shebang execution for example workflows.
+
+### Added
+- **[3D Eikonal Normal Ray Angle Filtering (`max_ray_angle_deg`)] (`src/pysole/config.py`, `src/pysole/migration.py`, `src/pysole/solver.py`, `pysole.json`, `examples/gok/pysole_gok.json`, `examples/wuk/pysole_wuk.json`, `README.md`, `tests/test_config.py`, `tests/test_eikonal_migration_plane.py`)**:
+  - **Configurable Ray Angle Threshold**: Added `migration_parameters.max_ray_angle_deg` (float, default: `60.0` degrees; 0° = vertical/nadir, 90° = horizontal) to prevent unphysical steep ray displacements across high-curvature surface topography from degrading subsequent interpolation.
+  - **Downstream Exclusion**: Filtered migrated survey points exceeding `max_ray_angle_deg` from the returned migrated coordinate array passed to Pass 2 depth grid Kriging and bedrock finalization.
+  - **Informative Filtering Notice**: Emits a clear log report upon completing ray displacement: `[3D Ray Migration] Discarded X of N survey picks exceeding max_ray_angle_deg = 60.0° (max observed ray angle = ...°)`.
+  - **Interactive Migration Prompt**: Extended interactive mode (`interactive_migration: true`) to prompt the user for both migration velocity and maximum ray angle with real-time defaults.
+  - **Diagnostic Figure 03 Visualization**: Highlighted discarded steep-angle picks with black `×` markers in Figure `03_<output_prefix>_3d_migration.png`:
+    - In `"arrows"` displacement vector mode: overlays black `×` markers at the surface location of discarded picks alongside displacement arrows.
+    - In `"grad_traveltime_grid"` mode: overlays black `×` markers in the lower subplot entitled `"Migrated Survey Point Depths [m]"`.
+- **[Comprehensive Migrated Points CSV Export (`<output_prefix>_migrated_points.csv`)] (`src/pysole/migration.py`, `src/pysole/raster.py`, `src/pysole/solver.py`, `tests/test_optional_outputs.py`)**:
+  - **Preservation of All Survey Soundings**: `<output_prefix>_migrated_points.csv` now preserves all $N$ original soundings (including points exceeding `max_ray_angle_deg`) to allow downstream quality assessment and parameter tuning.
+  - **Extended 3D Ray Kinematics Columns**: Expanded the CSV format from 4 (or 5) columns to 7 (or 8) columns:
+    - `x_migrated`: Migrated easting coordinate [m].
+    - `y_migrated`: Migrated northing coordinate [m].
+    - `z_migrated`: Migrated bottom elevation [m].
+    - `depth`: Calculated true ice thickness [m].
+    - `horizontal_ds`: Total horizontal displacement distance [m] ($\sqrt{\Delta x^2 + \Delta y^2}$).
+    - `azimuth`: Displacement direction in compass degrees (0° North, 90° East, 180° South, 270° West).
+    - `ray_angle`: Takeoff ray angle relative to vertical nadir (0° vertical, 90° horizontal).
+    - `profile_id`: Optional 8th column preserved when survey profile tracks are present in input data.
+- **[Python 3 Shebang in Example Scripts] (`examples/gok/run_gok_example.py`, `examples/wuk/run_wuk_example.py`)**:
+  - Added `#!/usr/bin/env python3` shebang and `chmod +x` executable permissions to allow direct command-line invocation (`./run_gok_example.py`).
+
+### Changed
+- **[Diagnostic Column Stripping on Survey Point Re-Import] (`src/pysole/raster.py`)**:
+  - Enhanced `load_survey_points()` to automatically recognize and ignore diagnostic ray columns (`horizontal_ds`, `azimuth`, `ray_angle`) when re-importing a generated `<output_prefix>_migrated_points.csv` as a Pass 2 `survey_data_type: "depth"` file.
+
+### Fixed
+- **[Example Script Shell Execution Fallback] (`examples/gok/run_gok_example.py`, `examples/wuk/run_wuk_example.py`)**:
+  - Prevented bash from executing Python import statements as shell utilities (such as ImageMagick's `import` tool) when invoking example scripts directly from terminal emulators.
+
+---
+
 ## [0.6.0] - 2026-10-22
 
 Glacier surface mass balance (`"mass_balance"`), spectrally smoothed flow velocity (`"velocity"`), and coupled SIA-velocity (`"velocity_sia"`) drift models across Native Universal Kriging, PyKrige Universal Kriging, Regression Kriging, Random Forest gap filling, and the Drift Analyzer (dynamic 24 / 48 / 60 / 120 candidate suites); quantitative glacier area, ice volume, and spatially autocorrelated volume uncertainty ($\sigma_V = A_{\text{total}} \cdot \bar{\sigma}_D$); non-interactive multi-model suite execution (`drift_analyzer: false`); flat `<output_dir>` raster exports with applied drift model slugs; and codebase streamlining.

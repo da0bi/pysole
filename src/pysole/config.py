@@ -104,6 +104,40 @@ def validate_memory_fraction(value: Any, name: str = "kriging_parameters.max_mem
     return frac
 
 
+def validate_max_ray_angle(value: Any, name: str = "migration_parameters.max_ray_angle_deg") -> float | None:
+    """
+    Validates that the maximum 3D Eikonal ray angle falls within ``(0.0, 90.0]`` degrees or is ``None``.
+
+    Parameters
+    ----------
+    value : Any
+        Maximum allowed ray path angle from vertical [deg] or None to disable filtering.
+    name : str, default "migration_parameters.max_ray_angle_deg"
+        Configuration key name used in diagnostic error messages.
+
+    Returns
+    -------
+    angle : float or None
+        Validated maximum ray angle in degrees, or None.
+
+    Raises
+    ------
+    ConfigError
+        If ``value`` is non-numeric or outside the valid range ``(0.0, 90.0]``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ConfigError(f"Configuration parameter '{name}' must be a number in (0, 90] or null, got {value!r}.")
+    try:
+        ang = float(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"Configuration parameter '{name}' must be a number in (0, 90] or null, got {value!r}.") from None
+    if not (np.isfinite(ang) and 0.0 < ang <= 90.0):
+        raise ConfigError(f"Configuration parameter '{name}' must satisfy 0 < value <= 90.0 (or null to disable), got {value!r}.")
+    return ang
+
+
 def _coerce_bool_leaves(config: dict[str, Any], defaults: dict[str, Any], prefix: str = "") -> None:
     """Validates / converts, in place, every config value whose default is a boolean."""
     for key, default in defaults.items():
@@ -263,6 +297,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "migration_parameters": {
         "perform_migration": True,
         "velocity": 0.16,
+        "max_ray_angle_deg": 60.0,
         "interactive_migration": False,
         "horizontal_displacement_visualization": "arrows",
     },
@@ -600,6 +635,9 @@ def load_config(
         config["kriging_parameters"]["max_memory_fraction"]
     )
 
+    config["migration_parameters"]["max_ray_angle_deg"] = validate_max_ray_angle(
+        config.get("migration_parameters", {}).get("max_ray_angle_deg", 60.0)
+    )
     hdv = config.get("migration_parameters", {}).get("horizontal_displacement_visualization", "arrows")
     if hdv not in ("arrows", "grad_traveltime_grid"):
         raise ConfigError(

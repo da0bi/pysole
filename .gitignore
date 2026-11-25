@@ -1,36 +1,58 @@
+# ==============================================================================
+# Python Build Artifacts, Bytecode & Virtual Environments
+# ==============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.pyc
-.venv/
-.pytest_cache/
-*.egg-info/
+*.so
 dist/
 build/
-*.so
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# ==============================================================================
+# Logs, Temporary Files & Local Scratch
+# ==============================================================================
+*.log
+scratch/
+/tmp/
+.antigravityrules
+pypi_request.txt
+
+# ==============================================================================
+# Internal Development, Scripts & Draft Papers
+# ==============================================================================
 logo/
 matlab/
 scripts/
-pypi_request.txt
-*.log
-scratch/
-figures/
-examples/**/figures/
-examples/**/*.tif
-examples/**/*.tiff
-examples/**/*_migrated_points.csv
-examples/**/pysole/*.csv
-# Default PySole output workspace created when running from the repo root / examples
-/pysole/
-examples/**/pysole/
 paper.md
 paper.bib
 HANDOFF.md
-/tmp/
-.antigravityrules
 
-# Ignore all PNG images everywhere across the repo
+# ==============================================================================
+# Default PySole Runtime Outputs (Root Workspace)
+# ==============================================================================
+/pysole/
+/figures/
+
+# ==============================================================================
+# Example Workflows (Track reference figures and bedrock rasters; ignore runs)
+# ==============================================================================
+examples/**/pysole/
+examples/**/pysole/*.csv
+examples/**/*_migrated_points.csv
+examples/**/*.tiff
+
+# Ignore generated GeoTIFF grids in examples EXCEPT input DEMs and final bedrock maps
+examples/**/*.tif
+!examples/**/input_data/*.tif
+!examples/**/*bedrock*.tif
+
+# ==============================================================================
+# Images (Ignore all PNGs EXCEPT documentation and example reference figures)
+# ==============================================================================
 *.png
-
-# EXCEPT for the specific images used in the README documentation
 !images/*.png
+!examples/**/figures/*.png
