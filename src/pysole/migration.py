@@ -354,16 +354,22 @@ def migrate_eikonal_points(
             f"due to boundary NaN gradients."
         )
     d_mig[~valid_d] = unmig_d[~valid_d]
-    x_mig[nan_disp] = survey_points[nan_disp, 0]
-    y_mig[nan_disp] = survey_points[nan_disp, 1]
-    z_surf_mig[nan_disp] = np.where(np.isnan(z_s0[nan_disp]), survey_points[nan_disp, 2], z_s0[nan_disp])
+    x_mig[~valid_d] = survey_points[~valid_d, 0]
+    y_mig[~valid_d] = survey_points[~valid_d, 1]
+    z_surf_mig[~valid_d] = np.where(np.isnan(z_s0[~valid_d]), survey_points[~valid_d, 2], z_s0[~valid_d])
+    dxi[~valid_d] = 0.0
+    dyi[~valid_d] = 0.0
 
     # Compute ray shift metrics: horizontal_ds [m], azimuth [0°, 360°) (0°=N, 90°=E), ray_angle [0°, 90°] (0°=nadir)
     horizontal_ds = np.hypot(dxi, dyi)
     azimuth = np.where(horizontal_ds > 0.0, np.mod(np.degrees(np.arctan2(dxi, dyi)), 360.0), 0.0)
     azimuth = np.where(np.isclose(azimuth, 360.0, atol=1e-9), 0.0, azimuth)
-    dzi_eff = np.where(nan_disp, -unmig_d, dzi)
-    ray_angle = np.clip(np.degrees(np.arctan2(horizontal_ds, -dzi_eff)), 0.0, 90.0)
+    downward_dz = np.where(~valid_d, unmig_d, np.maximum(-dzi, 0.0))
+    ray_angle = np.where(
+        horizontal_ds > 0.0,
+        np.clip(np.degrees(np.arctan2(horizontal_ds, downward_dz)), 0.0, 90.0),
+        0.0,
+    )
 
     if survey_points.shape[1] >= 5:
         all_migrated_points = np.column_stack(
