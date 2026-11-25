@@ -24,6 +24,7 @@
         "perform_migration": true,
         "velocity": 0.16,
         "max_ray_angle_deg": 60.0,
+        "ray_angle_method": "ray",
         "interactive_migration": false,
         "horizontal_displacement_visualization": "grad_traveltime_grid"
     },

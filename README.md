@@ -177,6 +177,7 @@ All execution options can be fully defined in a single JSON configuration file, 
         "perform_migration": true,
         "velocity": 0.16,
         "max_ray_angle_deg": 60.0,
+        "ray_angle_method": "ray",
         "interactive_migration": false,
         "horizontal_displacement_visualization": "arrows"
     },
@@ -267,7 +268,8 @@ All execution options can be fully defined in a single JSON configuration file, 
 | | `crs` | `str` / `int` | `null` | Coordinate Reference System (optional, e.g. `"EPSG:32633"`, `32633`, or PROJ string). When provided, validates metric projection, checks spatial alignment with vector outlines, and embeds EPSG metadata into output GeoTIFFs. |
 | **`migration_parameters`** | `perform_migration` | `bool` | `true` | If `true`, performs 3D ray-based migration on signal traveltimes. If `false`, migration is skipped. |
 | | `velocity` | `float` | `0.16` | Signal propagation velocity (default value of `0.16` m/ns is characteristic for radar wave propagation in temperate ice). |
-| | `max_ray_angle_deg` | `float` / `null` | `60.0` | Maximum allowed 3D ray path angle from vertical/nadir in degrees `(0, 90]` (0° = vertical, 90° = horizontal). Migrated picks with `ray_angle > max_ray_angle_deg` are excluded from depth interpolation and marked as black `×` symbols in Figure `03_`. *Note*: Migrated picks with `ray_angle > max_ray_angle_deg` are still included in `<output_prefix>_migrated_points.csv` when exported (`save_migrated_points`: `true` under `outputs`). Set to `null` to disable filtering. |
+| | `max_ray_angle_deg` | `float` / `null` | `60.0` | Maximum allowed 3D ray path angle from vertical/nadir in degrees `(0, 90]` (0° = vertical, 90° = horizontal). Migrated picks with `ray_angle > max_ray_angle_deg` are excluded from depth interpolation and marked as black `×` symbols in Figure `03_`. *Note*: Migrated picks with `ray_angle > max_ray_angle_deg` are still included in `<output_prefix>_migrated_points.csv` when exported (`save_migrated_points`: `true` under `outputs`). Set to `null` to disable filtering. Picks whose migrated depth collapses to ≤ 0 (near-horizontal rays) keep their unmigrated position and get `ray_angle = 90`, so any value below 90 removes them. |
+| | `ray_angle_method` | `str` | `"ray"` | How `ray_angle` (and the `max_ray_angle_deg` filter) is measured: `"ray"` = angle of the ray displacement vector, `atan(horizontal_ds / vertical ray displacement)`; `"depth"` = `atan(horizontal_ds / depth_migrated)`, with the depth below the surface at the relocated position (includes the surface elevation change between pick and relocated position). |
 | | `interactive_migration` | `bool` | `false` | If `true`, enables interactive velocity and `max_ray_angle_deg` testing with visual migrated depths and horizontal displacement vector plots. |
 | | `horizontal_displacement_visualization` | `str` | `"arrows"` | Horizontal displacement visualization mode: `"arrows"` (default, quiver displacement vectors overlaid on traveltime grid) or `"grad_traveltime_grid"` (displays traveltime field without arrows, and creates a companion figure `##_<output_prefix>_3d_migration_hor_displacements.png` showing traveltime gradient grid and original and migrated survey points). |
 | **`optimization_parameters`** | `fft_filter_metric` | `str` | `"wavenumber"` | Frequency spectrum filter metric: `"wavenumber"` [rad/m] or `"wavelength"` [m]. |

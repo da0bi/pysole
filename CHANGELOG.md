@@ -5,6 +5,20 @@ All notable changes to `PySole` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **[Collapsed rays bypassed `max_ray_angle_deg`] (`src/pysole/migration.py`, `tests/test_eikonal_migration_plane.py`)**:
+  - Picks whose migrated depth collapses to <= 0 (near-horizontal rays, e.g. where the Pass 1 traveltime surface is steeper than `1/v`) fell back to their unmigrated position with `ray_angle = 0`, so the ray angle filter kept exactly the steepest rays. They now get `ray_angle = 90` and are removed by any `max_ray_angle_deg` below 90. Zero-traveltime (ice-free) picks are unaffected.
+  - The log now reports these picks separately from the picks without a valid gradient at the domain boundary.
+
+### Added
+- **[`migration_parameters.ray_angle_method`] (`src/pysole/config.py`, `src/pysole/migration.py`, `src/pysole/solver.py`, `pysole.json`, examples, `README.md`, tests)**:
+  - `"ray"` (default, unchanged behaviour): angle of the ray displacement vector, `atan(horizontal_ds / vertical ray displacement)`.
+  - `"depth"`: `atan(horizontal_ds / depth_migrated)`, with the depth below the surface at the relocated position. On steep surfaces this keeps rays that run sideways into the slope but still end at a sensible depth.
+
+---
+
 ## [0.6.1] - 2026-11-25
 
 3D Eikonal normal ray migration parameter `max_ray_angle_deg` to reject steep ray artifacts from downstream depth grid interpolation and bedrock finalization; diagnostic visualization of discarded picks with black `×` markers on Figure 03; extended `<output_prefix>_migrated_points.csv` export retaining all survey picks and logging horizontal displacement, azimuth, and ray angle; automatic diagnostic column stripping during migrated point re-import; and standalone Python 3 shebang execution for example workflows.

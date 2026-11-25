@@ -186,6 +186,74 @@ class TestEikonalMigrationPlane(unittest.TestCase):
                 self.assertEqual(res.all_migrated_points[1, 7], 2.0)
                 self.assertTrue(os.path.exists(os.path.join(tmpdir, "03_3d_migration.png")))
 
+    def test_collapsed_depth_picks_get_ray_angle_90_and_are_discarded(self):
+        """
+        Picks whose migrated depth collapses to <= 0 (traveltime surface steeper than 1/v: evanescent,
+        vertical slowness clamped to 0) fall back to their unmigrated position with ray_angle = 90°, so the
+        max_ray_angle_deg filter removes them. Zero-traveltime (ice-free) picks keep ray_angle = 0 and stay.
+        """
+        dem = np.full_like(self.xx, 2000.0)
+        b_gentle = np.tan(np.radians(10.0))
+        H_gentle = (80.0 + b_gentle * (self.xx - 75.0)) / np.sqrt(1.0 + b_gentle**2)
+        H_steep = np.maximum(80.0 + 2.0 * (self.xx - 225.0), 1.0)   # |grad T| * v = 2 > 1 at x = 225
+        H = np.where(self.xx < 150.0, H_gentle, H_steep)
+        H[self.yy < 50.0] = 0.0                                       # ice-free strip
+        T_grid = H / self.v
+
+        t_gentle = (80.0 / np.sqrt(1.0 + b_gentle**2)) / self.v
+        sample_pts = np.array([
+            [75.0, 150.0, 2000.0, t_gentle, 1.0],      # gentle ray -> kept
+            [225.0, 150.0, 2000.0, 80.0 / self.v, 2.0],  # collapsed ray -> 90°, discarded
+            [75.0, 20.0, 2000.0, 0.0, 3.0],            # ice-free pick -> 0°, kept
+        ])
+        with self.assertLogs("pysole", level="INFO") as cm:
+            res = migrate_eikonal_points(
+                dem=dem, travel_time_grid=T_grid, survey_points=sample_pts, geometry=self.geometry,
+                velocity=self.v, max_ray_angle_deg=60.0, show_progress=False,
+            )
+        ray_angle = res.all_migrated_points[:, 6]
+        np.testing.assert_allclose(ray_angle[1], 90.0)
+        np.testing.assert_allclose(ray_angle[2], 0.0)
+        self.assertLess(ray_angle[0], 60.0)
+        # the collapsed pick keeps its unmigrated position and depth
+        np.testing.assert_allclose(res.all_migrated_points[1, :2], [225.0, 150.0])
+        np.testing.assert_allclose(res.all_migrated_points[1, 3], 80.0)
+        # pass-2 points: gentle and ice-free pick
+        np.testing.assert_array_equal(res.migrated_points[:, 4], [1.0, 3.0])
+        self.assertTrue(any("1 survey picks with non-positive migrated depth" in m for m in cm.output), cm.output)
+        self.assertTrue(any("Discarded 1 of 3 survey picks" in m for m in cm.output), cm.output)
+        self.assertFalse(any("boundary NaN gradients" in m for m in cm.output), cm.output)
+
+    def test_ray_angle_method_depth_vs_ray(self):
+        """
+        Inclined surface (slope s) over a parallel bed: the ray runs along the surface normal, so
+        'ray' gives theta = atan(s). The relocated point lies uphill, the surface there is higher and the
+        migrated depth is H / cos(theta) -> 'depth' gives atan(sin(theta) * cos(theta)).
+        """
+        s, H = 0.3, 100.0
+        dem = s * self.xx + 2000.0
+        theta = np.arctan(s)
+        x0, y0 = 150.0, 150.0
+        sample_pts = np.array([[x0, y0, s * x0 + 2000.0, H / self.v]])
+        T_grid = np.full_like(self.xx, H / self.v)
+        angles = {}
+        for method in ("ray", "depth"):
+            res = migrate_eikonal_points(
+                dem=dem, travel_time_grid=T_grid, survey_points=sample_pts, geometry=self.geometry,
+                velocity=self.v, max_ray_angle_deg=None, show_progress=False, ray_angle_method=method,
+            )
+            hds, depth, angles[method] = res.all_migrated_points[0, [4, 3, 6]]
+            np.testing.assert_allclose(hds, H * np.sin(theta), atol=0.1)
+            np.testing.assert_allclose(depth, H / np.cos(theta), atol=0.1)
+        np.testing.assert_allclose(angles["ray"], np.degrees(theta), atol=0.1)
+        np.testing.assert_allclose(angles["depth"], np.degrees(np.arctan(np.sin(theta) * np.cos(theta))), atol=0.1)
+
+        with self.assertRaises(Exception):
+            migrate_eikonal_points(
+                dem=dem, travel_time_grid=T_grid, survey_points=sample_pts, geometry=self.geometry,
+                velocity=self.v, show_progress=False, ray_angle_method="chord",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
