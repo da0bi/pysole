@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[Windows: crash on non-UTF-8 console] (`src/pysole/logging.py`, `src/pysole/config.py`, `tests/test_logging.py`)**:
   - With redirected output (subprocess, `> run.log`) Windows encodes stdout with the ANSI code page, which cannot encode `λ` or `⁶`. The CLI now makes stdout/stderr replace such characters instead of raising (`UnicodeEncodeError` in the final summary card made successful runs exit with code 1).
 - **[Windows: path test] (`tests/test_config.py`)**: `test_output_dir_resolution` compares resolved paths instead of POSIX strings.
+- **[Collapsed rays bypassed `max_ray_angle_deg`] (`src/pysole/migration.py`, `tests/test_eikonal_migration_plane.py`)**:
+  - Picks whose migrated depth collapses to <= 0 (near-horizontal rays, e.g. where the Pass 1 traveltime surface is steeper than `1/v`) fell back to their unmigrated position with `ray_angle = 0`, so the ray angle filter kept exactly the steepest rays. They now get `ray_angle = 90` and are removed by any `max_ray_angle_deg` below 90. Zero-traveltime (ice-free) picks are unaffected.
+  - The log now reports these picks separately from the picks without a valid gradient at the domain boundary.
+
+### Added
+- **[`migration_parameters.ray_angle_method`] (`src/pysole/config.py`, `src/pysole/migration.py`, `src/pysole/solver.py`, `pysole.json`, examples, `README.md`, tests)**:
+  - `"ray"` (default, unchanged behaviour): angle of the ray displacement vector, `atan(horizontal_ds / vertical ray displacement)`.
+  - `"depth"`: `atan(horizontal_ds / depth_migrated)`, with the depth below the surface at the relocated position. On steep surfaces this keeps rays that run sideways into the slope but still end at a sensible depth.
 
 ---
 
