@@ -8,7 +8,7 @@ computing non-orthogonal slowness vector components (sx, sy, sz) and horizontal/
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
-from .config import validate_max_ray_angle
+from .config import validate_max_ray_angle, validate_ray_angle_method
 from .smoothing import compute_gradients
 from .raster import GridGeometry
 from .logging import logger, get_progress_bar
@@ -39,7 +39,9 @@ class MigrationResult:
     azimuth : np.ndarray
         1D array of horizontal shift compass bearings [deg] in ``[0, 360)`` (0° = North, 90° = East).
     ray_angle : np.ndarray
-        1D array of 3D ray path angles from vertical/nadir [deg] in ``[0, 90]`` (0° = vertical, 90° = horizontal).
+        1D array of 3D ray path angles from vertical/nadir [deg] in ``[0, 90]`` (0° = vertical, 90° = horizontal),
+        measured as set by ``ray_angle_method``. Picks whose migrated depth collapsed to <= 0 (near-horizontal
+        rays) are kept at their unmigrated position and get 90°.
     valid_ray_mask : np.ndarray
         1D boolean mask indicating which survey picks satisfied ``ray_angle <= max_ray_angle_deg``.
     """
@@ -100,6 +102,7 @@ class EikonalMigrator:
         show_progress: bool = True,
         output_prefix: str = "",
         horizontal_displacement_visualization: str = "arrows",
+        ray_angle_method: str = "ray",
     ) -> MigrationResult:
         """
         Executes 3D Eikonal ray migration for a continuous traveltime field and scattered picks.
@@ -126,6 +129,9 @@ class EikonalMigrator:
             Output prefix for diagnostic figures.
         horizontal_displacement_visualization : str, default "arrows"
             Visualization style for horizontal displacements: 'arrows' or 'grad_traveltime_grid'.
+        ray_angle_method : str, default "ray"
+            How ``ray_angle`` is measured: ``"ray"`` (ray displacement vector) or ``"depth"``
+            (horizontal shift over migrated depth). See :func:`migrate_eikonal_points`.
 
         Returns
         -------
@@ -148,6 +154,7 @@ class EikonalMigrator:
             show_progress=show_progress,
             output_prefix=output_prefix,
             horizontal_displacement_visualization=horizontal_displacement_visualization,
+            ray_angle_method=ray_angle_method,
         )
 
     def migrate_points(
@@ -202,6 +209,7 @@ def migrate_eikonal_points(
     show_progress: bool = True,
     output_prefix: str = "",
     horizontal_displacement_visualization: str = "arrows",
+    ray_angle_method: str = "ray",
 ) -> MigrationResult:
     """
     Relocates scattered radar soundings into 3D space using 3D Eikonal ray normal migration.
@@ -257,6 +265,16 @@ def migrate_eikonal_points(
         Output prefix for diagnostic figures.
     horizontal_displacement_visualization : str, default "arrows"
         Visualization style for horizontal displacements: 'arrows' or 'grad_traveltime_grid'.
+    ray_angle_method : str, default "ray"
+        How ``ray_angle`` (and thus the ``max_ray_angle_deg`` filter) is measured:
+
+        - ``"ray"``: angle of the ray displacement vector from vertical,
+          ``atan(horizontal_ds / vertical ray displacement)``.
+        - ``"depth"``: ``atan(horizontal_ds / migrated depth)``, with the depth measured below the
+          surface at the relocated position (includes the surface elevation change between pick
+          and relocated position).
+
+        In both cases picks whose migrated depth collapsed to <= 0 (near-horizontal rays) get 90°.
 
     Returns
     -------
@@ -264,6 +282,7 @@ def migrate_eikonal_points(
         Container holding retained migrated points, full export table, ray metrics, and 2D displacement grids.
     """
     eff_max_angle = validate_max_ray_angle(max_ray_angle_deg, "max_ray_angle_deg")
+    angle_method = validate_ray_angle_method(ray_angle_method, "ray_angle_method")
 
     dx = geometry.dx
     dy = geometry.dy
@@ -345,13 +364,23 @@ def migrate_eikonal_points(
     unmig_d = survey_points[:, 3] * velocity
     d_mig = np.where(nan_disp, unmig_d, np.maximum(-dzi + delta_zs, 0.0))
 
-    # Fallback to unmigrated coordinates if dzi interpolation hit boundary NaNs or non-positive depth
+    # Fallback to unmigrated coordinates if dzi interpolation hit boundary NaNs or non-positive depth.
+    # Non-positive depth of a pick with a positive traveltime means the ray became (near-)horizontal:
+    # these "collapsed" picks get ray_angle = 90° below, so max_ray_angle_deg removes them.
+    # Zero-traveltime picks (ice-free, depth 0) are no collapse and stay vertical.
     valid_d = (~nan_disp) & (d_mig > 0)
-    fallback_count = int(np.sum(~valid_d))
-    if fallback_count > 0:
+    collapsed = (~nan_disp) & (d_mig <= 0) & (unmig_d > 0)
+    boundary_count = int(np.sum(nan_disp))
+    collapsed_count = int(np.sum(collapsed))
+    if boundary_count > 0:
         logger.info(
-            f"   [3D Ray Migration] {fallback_count} survey picks fell back to unmigrated coordinates "
+            f"   [3D Ray Migration] {boundary_count} survey picks fell back to unmigrated coordinates "
             f"due to boundary NaN gradients."
+        )
+    if collapsed_count > 0:
+        logger.info(
+            f"   [3D Ray Migration] {collapsed_count} survey picks with non-positive migrated depth "
+            f"(near-horizontal rays) fell back to unmigrated coordinates; ray_angle set to 90°."
         )
     d_mig[~valid_d] = unmig_d[~valid_d]
     x_mig[~valid_d] = survey_points[~valid_d, 0]
@@ -364,12 +393,16 @@ def migrate_eikonal_points(
     horizontal_ds = np.hypot(dxi, dyi)
     azimuth = np.where(horizontal_ds > 0.0, np.mod(np.degrees(np.arctan2(dxi, dyi)), 360.0), 0.0)
     azimuth = np.where(np.isclose(azimuth, 360.0, atol=1e-9), 0.0, azimuth)
-    downward_dz = np.where(~valid_d, unmig_d, np.maximum(-dzi, 0.0))
+    if angle_method == "depth":
+        vertical_extent = d_mig
+    else:
+        vertical_extent = np.where(~valid_d, unmig_d, np.maximum(-dzi, 0.0))
     ray_angle = np.where(
         horizontal_ds > 0.0,
-        np.clip(np.degrees(np.arctan2(horizontal_ds, downward_dz)), 0.0, 90.0),
+        np.clip(np.degrees(np.arctan2(horizontal_ds, vertical_extent)), 0.0, 90.0),
         0.0,
     )
+    ray_angle[collapsed] = 90.0
 
     if survey_points.shape[1] >= 5:
         all_migrated_points = np.column_stack(

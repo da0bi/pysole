@@ -134,6 +134,26 @@ class TestConfigWorkflowWuk(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 pysole.Solver(dem=dem, max_ray_angle_deg=invalid)
 
+    def test_ray_angle_method_default_and_validation(self):
+        from pysole.config import ConfigError, load_config
+
+        self.assertEqual(pysole.config.DEFAULT_CONFIG["migration_parameters"]["ray_angle_method"], "ray")
+        self.assertEqual(load_config({})["migration_parameters"]["ray_angle_method"], "ray")
+        cfg = load_config({"migration_parameters": {"ray_angle_method": "Depth"}})
+        self.assertEqual(cfg["migration_parameters"]["ray_angle_method"], "depth")
+
+        dem = np.ones((10, 10))
+        self.assertEqual(pysole.Solver(dem=dem).ray_angle_method, "ray")
+        self.assertEqual(pysole.Solver(dem=dem, ray_angle_method="depth").ray_angle_method, "depth")
+        solver_cfg = pysole.Solver(dem=dem, config={"migration_parameters": {"ray_angle_method": "depth"}})
+        self.assertEqual(solver_cfg.ray_angle_method, "depth")
+
+        for invalid in ("chord", "", None, 1, True):
+            with self.assertRaises(ConfigError):
+                load_config({"migration_parameters": {"ray_angle_method": invalid}})
+            with self.assertRaises(ConfigError):
+                pysole.Solver(dem=dem, ray_angle_method=invalid)
+
     def test_output_dir_resolution(self):
         dem = np.ones((10, 10))
         # 1. Fallback to survey_data_path directory when output_dir is None (plots_dir defaults to figures)

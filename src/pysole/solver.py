@@ -48,6 +48,7 @@ from .config import (
     warn_unknown_config_keys,
     validate_memory_fraction,
     validate_max_ray_angle,
+    validate_ray_angle_method,
 )
 from .logging import logger, log_section_header, end_terminal_block
 from .drift_analyzer import (
@@ -292,6 +293,7 @@ class Solver:
         post_calculate_uncertainty: bool = False,
         perform_migration: bool = True,
         max_ray_angle_deg: float | None = 60.0,
+        ray_angle_method: str = "ray",
         survey_data_type: str = "one_way_traveltime",
         horizontal_displacement_visualization: str = "arrows",
         plots_dir: str | Path | None = None,
@@ -366,6 +368,13 @@ class Solver:
             If True, calculates estimation variance during Pass 2 post-migration Kriging.
         perform_migration : bool, default True
             If True, performs 3D Eikonal normal ray migration on radar traveltimes. If False, skips migration.
+        max_ray_angle_deg : float or None, default 60.0
+            Migrated picks with a ray angle from vertical above this value [deg] are left out of the
+            post-migration interpolation. None disables the filter.
+        ray_angle_method : str, default 'ray'
+            How the ray angle is measured: 'ray' (ray displacement vector,
+            atan(horizontal_ds / vertical ray displacement)) or 'depth'
+            (atan(horizontal_ds / migrated depth)).
         survey_data_type : str, default 'one_way_traveltime'
             Type of input survey data: 'one_way_traveltime' [ns], 'two_way_traveltime' [ns]
             (automatically converted via two_way_traveltime / 2.0), or 'depth' [m] (direct ice thickness measurements).
@@ -529,6 +538,9 @@ class Solver:
         if max_ray_angle_deg == 60.0 and "max_ray_angle_deg" in mig_cfg:
             max_ray_angle_deg = mig_cfg.get("max_ray_angle_deg")
         self.max_ray_angle_deg = validate_max_ray_angle(max_ray_angle_deg)
+        if ray_angle_method == "ray" and "ray_angle_method" in mig_cfg:
+            ray_angle_method = mig_cfg.get("ray_angle_method")
+        self.ray_angle_method = validate_ray_angle_method(ray_angle_method)
         self.survey_data_type = survey_data_type
         self.horizontal_displacement_visualization = horizontal_displacement_visualization
         self.n_cores = n_cores
@@ -1544,6 +1556,7 @@ class Solver:
             post_calculate_uncertainty=post_calculate_uncertainty,
             perform_migration=migration_cfg.get("perform_migration", True),
             max_ray_angle_deg=migration_cfg.get("max_ray_angle_deg", 60.0),
+            ray_angle_method=migration_cfg.get("ray_angle_method", "ray"),
             survey_data_type=survey_dtype,
             horizontal_displacement_visualization=migration_cfg.get("horizontal_displacement_visualization", "arrows"),
             plots_dir=outputs.get("plots_dir", None),
@@ -2141,6 +2154,7 @@ class Solver:
                 show_progress=self.show_progress,
                 output_prefix=self.figure_prefix,
                 horizontal_displacement_visualization=self.horizontal_displacement_visualization,
+                ray_angle_method=self.ray_angle_method,
             )
             self.migrated_points = res.migrated_points
             self._migrated_points_export = res.all_migrated_points

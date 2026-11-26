@@ -138,6 +138,39 @@ def validate_max_ray_angle(value: Any, name: str = "migration_parameters.max_ray
     return ang
 
 
+RAY_ANGLE_METHODS = ("ray", "depth")
+
+
+def validate_ray_angle_method(value: Any, name: str = "migration_parameters.ray_angle_method") -> str:
+    """
+    Validates how the ray angle of migrated picks is measured.
+
+    Parameters
+    ----------
+    value : Any
+        ``"ray"`` (angle of the 3D ray displacement vector from vertical,
+        ``atan(horizontal_ds / vertical ray displacement)``) or ``"depth"``
+        (``atan(horizontal_ds / migrated depth)``, i.e. the vertical extent is measured from the
+        surface at the relocated position, which includes the surface elevation change).
+    name : str, default "migration_parameters.ray_angle_method"
+        Configuration key name used in diagnostic error messages.
+
+    Returns
+    -------
+    method : str
+        Validated, lower-case method name.
+
+    Raises
+    ------
+    ConfigError
+        If ``value`` is not one of ``RAY_ANGLE_METHODS``.
+    """
+    method = str(value).strip().lower() if isinstance(value, str) else value
+    if method not in RAY_ANGLE_METHODS:
+        raise ConfigError(f"Configuration parameter '{name}' must be one of {list(RAY_ANGLE_METHODS)}, got {value!r}.")
+    return method
+
+
 def _coerce_bool_leaves(config: dict[str, Any], defaults: dict[str, Any], prefix: str = "") -> None:
     """Validates / converts, in place, every config value whose default is a boolean."""
     for key, default in defaults.items():
@@ -298,6 +331,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "perform_migration": True,
         "velocity": 0.16,
         "max_ray_angle_deg": 60.0,
+        "ray_angle_method": "ray",
         "interactive_migration": False,
         "horizontal_displacement_visualization": "arrows",
     },
@@ -637,6 +671,9 @@ def load_config(
 
     config["migration_parameters"]["max_ray_angle_deg"] = validate_max_ray_angle(
         config.get("migration_parameters", {}).get("max_ray_angle_deg", 60.0)
+    )
+    config["migration_parameters"]["ray_angle_method"] = validate_ray_angle_method(
+        config.get("migration_parameters", {}).get("ray_angle_method", "ray")
     )
     hdv = config.get("migration_parameters", {}).get("horizontal_displacement_visualization", "arrows")
     if hdv not in ("arrows", "grad_traveltime_grid"):
