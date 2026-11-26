@@ -20,6 +20,57 @@ _current_log_level: int | None = None
 _current_console_output: bool | None = None
 
 
+class AppendFileHandler(logging.FileHandler):
+    """File handler that opens the log file only while writing a record.
+
+    A plain ``logging.FileHandler`` keeps ``pysole.log`` open until the handler is closed. Windows does
+    not allow deleting, moving or renaming an open file, so a finished run would lock its output folder
+    for the lifetime of the Python process (notebooks, test temp directories). Logging volume is small,
+    so reopening the file in append mode per record costs nothing noticeable.
+    """
+
+    def __init__(self, filename: str | Path, encoding: str = "utf-8"):
+        super().__init__(filename, mode="a", encoding=encoding, delay=True)
+        # create the file right away, as logging.FileHandler does (callers expect it to exist)
+        with open(self.baseFilename, "a", encoding=encoding):
+            pass
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            super().emit(record)
+        except FileNotFoundError:
+            # the log folder was removed (e.g. a finished run's temporary output directory): drop the
+            # record, as an open handle would have written into the deleted file before
+            pass
+        except OSError:
+            self.handleError(record)
+        finally:
+            self.acquire()
+            try:
+                if self.stream is not None:
+                    self.stream.close()
+                    self.stream = None
+            finally:
+                self.release()
+
+
+def make_console_streams_safe() -> None:
+    """Makes stdout/stderr replace characters their encoding cannot represent instead of raising.
+
+    On Windows, redirected or piped output (subprocess, ``> run.log``) uses the ANSI code page (e.g. cp1252),
+    which cannot encode characters such as λ or ⁶ used in PySole messages; printing them would raise
+    ``UnicodeEncodeError`` (for the final summary card after all outputs were written). Streams without
+    ``reconfigure`` (e.g. Jupyter) are left untouched.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(errors="backslashreplace")
+            except (ValueError, OSError):
+                pass
+
+
 def reset_logging_state() -> None:
     """Resets cached logging configuration state (primarily for test fixtures)."""
     global _current_log_path, _current_log_level, _current_console_output
@@ -94,7 +145,7 @@ def setup_logging(
     if target_log_path:
         try:
             target_log_path.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(target_log_path, mode="a", encoding="utf-8")
+            file_handler = AppendFileHandler(target_log_path, encoding="utf-8")
             file_handler.setLevel(numeric_level)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)

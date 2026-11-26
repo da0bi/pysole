@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **[Windows: log file kept open] (`src/pysole/logging.py`, `tests/test_logging.py`)**:
+  - `pysole.log` is now written by `AppendFileHandler`, which opens the file only while writing a record. A plain `FileHandler` kept it open for the lifetime of the Python process, and Windows cannot delete or move open files: output folders stayed locked (notebooks) and test temp directories could not be cleaned up (`WinError 32`, 26 failing tests on Windows).
+- **[Windows: crash on non-UTF-8 console] (`src/pysole/logging.py`, `src/pysole/config.py`, `tests/test_logging.py`)**:
+  - With redirected output (subprocess, `> run.log`) Windows encodes stdout with the ANSI code page, which cannot encode `λ` or `⁶`. The CLI now makes stdout/stderr replace such characters instead of raising (`UnicodeEncodeError` in the final summary card made successful runs exit with code 1).
+- **[Windows: path test] (`tests/test_config.py`)**: `test_output_dir_resolution` compares resolved paths instead of POSIX strings.
 - **[Collapsed rays bypassed `max_ray_angle_deg`] (`src/pysole/migration.py`, `tests/test_eikonal_migration_plane.py`)**:
   - Picks whose migrated depth collapses to <= 0 (near-horizontal rays, e.g. where the Pass 1 traveltime surface is steeper than `1/v`) fell back to their unmigrated position with `ray_angle = 0`, so the ray angle filter kept exactly the steepest rays. They now get `ray_angle = 90` and are removed by any `max_ray_angle_deg` below 90. Zero-traveltime (ice-free) picks are unaffected.
   - The log now reports these picks separately from the picks without a valid gradient at the domain boundary.

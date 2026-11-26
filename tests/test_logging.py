@@ -61,6 +61,32 @@ class TestLogging(unittest.TestCase):
         self.assertIn("log_level", DEFAULT_CONFIG["inputs"])
         self.assertEqual(DEFAULT_CONFIG["inputs"]["log_level"], "INFO")
 
+    def test_log_file_is_not_kept_open(self):
+        """The log file is closed after every record, so it can be removed while logging is configured
+        (Windows refuses to delete open files, e.g. when a TemporaryDirectory is cleaned up)."""
+        setup_logging(log_file=self.test_log_file, log_level="INFO", console_output=False)
+        logger.info("first")
+        file_handlers = [h for h in logger.handlers if isinstance(h, logging.FileHandler)]
+        self.assertEqual(len(file_handlers), 1)
+        self.assertIsNone(file_handlers[0].stream)
+        os.remove(self.test_log_file)          # raises PermissionError on Windows if still open
+        logger.info("second")                  # reopens in append mode
+        with open(self.test_log_file, encoding="utf-8") as f:
+            self.assertIn("second", f.read())
+
+    def test_console_streams_safe_for_non_utf8_encoding(self):
+        """Redirected output on Windows is cp1252: messages with λ or ⁶ must not raise UnicodeEncodeError."""
+        import io
+        import sys
+
+        buf = io.BytesIO()
+        stream = io.TextIOWrapper(buf, encoding="cp1252")
+        with patch.object(sys, "stdout", stream), patch.object(sys, "stderr", stream):
+            pysole_logging.make_console_streams_safe()
+            print("k_c = 0.0713 (λ_c = 88.08 m), V = 18.1 × 10⁶ m³")
+            stream.flush()
+        self.assertIn(b"\\u03bb", buf.getvalue())
+
 
 class RecordingBar:
     """Fake tqdm bar that records the description lines."""
